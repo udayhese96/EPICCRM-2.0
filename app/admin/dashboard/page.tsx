@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,8 @@ import {
 } from "lucide-react"
 
 export default function AdminDashboard() {
+  const router = useRouter()
+  
   return (
     <DashboardLayout>
       <div className="space-y-8">
@@ -167,7 +170,7 @@ export default function AdminDashboard() {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">
                   <div className="p-2 bg-blue-100 rounded-lg">
@@ -183,7 +186,7 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-ps')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">
                   <div className="p-2 bg-green-100 rounded-lg">

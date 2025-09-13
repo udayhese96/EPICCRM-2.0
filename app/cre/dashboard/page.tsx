@@ -19,6 +19,7 @@ import {
   User
 } from "lucide-react"
 import { useState, useEffect } from "react"
+import { LeadUpdateModal } from "./components/lead-update-modal"
 
 interface User {
   id: string
@@ -30,15 +31,75 @@ interface User {
   role: string
 }
 
+interface Lead {
+  id: string
+  uid: string
+  customer_name: string
+  customer_mobile_number: string
+  source: string
+  campaign: string
+  date: string
+  lead_status: string
+  customer_email?: string
+  customer_location?: string
+  remarks?: string
+}
+
 export default function CREDashboard() {
   const [user, setUser] = useState<User | null>(null)
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
+  const [leads, setLeads] = useState<Lead[]>([])
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
     if (supabaseUser) {
       setUser(JSON.parse(supabaseUser))
     }
+    
+    // Load sample leads - in real app, fetch from database
+    setLeads([
+      {
+        id: "1",
+        uid: "MK-6742-3632",
+        customer_name: "Mohd kaleemuddin",
+        customer_mobile_number: "9133716742",
+        source: "META",
+        campaign: "Scratch And Win",
+        date: "2025-09-12",
+        lead_status: "Fresh",
+        customer_email: "mohd@example.com"
+      },
+      {
+        id: "2", 
+        uid: "MU-0460-3649",
+        customer_name: "Nani Nani",
+        customer_mobile_number: "9618140460",
+        source: "META",
+        campaign: "New 450x Video",
+        date: "2025-09-12",
+        lead_status: "Fresh"
+      }
+    ])
   }, [])
+
+  const handleUpdateLead = (leadData: any) => {
+    console.log("Updating lead:", leadData)
+    // In real app, send to backend API
+    // Update leads state or refetch data
+    setLeads(prevLeads => 
+      prevLeads.map(lead => 
+        lead.id === leadData.leadId 
+          ? { ...lead, lead_status: leadData.status, updated_at: leadData.updated_at }
+          : lead
+      )
+    )
+  }
+
+  const openUpdateModal = (lead: Lead) => {
+    setSelectedLead(lead)
+    setIsUpdateModalOpen(true)
+  }
 
   const userName = user?.first_name || user?.name || user?.username || "Kumari"
 
@@ -225,40 +286,29 @@ export default function CREDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-b hover:bg-gray-50">
-                      <td className="p-3">
-                        <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white">
-                          Update
-                        </Button>
-                      </td>
-                      <td className="p-3">
-                        <Badge variant="outline">Pending</Badge>
-                      </td>
-                      <td className="p-3 text-sm text-gray-600">No calls</td>
-                      <td className="p-3 font-medium">Mohd kaleemuddin</td>
-                      <td className="p-3">9133716742</td>
-                      <td className="p-3">META</td>
-                      <td className="p-3">Scratch And Win</td>
-                      <td className="p-3 text-sm">2025-09-12</td>
-                      <td className="p-3 text-sm font-mono">MK-6742-3632</td>
-                    </tr>
-                    <tr className="border-b hover:bg-gray-50">
-                      <td className="p-3">
-                        <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white">
-                          Update
-                        </Button>
-                      </td>
-                      <td className="p-3">
-                        <Badge variant="outline">Pending</Badge>
-                      </td>
-                      <td className="p-3 text-sm text-gray-600">No calls</td>
-                      <td className="p-3 font-medium">Nani Nani</td>
-                      <td className="p-3">9618140460</td>
-                      <td className="p-3">META</td>
-                      <td className="p-3">New 450x Video</td>
-                      <td className="p-3 text-sm">2025-09-12</td>
-                      <td className="p-3 text-sm font-mono">MU-0460-3649</td>
-                    </tr>
+                    {leads.map((lead) => (
+                      <tr key={lead.id} className="border-b hover:bg-gray-50">
+                        <td className="p-3">
+                          <Button 
+                            size="sm" 
+                            className="bg-red-500 hover:bg-red-600 text-white"
+                            onClick={() => openUpdateModal(lead)}
+                          >
+                            Update
+                          </Button>
+                        </td>
+                        <td className="p-3">
+                          <Badge variant="outline">{lead.lead_status}</Badge>
+                        </td>
+                        <td className="p-3 text-sm text-gray-600">No calls</td>
+                        <td className="p-3 font-medium">{lead.customer_name}</td>
+                        <td className="p-3">{lead.customer_mobile_number}</td>
+                        <td className="p-3">{lead.source}</td>
+                        <td className="p-3">{lead.campaign}</td>
+                        <td className="p-3 text-sm">{lead.date}</td>
+                        <td className="p-3 text-sm font-mono">{lead.uid}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -266,6 +316,14 @@ export default function CREDashboard() {
           </Card>
         </div>
       </div>
+
+      {/* Lead Update Modal */}
+      <LeadUpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        lead={selectedLead}
+        onUpdate={handleUpdateLead}
+      />
     </DashboardLayout>
   )
 }

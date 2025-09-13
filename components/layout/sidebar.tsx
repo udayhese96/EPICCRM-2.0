@@ -47,6 +47,16 @@ const getNavigationForRole = (role: string) => {
           icon: UserPlus,
         },
         {
+          name: "Manage CRE",
+          href: "/admin/manage-cre",
+          icon: Users,
+        },
+        {
+          name: "Manage PS",
+          href: "/admin/manage-ps",
+          icon: Users,
+        },
+        {
           name: "Branches",
           href: "/admin/branches",
           icon: Building2,
