@@ -24,6 +24,7 @@ export default function AddUserPage() {
   const router = useRouter()
   const [formData, setFormData] = useState({
     email: "",
+    username: "",
     password: "",
     firstName: "",
     lastName: "",
@@ -56,42 +57,53 @@ export default function AddUserPage() {
     setIsLoading(true)
     setError(null)
 
-    const supabase = createClient()
-
     try {
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: formData.email,
-        password: formData.password,
-        email_confirm: true,
-        user_metadata: {
+      const supabase = createClient()
+      
+      // Determine which table to insert into based on role
+      let tableName = ''
+      switch (formData.role) {
+        case 'admin':
+          tableName = 'admin_users'
+          break
+        case 'cre':
+          tableName = 'cre_users'
+          break
+        case 'ps':
+          tableName = 'ps_users'
+          break
+        case 'branch_head':
+          tableName = 'bh_users'
+          break
+        default:
+          throw new Error("Invalid role selected")
+      }
+
+      // Insert user into the appropriate table
+      const { data, error } = await supabase
+        .from(tableName)
+        .insert({
+          email: formData.email,
+          username: formData.username,
+          password_hash: formData.password, // Plain text for now
           first_name: formData.firstName,
           last_name: formData.lastName,
           phone: formData.phone,
-          role: formData.role,
-          branch_id: formData.branchId,
-        },
-      })
+          branch_id: formData.role === 'admin' ? null : (formData.branchId || 1),
+          is_active: formData.status === 'active',
+          name: `${formData.firstName} ${formData.lastName}`, // Add name field for CRE/PS users
+          ...(formData.role === 'ps' || formData.role === 'branch_head' ? { branch: 'Main Branch' } : {}),
+        })
+        .select()
 
-      if (authError) throw authError
-
-      // Update profile with additional data
-      if (authData.user) {
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .update({
-            phone: formData.phone,
-            role: formData.role,
-            branch_id: formData.branchId || null,
-            status: formData.status,
-          })
-          .eq("id", authData.user.id)
-
-        if (profileError) throw profileError
+      if (error) {
+        throw new Error(error.message)
       }
 
+      console.log("User created successfully:", data)
       router.push("/admin/users")
     } catch (error: unknown) {
+      console.error("Error creating user:", error)
       setError(error instanceof Error ? error.message : "An error occurred")
     } finally {
       setIsLoading(false)
@@ -157,6 +169,17 @@ export default function AddUserPage() {
                   required
                   value={formData.email}
                   onChange={(e) => handleInputChange("email", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  placeholder="johndoe"
+                  required
+                  value={formData.username}
+                  onChange={(e) => handleInputChange("username", e.target.value)}
                 />
               </div>
 

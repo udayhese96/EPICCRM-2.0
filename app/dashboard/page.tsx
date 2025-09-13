@@ -20,32 +20,29 @@ export default function DashboardPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const token = localStorage.getItem("authToken")
-
-      if (!token) {
-        router.push("/auth/login")
-        return
-      }
-
+    const checkAuth = () => {
       try {
-        const response = await fetch("/api/auth/verify", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
+        // Check for new session format first
+        const supabaseUser = localStorage.getItem("supabase_user")
+        const legacyToken = localStorage.getItem("access_token")
+        const legacyUser = localStorage.getItem("user")
 
-        if (!response.ok) {
-          localStorage.removeItem("authToken")
+        if (supabaseUser) {
+          console.log("✅ Dashboard loaded for user (supabase):", JSON.parse(supabaseUser))
+          setUser(JSON.parse(supabaseUser))
+        } else if (legacyToken && legacyUser) {
+          console.log("✅ Dashboard loaded for user (legacy):", JSON.parse(legacyUser))
+          setUser(JSON.parse(legacyUser))
+        } else {
+          console.log("❌ No session found, redirecting to login")
           router.push("/auth/login")
           return
         }
-
-        const userData = await response.json()
-        setUser(userData.user)
       } catch (error) {
         console.error("Auth verification failed:", error)
-        localStorage.removeItem("authToken")
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("supabase_user")
         router.push("/auth/login")
       } finally {
         setLoading(false)

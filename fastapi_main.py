@@ -6,9 +6,9 @@ from typing import Optional, List
 import jwt
 import bcrypt
 from datetime import datetime, timedelta
-import psycopg2
-from psycopg2.extras import RealDictCursor
 import os
+from supabase import create_client, Client
+# from decouple import config
 
 # FastAPI app initialization
 app = FastAPI(
@@ -20,7 +20,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,14 +29,16 @@ app.add_middleware(
 # Security
 security = HTTPBearer()
 
-# Database connection
-DATABASE_CONFIG = {
-    'host': 'aws-0-ap-south-1.pooler.supabase.com',
-    'database': 'postgres',
-    'user': 'postgres.raticwohyvxcyoqzqnwj',
-    'password': 'Ather@123456',
-    'port': '6543'
-}
+# Environment variables
+os.environ['SUPABASE_URL'] = 'https://raticwohyvxcyoqzqnwj.supabase.co'
+os.environ['SUPABASE_ANON_KEY'] = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhdGljd29oeXZ4Y3lvcXpxbndqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc3NDAzOTMsImV4cCI6MjA3MzMxNjM5M30.Jt5Bzlnn96cnqLXY6il0tSHpEV76P1SV8RwAc0vea2g'
+os.environ['SUPABASE_SERVICE_ROLE_KEY'] = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhdGljd29oeXZ4Y3lvcXpxbndqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1Nzc0MDM5MywiZXhwIjoyMDczMzE2MzkzfQ.lAYCj6MIlQyr_WqfjM3hUTgu4bG4OBpSdx49QAEzsU4'
+
+# Supabase client
+supabase: Client = create_client(
+    os.environ['SUPABASE_URL'],
+    os.environ['SUPABASE_SERVICE_ROLE_KEY']
+)
 
 JWT_SECRET = "your-jwt-secret-key-here"
 JWT_ALGORITHM = "HS256"
@@ -104,44 +106,75 @@ def verify_jwt_token(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=401, detail="Invalid token")
 
 # Authentication endpoints
-@app.post("/auth/login")
+@app.post("/api/auth/login")
 async def login(user_data: UserLogin):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     try:
-        cursor.execute(
-            "SELECT id, username, email, first_name, last_name, role, password FROM auth_user WHERE username = %s",
-            (user_data.username,)
-        )
-        user = cursor.fetchone()
+        # Define the user tables for each role
+        user_tables = {
+            'admin_users': 'admin',
+            'cre_users': 'cre', 
+            'ps_users': 'ps',
+            'bh_users': 'branch_head'
+        }
+        
+        user = None
+        user_role = None
+        
+        # Search through each user table to find the username using Supabase
+        print(f"🔍 Searching for user: {user_data.username}")
+        for table_name, role in user_tables.items():
+            try:
+                print(f"🔍 Checking table: {table_name}")
+                response = supabase.table(table_name).select('*').eq('username', user_data.username).execute()
+                print(f"📊 Response from {table_name}: {response}")
+                if response.data and len(response.data) > 0:
+                    user = response.data[0]
+                    user_role = role
+                    print(f"✅ Found user in {table_name}: {user}")
+                    break
+            except Exception as e:
+                print(f"❌ Error checking {table_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
         
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise HTTPException(status_code=401, detail="Invalid username or password")
         
-        # For demo purposes, we'll use simple password comparison
-        # In production, use proper password hashing
-        if user_data.password != "password123":  # Simple demo password
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+        # Verify password (plain text comparison for now)
+        if user_data.password != user.get("password_hash", ""):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
         
-        token = create_jwt_token(dict(user))
+        # Check if user is active
+        if not user.get("is_active", True):
+            raise HTTPException(status_code=401, detail="Account is not active")
+        
+        token = create_jwt_token({
+            "user_id": str(user["id"]),
+            "username": user["username"],
+            "email": user["email"],
+            "role": user_role
+        })
         
         return {
             "access_token": token,
             "token_type": "bearer",
             "user": {
-                "id": user["id"],
+                "id": str(user["id"]),
                 "username": user["username"],
                 "email": user["email"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
-                "role": user["role"]
+                "first_name": user.get("first_name", ""),
+                "last_name": user.get("last_name", ""),
+                "role": user_role,
+                "status": "active" if user.get("is_active", True) else "inactive"
             }
         }
-    
-    finally:
-        cursor.close()
-        conn.close()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
 
 @app.get("/auth/me")
 async def get_current_user(current_user: dict = Depends(verify_jwt_token)):

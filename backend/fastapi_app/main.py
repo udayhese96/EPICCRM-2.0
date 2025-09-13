@@ -611,56 +611,77 @@ async def register_user(user_data: UserCreate):
 
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(login_data: LoginRequest):
-    """Login user with username and password"""
+    """Login user with username and password from separate role tables"""
     try:
-        if login_data.username in HARDCODED_USERS:
-            user_data = HARDCODED_USERS[login_data.username]
-            if user_data["password"] == login_data.password:
-                # Create a mock JWT token for hardcoded users
-                import jwt
-                import datetime
-                
-                token_payload = {
-                    "sub": user_data["id"],
-                    "username": user_data["username"],
-                    "email": user_data["email"],
-                    "role": user_data["role"],
-                    "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-                }
-                
-                # Use a simple secret for hardcoded users
-                token = jwt.encode(token_payload, "hardcoded-secret", algorithm="HS256")
-                
-                return LoginResponse(
-                    access_token=token,
-                    token_type="bearer",
-                    user=UserResponse(**user_data)
-                )
+        import jwt
+        import datetime
         
-        # If not hardcoded user, try database lookup
-        user_response = supabase.table('users').select('*').eq('username', login_data.username).execute()
+        # Define the user tables for each role (matching new schema)
+        user_tables = {
+            'admin': ('admin_users', 'admin'),
+            'cre': ('cre_users', 'cre'), 
+            'ps': ('ps_users', 'ps'),
+            'branchhead': ('bh_users', 'branch_head')
+        }
         
-        if not user_response.data:
+        user_data = None
+        user_role = None
+        
+        # Search through each user table to find the username
+        for username_prefix, (table_name, role) in user_tables.items():
+            try:
+                response = supabase.table(table_name).select('*').eq('username', login_data.username).execute()
+                if response.data:
+                    user_data = response.data[0]
+                    user_role = role
+                    break
+            except Exception as e:
+                print(f"Error checking {table_name}: {e}")
+                continue
+        
+        if not user_data:
             raise HTTPException(status_code=401, detail="Invalid username or password")
         
-        user_data = user_response.data[0]
-        
-        # Authenticate with Supabase using the user's email (since Supabase auth uses email)
-        auth_response = supabase.auth.sign_in_with_password({
-            "email": user_data['email'],
-            "password": login_data.password
-        })
-        
-        if not auth_response.user or not auth_response.session:
+        # Verify password (plain text comparison for now)
+        stored_password = user_data.get('password_hash', '')
+        if stored_password != login_data.password:
             raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+        # Check if user is active
+        if user_data.get('status') != 'active':
+            raise HTTPException(status_code=401, detail="Account is not active")
+        
+        # Create JWT token
+        token_payload = {
+            "sub": user_data["id"],
+            "username": user_data["username"],
+            "email": user_data["email"],
+            "role": user_role,
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        }
+        
+        token = jwt.encode(token_payload, "hardcoded-secret", algorithm="HS256")
         
         return LoginResponse(
-            access_token=auth_response.session.access_token,
+            access_token=token,
             token_type="bearer",
-            user=UserResponse(**user_data)
+            user=UserResponse(
+                id=user_data["id"],
+                username=user_data["username"],
+                email=user_data["email"],
+                first_name=user_data.get("first_name", ""),
+                last_name=user_data.get("last_name", ""),
+                role=user_role,
+                status=user_data.get("status", "active"),
+                phone=user_data.get("phone", ""),
+                branch_id=user_data.get("branch_id")
+            )
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Login error: {e}")
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
 @app.get("/api/auth/me", response_model=UserResponse)
@@ -771,6 +792,220 @@ async def update_user(
         
         return UserResponse(**response.data[0])
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# LEAD MANAGEMENT ENDPOINTS
+# ========================================
+
+@app.get("/api/leads", response_model=List[LeadResponse])
+async def get_leads(
+    status: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    current_user=Depends(can_manage_leads)
+):
+    """Get leads based on user role and filters"""
+    try:
+        query = supabase.table('lead_master').select('*')
+        
+        # Apply role-based filtering
+        if current_user.role == 'cre':
+            query = query.eq('cre_name', current_user.username)
+        elif current_user.role == 'ps':
+            query = query.eq('ps_name', current_user.username)
+        elif current_user.role == 'branch_head':
+            query = query.eq('branch_id', current_user.branch_id)
+        
+        # Apply additional filters
+        if status:
+            query = query.eq('final_status', status)
+        if assigned_to:
+            if current_user.role in ['admin', 'branch_head']:
+                query = query.eq('cre_name', assigned_to)
+        
+        response = query.order('created_at', desc=True).execute()
+        return [LeadResponse(**lead) for lead in response.data or []]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/leads", response_model=LeadResponse)
+async def create_lead(lead_data: LeadCreate, current_user=Depends(can_manage_leads)):
+    """Create a new lead"""
+    try:
+        import uuid
+        
+        # Generate unique UID
+        lead_uid = f"LD{str(uuid.uuid4())[:8].upper()}"
+        
+        lead_record = {
+            "uid": lead_uid,
+            "customer_name": lead_data.name,
+            "customer_mobile_number": lead_data.phone,
+            "source": lead_data.source,
+            "lead_category": "Fresh",
+            "model_interested": lead_data.notes,
+            "branch": current_user.branch_id if hasattr(current_user, 'branch_id') else 1,
+            "assigned": "Yes" if lead_data.assigned_to else "No",
+            "cre_name": lead_data.assigned_to,
+            "lead_status": "New",
+            "final_status": "Pending",
+            "created_at": "NOW()",
+            "updated_at": "NOW()"
+        }
+        
+        response = supabase.table('lead_master').insert(lead_record).execute()
+        
+        if response.data:
+            return LeadResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create lead")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads/{lead_id}", response_model=LeadResponse)
+async def get_lead(lead_id: str, current_user=Depends(can_manage_leads)):
+    """Get a specific lead by ID or UID"""
+    try:
+        # Try to find by UID first, then by ID
+        response = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
+        
+        if not response.data:
+            response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        lead = response.data[0]
+        
+        # Check permissions
+        if current_user.role == 'cre' and lead.get('cre_name') != current_user.username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif current_user.role == 'ps' and lead.get('ps_name') != current_user.username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        return LeadResponse(**lead)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/leads/{lead_id}", response_model=LeadResponse)
+async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=Depends(can_manage_leads)):
+    """Update a lead"""
+    try:
+        # Get existing lead
+        response = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        existing_lead = response.data[0]
+        
+        # Check permissions
+        if current_user.role == 'cre' and existing_lead.get('cre_name') != current_user.username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif current_user.role == 'ps' and existing_lead.get('ps_name') != current_user.username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Build update data
+        update_data = {"updated_at": "NOW()"}
+        
+        if lead_data.name:
+            update_data["customer_name"] = lead_data.name
+        if lead_data.phone:
+            update_data["customer_mobile_number"] = lead_data.phone
+        if lead_data.status:
+            update_data["lead_status"] = lead_data.status
+        if lead_data.notes:
+            update_data["first_remark"] = lead_data.notes
+        if lead_data.assigned_to:
+            update_data["cre_name"] = lead_data.assigned_to
+            update_data["assigned"] = "Yes"
+        
+        # Update the lead
+        response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
+        
+        if response.data:
+            return LeadResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update lead")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads/statistics", response_model=LeadStatistics)
+async def get_lead_statistics(current_user=Depends(can_manage_leads)):
+    """Get lead statistics based on user role"""
+    try:
+        base_query = supabase.table('lead_master').select('final_status')
+        
+        # Apply role-based filtering
+        if current_user.role == 'cre':
+            base_query = base_query.eq('cre_name', current_user.username)
+        elif current_user.role == 'ps':
+            base_query = base_query.eq('ps_name', current_user.username)
+        elif current_user.role == 'branch_head':
+            base_query = base_query.eq('branch_id', current_user.branch_id)
+        
+        response = base_query.execute()
+        leads = response.data or []
+        
+        stats = {
+            "total": len(leads),
+            "new": len([l for l in leads if l.get('final_status') == 'Pending']),
+            "in_progress": len([l for l in leads if l.get('final_status') in ['Hot', 'Warm', 'Follow-up']]),
+            "won": len([l for l in leads if l.get('final_status') == 'Won']),
+            "lost": len([l for l in leads if l.get('final_status') == 'Lost'])
+        }
+        
+        return LeadStatistics(**stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# ACTIVITY ENDPOINTS
+# ========================================
+
+@app.post("/api/leads/{lead_id}/activities", response_model=ActivityResponse)
+async def create_activity(
+    lead_id: str, 
+    activity_data: ActivityCreate, 
+    current_user=Depends(can_manage_leads)
+):
+    """Create a new activity for a lead"""
+    try:
+        activity_record = {
+            "lead_uid": lead_id,
+            "activity_type": activity_data.activity_type,
+            "subject": activity_data.subject,
+            "description": activity_data.description,
+            "created_by": current_user.username,
+            "created_at": "NOW()"
+        }
+        
+        if activity_data.scheduled_at:
+            activity_record["scheduled_at"] = activity_data.scheduled_at
+        
+        response = supabase.table('lead_activities').insert(activity_record).execute()
+        
+        if response.data:
+            return ActivityResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create activity")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads/{lead_id}/activities", response_model=List[ActivityResponse])
+async def get_lead_activities(lead_id: str, current_user=Depends(can_manage_leads)):
+    """Get all activities for a lead"""
+    try:
+        response = supabase.table('lead_activities').select('*').eq('lead_uid', lead_id).order('created_at', desc=True).execute()
+        return [ActivityResponse(**activity) for activity in response.data or []]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

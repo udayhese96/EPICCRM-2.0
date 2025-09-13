@@ -58,39 +58,28 @@ export default function LeadsPage() {
 
   useEffect(() => {
     const checkAuth = () => {
-      // Check for new session format first
-      const supabaseUser = localStorage.getItem("supabase_user")
-      const legacyToken = localStorage.getItem("access_token")
-      const legacyUser = localStorage.getItem("user")
+      const token = localStorage.getItem("access_token")
+      const userStr = localStorage.getItem("user")
 
-      if (supabaseUser) {
-        try {
-          const userData = JSON.parse(supabaseUser)
-          console.log("✅ Leads page loaded for user (supabase):", userData)
-          setUser(userData)
-        } catch (error) {
-          console.error("Error parsing supabase user:", error)
-          localStorage.removeItem("supabase_user")
-          router.push("/auth/login")
-        }
-      } else if (legacyToken && legacyUser) {
-        try {
-          const userData = JSON.parse(legacyUser)
-          console.log("✅ Leads page loaded for user (legacy):", userData)
-          setUser(userData)
-        } catch (error) {
-          console.error("Error parsing legacy user:", error)
-          localStorage.removeItem("access_token")
-          localStorage.removeItem("user")
-          router.push("/auth/login")
-        }
-      } else {
+      if (!token || !userStr) {
         console.log("❌ No auth data found, redirecting to login")
         router.push("/auth/login")
         return
       }
-      
-      setLoading(false)
+
+      try {
+        const userData = JSON.parse(userStr)
+        console.log("✅ Leads page loaded for user:", userData)
+        setUser(userData)
+      } catch (error) {
+        console.error("❌ Error parsing user data:", error)
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("user")
+        router.push("/auth/login")
+        return
+      } finally {
+        setLoading(false)
+      }
     }
 
     checkAuth()

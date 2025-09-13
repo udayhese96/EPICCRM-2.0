@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { usePermissions } from "@/hooks/use-permissions"
+// import { usePermissions } from "@/hooks/use-permissions"
 import {
   LayoutDashboard,
   Users,
@@ -27,82 +27,152 @@ interface SidebarProps {
   userRole: string
 }
 
-const navigation = [
-  {
-    name: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    permission: { resource: "dashboard", action: "read" as const },
-  },
-  {
-    name: "Leads",
-    href: "/leads",
-    icon: Contact,
-    permission: { resource: "leads", action: "read" as const },
-  },
-  {
-    name: "Teams",
-    href: "/teams",
-    icon: UsersIcon,
-    permission: { resource: "users", action: "read" as const },
-  },
-  {
-    name: "Users",
-    href: "/admin/users",
-    icon: Users,
-    permission: { resource: "users", action: "read" as const },
-  },
-  {
-    name: "Add User",
-    href: "/admin/users/add",
-    icon: UserPlus,
-    permission: { resource: "users", action: "create" as const },
-  },
-  {
-    name: "Branches",
-    href: "/admin/branches",
-    icon: Building2,
-    requiredRole: "admin" as const,
-  },
-  {
-    name: "Reports",
-    href: "/reports",
-    icon: BarChart3,
-    permission: { resource: "reports", action: "read" as const },
-  },
-  {
-    name: "Settings",
-    href: "/admin/settings",
-    icon: Settings,
-    requiredRole: "admin" as const,
-  },
-]
+const getNavigationForRole = (role: string) => {
+  switch (role) {
+    case "admin":
+      return [
+        {
+          name: "Admin Dashboard",
+          href: "/admin/dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Users",
+          href: "/admin/users",
+          icon: Users,
+        },
+        {
+          name: "Add User",
+          href: "/admin/users/add",
+          icon: UserPlus,
+        },
+        {
+          name: "Branches",
+          href: "/admin/branches",
+          icon: Building2,
+        },
+        {
+          name: "Reports",
+          href: "/reports",
+          icon: BarChart3,
+        },
+        {
+          name: "Settings",
+          href: "/admin/settings",
+          icon: Settings,
+        },
+      ]
+    case "cre":
+      return [
+        {
+          name: "CRE Dashboard",
+          href: "/cre/dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Fresh Leads",
+          href: "/leads",
+          icon: Contact,
+        },
+        {
+          name: "Follow-ups",
+          href: "/leads?tab=followups",
+          icon: Contact,
+        },
+        {
+          name: "Analytics",
+          href: "/analytics",
+          icon: BarChart3,
+        },
+      ]
+    case "ps":
+      return [
+        {
+          name: "PS Dashboard", 
+          href: "/ps/dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Fresh Leads",
+          href: "/leads",
+          icon: Contact,
+        },
+        {
+          name: "Walk-in Leads",
+          href: "/leads?tab=walkin",
+          icon: UsersIcon,
+        },
+        {
+          name: "Analytics",
+          href: "/analytics",
+          icon: BarChart3,
+        },
+      ]
+    case "branch_head":
+      return [
+        {
+          name: "Branch Dashboard",
+          href: "/branch-head/dashboard", 
+          icon: LayoutDashboard,
+        },
+        {
+          name: "All Leads",
+          href: "/leads",
+          icon: Contact,
+        },
+        {
+          name: "Team Performance",
+          href: "/reports",
+          icon: BarChart3,
+        },
+        {
+          name: "Manage PS",
+          href: "/admin/users",
+          icon: UsersIcon,
+        },
+      ]
+    default:
+      return [
+        {
+          name: "Dashboard",
+          href: "/dashboard",
+          icon: LayoutDashboard,
+        },
+      ]
+  }
+}
 
 export function Sidebar({ userRole }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const { checkPermission, profile } = usePermissions()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
 
-  const handleLogout = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
+  // Simple permission check based on role
+  const checkPermission = (resource: string, action: string): boolean => {
+    if (userRole === "admin") return true
+    
+    switch (userRole) {
+      case "cre":
+        return ["dashboard", "leads"].includes(resource)
+      case "ps": 
+        return ["dashboard", "leads"].includes(resource)
+      case "branch_head":
+        return ["dashboard", "leads", "users", "reports"].includes(resource)
+      default:
+        return false
+    }
+  }
+
+  const handleLogout = () => {
+    // Clear session data
+    localStorage.removeItem("supabase_user")
+    localStorage.removeItem("access_token")
+    localStorage.removeItem("user")
+    
     router.push("/auth/login")
   }
 
-  const filteredNavigation = navigation.filter((item) => {
-    // Check role requirement
-    if (item.requiredRole) {
-      return profile?.role === item.requiredRole || profile?.role === "admin"
-    }
-
-    // Check permission requirement
-    if (item.permission) {
-      return checkPermission(item.permission.resource, item.permission.action)
-    }
-
-    return true
-  })
+  const navigation = getNavigationForRole(userRole)
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -115,7 +185,7 @@ export function Sidebar({ userRole }: SidebarProps) {
 
       <ScrollArea className="flex-1 p-4">
         <nav className="space-y-2">
-          {filteredNavigation.map((item) => {
+          {navigation.map((item) => {
             const isActive = pathname === item.href
             return (
               <Link
