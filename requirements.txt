@@ -1,0 +1,24 @@
+# Django and Django REST Framework
+Django==4.2.7
+djangorestframework==4.14.0
+django-cors-headers==4.3.1
+django-filter==23.3
+
+# FastAPI and dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
+# Database
+psycopg2-binary==2.9.9
+supabase==2.0.2
+
+# Authentication
+PyJWT==2.8.0
+passlib==1.7.4
+python-bcrypt==0.4.3
+
+# Utilities
+python-dotenv==1.0.0
+python-decouple==3.8
+pydantic==2.5.0
