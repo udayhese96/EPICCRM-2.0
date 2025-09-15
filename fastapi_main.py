@@ -8,6 +8,8 @@ import bcrypt
 from datetime import datetime, timedelta
 import os
 from supabase import create_client, Client
+import psycopg2
+from psycopg2.extras import RealDictCursor
 # from decouple import config
 
 # FastAPI app initialization
@@ -42,6 +44,15 @@ supabase: Client = create_client(
 
 JWT_SECRET = "your-jwt-secret-key-here"
 JWT_ALGORITHM = "HS256"
+
+# Database configuration
+DATABASE_CONFIG = {
+    'host': os.getenv('POSTGRES_HOST', 'db.raticwohyvxcyoqzqnwj.supabase.co'),
+    'database': os.getenv('POSTGRES_DATABASE', 'postgres'),
+    'user': os.getenv('POSTGRES_USER', 'postgres'),
+    'password': os.getenv('POSTGRES_PASSWORD', 'EpicCrm2024!'),
+    'port': '5432'
+}
 
 # Pydantic models
 class UserLogin(BaseModel):

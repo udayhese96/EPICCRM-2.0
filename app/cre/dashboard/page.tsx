@@ -40,6 +40,11 @@ interface Lead {
   campaign: string
   date: string
   lead_status: string
+  lead_category?: "Hot" | "Warm" | "Cold"
+  follow_up_date?: string // ISO yyyy-mm-dd
+  pending_reason?: string
+  followup_count?: number // 0..5
+  call_logs?: { date: string; outcome: string; remarks: string }[]
   customer_email?: string
   customer_location?: string
   remarks?: string
@@ -50,6 +55,10 @@ export default function CREDashboard() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
   const [leads, setLeads] = useState<Lead[]>([])
+  const [activeTab, setActiveTab] = useState<string>("fresh")
+  const [activeStatus, setActiveStatus] = useState<string>("all")
+  const [searchTerm, setSearchTerm] = useState("")
+  const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -68,6 +77,8 @@ export default function CREDashboard() {
         campaign: "Scratch And Win",
         date: "2025-09-12",
         lead_status: "Fresh",
+        lead_category: "Warm",
+        followup_count: 0,
         customer_email: "mohd@example.com"
       },
       {
@@ -78,7 +89,50 @@ export default function CREDashboard() {
         source: "META",
         campaign: "New 450x Video",
         date: "2025-09-12",
-        lead_status: "Fresh"
+        lead_status: "Fresh",
+        lead_category: "Hot",
+        followup_count: 0
+      },
+      {
+        id: "3",
+        uid: "AB-1234-5678",
+        customer_name: "John Smith",
+        customer_mobile_number: "9876543210",
+        source: "Website",
+        campaign: "Test Drive",
+        date: "2025-09-11",
+        lead_status: "Called",
+        lead_category: "Cold",
+        followup_count: 0
+      },
+      {
+        id: "4",
+        uid: "CD-5678-9012",
+        customer_name: "Jane Doe",
+        customer_mobile_number: "8765432109",
+        source: "Referral",
+        campaign: "Referral Program",
+        date: "2025-09-10",
+        lead_status: "Follow Up",
+        lead_category: "Hot",
+        followup_count: 0,
+        follow_up_date: new Date().toISOString().slice(0,10)
+      },
+      {
+        id: "5",
+        uid: "EF-9012-3456",
+        customer_name: "Mike Johnson",
+        customer_mobile_number: "7654321098",
+        source: "META",
+        campaign: "New Campaign",
+        date: "2025-09-09",
+        lead_status: "Qualified",
+        lead_category: "Warm",
+        followup_count: 1,
+        follow_up_date: new Date().toISOString().slice(0,10),
+        call_logs: [
+          { date: new Date().toISOString().slice(0,10), outcome: "Connected", remarks: "Initial qualification done" }
+        ]
       }
     ])
   }, [])
@@ -90,7 +144,23 @@ export default function CREDashboard() {
     setLeads(prevLeads => 
       prevLeads.map(lead => 
         lead.id === leadData.leadId 
-          ? { ...lead, lead_status: leadData.status, updated_at: leadData.updated_at }
+          ? {
+              ...lead,
+              lead_status: leadData.lead_status || lead.lead_status,
+              updated_at: leadData.updated_at,
+              follow_up_date: leadData.follow_up_date ?? lead.follow_up_date,
+              followup_count: leadData.followup_count ?? lead.followup_count,
+              call_logs: leadData.call_status || leadData.general_remarks
+                ? [
+                    ...(lead.call_logs || []),
+                    {
+                      date: (leadData.follow_up_date || new Date().toISOString().slice(0,10)),
+                      outcome: leadData.call_status || "",
+                      remarks: leadData.general_remarks || ""
+                    }
+                  ]
+                : (lead.call_logs || [])
+            }
           : lead
       )
     )
@@ -101,7 +171,90 @@ export default function CREDashboard() {
     setIsUpdateModalOpen(true)
   }
 
+  // Filter leads based on active tab and status
+  const getFilteredLeads = () => {
+    let filteredLeads = leads
+
+    // Filter by tab
+    switch (activeTab) {
+      case "fresh":
+        filteredLeads = leads.filter(lead => 
+          ["Fresh", "Called", "Follow Up"].includes(lead.lead_status)
+        )
+        break
+      case "followup":
+        {
+          const today = new Date().toISOString().slice(0,10)
+          filteredLeads = leads.filter(lead => lead.follow_up_date === today)
+        }
+        break
+      case "pending":
+        filteredLeads = leads.filter(lead => {
+          const isQualified = lead.lead_status === "Qualified"
+          const isCallMeBack = lead.lead_status === "Pending" && lead.pending_reason === "Call me back"
+          return isQualified || isCallMeBack
+        })
+        if (pendingCategory !== "all") {
+          filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
+        }
+        break
+      case "qualified":
+        filteredLeads = leads.filter(lead => lead.lead_status === "Qualified")
+        break
+      case "wonlost":
+        filteredLeads = leads.filter(lead => 
+          ["Won", "Lost"].includes(lead.lead_status)
+        )
+        break
+      case "events":
+        filteredLeads = leads.filter(lead => lead.source === "Event")
+        break
+      default:
+        filteredLeads = leads
+    }
+
+    // Filter by status within tab
+    if (activeStatus !== "all") {
+      filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
+    }
+
+    // Filter by search term
+    if (searchTerm) {
+      filteredLeads = filteredLeads.filter(lead => 
+        lead.uid.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.customer_mobile_number.includes(searchTerm)
+      )
+    }
+
+    return filteredLeads
+  }
+
+  const getTabCounts = () => {
+    const today = new Date().toISOString().slice(0,10)
+    return {
+      fresh: leads.filter(lead => ["Fresh", "Called", "Follow Up"].includes(lead.lead_status)).length,
+      followup: leads.filter(lead => lead.follow_up_date === today).length,
+      pending: leads.filter(lead => (lead.lead_status === "Qualified") || (lead.lead_status === "Pending" && lead.pending_reason === "Call me back")).length,
+      qualified: leads.filter(lead => lead.lead_status === "Qualified").length,
+      wonlost: leads.filter(lead => ["Won", "Lost"].includes(lead.lead_status)).length,
+      events: leads.filter(lead => lead.source === "Event").length
+    }
+  }
+
+  const getStatusCounts = () => {
+    const freshLeads = leads.filter(lead => ["Fresh", "Called", "Follow Up"].includes(lead.lead_status))
+    return {
+      untouched: freshLeads.filter(lead => lead.lead_status === "Fresh").length,
+      called: freshLeads.filter(lead => lead.lead_status === "Called").length,
+      followup: freshLeads.filter(lead => lead.lead_status === "Follow Up").length
+    }
+  }
+
   const userName = user?.first_name || user?.name || user?.username || "Kumari"
+  const filteredLeads = getFilteredLeads()
+  const tabCounts = getTabCounts()
+  const statusCounts = getStatusCounts()
 
   return (
     <DashboardLayout>
@@ -139,11 +292,11 @@ export default function CREDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-blue-100 text-sm">Fresh Leads</p>
-                    <p className="text-3xl font-bold">633</p>
+                    <p className="text-3xl font-bold">{tabCounts.fresh}</p>
                     <div className="flex items-center space-x-1 mt-2">
-                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">16</Badge>
-                      <Badge variant="secondary" className="bg-blue-400 text-white text-xs">613</Badge>
-                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">4</Badge>
+                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">{statusCounts.untouched}</Badge>
+                      <Badge variant="secondary" className="bg-blue-400 text-white text-xs">{statusCounts.called}</Badge>
+                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">{statusCounts.followup}</Badge>
                     </div>
                   </div>
                 </div>
@@ -154,7 +307,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-amber-100 text-sm">Today's Follow-ups</p>
-                  <p className="text-3xl font-bold">308</p>
+                  <p className="text-3xl font-bold">{tabCounts.followup}</p>
                   <Calendar className="h-6 w-6 mx-auto mt-2 text-amber-200" />
                 </div>
               </CardContent>
@@ -164,7 +317,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-teal-100 text-sm">Pending Leads</p>
-                  <p className="text-3xl font-bold">328</p>
+                  <p className="text-3xl font-bold">{tabCounts.pending}</p>
                   <AlertCircle className="h-6 w-6 mx-auto mt-2 text-teal-200" />
                 </div>
               </CardContent>
@@ -173,8 +326,8 @@ export default function CREDashboard() {
             <Card className="bg-emerald-600 text-white">
               <CardContent className="p-4">
                 <div className="text-center">
-                  <p className="text-emerald-100 text-sm">Assigned to PS</p>
-                  <p className="text-3xl font-bold">267</p>
+                  <p className="text-emerald-100 text-sm">Qualified Leads</p>
+                  <p className="text-3xl font-bold">{tabCounts.qualified}</p>
                   <Users className="h-6 w-6 mx-auto mt-2 text-emerald-200" />
                 </div>
               </CardContent>
@@ -184,7 +337,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-green-100 text-sm">Won Leads</p>
-                  <p className="text-3xl font-bold">53</p>
+                  <p className="text-3xl font-bold">{tabCounts.wonlost}</p>
                   <Trophy className="h-6 w-6 mx-auto mt-2 text-green-200" />
                 </div>
               </CardContent>
@@ -194,7 +347,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-red-100 text-sm">Lost Leads</p>
-                  <p className="text-3xl font-bold">665</p>
+                  <p className="text-3xl font-bold">{tabCounts.wonlost}</p>
                   <X className="h-6 w-6 mx-auto mt-2 text-red-200" />
                 </div>
               </CardContent>
@@ -203,38 +356,70 @@ export default function CREDashboard() {
 
           {/* Filter Tabs */}
           <div className="flex flex-wrap gap-2">
-            <Button variant="default" className="bg-gray-900 text-white">
+            <Button 
+              variant={activeTab === "fresh" ? "default" : "outline"}
+              className={activeTab === "fresh" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("fresh")}
+            >
               <Star className="h-4 w-4 mr-2" />
-              Fresh Leads
+              Fresh Leads ({tabCounts.fresh})
             </Button>
-            <Button variant="outline">
+            <Button 
+              variant={activeTab === "followup" ? "default" : "outline"}
+              className={activeTab === "followup" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("followup")}
+            >
               <Calendar className="h-4 w-4 mr-2" />
-              Today's Follow-ups
+              Today's Follow-ups ({tabCounts.followup})
             </Button>
-            <Button variant="outline">
+            <Button 
+              variant={activeTab === "pending" ? "default" : "outline"}
+              className={activeTab === "pending" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("pending")}
+            >
               <AlertCircle className="h-4 w-4 mr-2" />
-              Pending Leads
+              Pending Leads ({tabCounts.pending})
             </Button>
-            <Button variant="outline">
+            <Button 
+              variant={activeTab === "qualified" ? "default" : "outline"}
+              className={activeTab === "qualified" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("qualified")}
+            >
               <Users className="h-4 w-4 mr-2" />
-              PS Assigned
+              Qualified Leads ({tabCounts.qualified})
             </Button>
-            <Button variant="outline">
+            <Button 
+              variant={activeTab === "wonlost" ? "default" : "outline"}
+              className={activeTab === "wonlost" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("wonlost")}
+            >
               <Trophy className="h-4 w-4 mr-2" />
-              Won/Lost Leads
+              Won/Lost Leads ({tabCounts.wonlost})
             </Button>
-            <Button variant="outline">
+            <Button 
+              variant={activeTab === "events" ? "default" : "outline"}
+              className={activeTab === "events" ? "bg-gray-900 text-white" : ""}
+              onClick={() => setActiveTab("events")}
+            >
               <Calendar className="h-4 w-4 mr-2" />
-              Event Leads
+              Event Leads ({tabCounts.events})
             </Button>
           </div>
 
-          {/* Fresh Leads Section */}
+          {/* Dynamic Leads Section */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-xl">Fresh Leads (633)</CardTitle>
+                  <CardTitle className="text-xl">
+                    {activeTab === "fresh" && "Fresh Leads"}
+                    {activeTab === "followup" && "Today's Follow-ups"}
+                    {activeTab === "pending" && "Pending Leads"}
+                    {activeTab === "qualified" && "Qualified Leads"}
+                    {activeTab === "wonlost" && "Won/Lost Leads"}
+                    {activeTab === "events" && "Event Leads"}
+                    {" "}({filteredLeads.length})
+                  </CardTitle>
                 </div>
                 <div className="flex items-center space-x-3">
                   <select className="border border-gray-300 rounded px-3 py-1 text-sm">
@@ -247,27 +432,71 @@ export default function CREDashboard() {
                     <Input 
                       placeholder="Search by UID, name..." 
                       className="pl-10 w-64"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button size="sm" variant="outline">
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => setSearchTerm("")}
+                  >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {/* Status Tabs */}
-              <div className="flex space-x-2 mb-4">
-                <Badge variant="secondary" className="bg-gray-100">
-                  Untouched <span className="ml-1 bg-gray-300 px-1 rounded">16</span>
-                </Badge>
-                <Badge variant="secondary" className="bg-gray-100">
-                  Called <span className="ml-1 bg-gray-300 px-1 rounded">613</span>
-                </Badge>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-800">
-                  Follow Up <span className="ml-1 bg-amber-300 px-1 rounded">4</span>
-                </Badge>
-              </div>
+              {/* Status Tabs - Only show for Fresh Leads */}
+              {activeTab === "fresh" && (
+                <div className="flex space-x-2 mb-4">
+                  <Badge 
+                    variant="secondary" 
+                    className={`cursor-pointer ${activeStatus === "all" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                    onClick={() => setActiveStatus("all")}
+                  >
+                    All <span className="ml-1 bg-gray-300 px-1 rounded">{tabCounts.fresh}</span>
+                  </Badge>
+                  <Badge 
+                    variant="secondary" 
+                    className={`cursor-pointer ${activeStatus === "Fresh" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                    onClick={() => setActiveStatus("Fresh")}
+                  >
+                    Untouched <span className="ml-1 bg-gray-300 px-1 rounded">{statusCounts.untouched}</span>
+                  </Badge>
+                  <Badge 
+                    variant="secondary" 
+                    className={`cursor-pointer ${activeStatus === "Called" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                    onClick={() => setActiveStatus("Called")}
+                  >
+                    Called <span className="ml-1 bg-gray-300 px-1 rounded">{statusCounts.called}</span>
+                  </Badge>
+                  <Badge 
+                    variant="secondary" 
+                    className={`cursor-pointer ${activeStatus === "Follow Up" ? "bg-amber-900 text-white" : "bg-amber-100 text-amber-800"}`}
+                    onClick={() => setActiveStatus("Follow Up")}
+                  >
+                    Follow Up <span className="ml-1 bg-amber-300 px-1 rounded">{statusCounts.followup}</span>
+                  </Badge>
+                </div>
+              )}
+
+              {/* Pending Filters - Hot/Warm/Cold */}
+              {activeTab === "pending" && (
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-sm text-gray-600">Lead Category:</span>
+                  {(["all", "Hot", "Warm", "Cold"] as const).map(cat => (
+                    <Badge
+                      key={cat}
+                      variant="secondary"
+                      className={`cursor-pointer ${pendingCategory === cat ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                      onClick={() => setPendingCategory(cat)}
+                    >
+                      {cat.toString()}
+                    </Badge>
+                  ))}
+                </div>
+              )}
 
               {/* Leads Table */}
               <div className="overflow-x-auto">
@@ -286,29 +515,52 @@ export default function CREDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {leads.map((lead) => (
-                      <tr key={lead.id} className="border-b hover:bg-gray-50">
-                        <td className="p-3">
-                          <Button 
-                            size="sm" 
-                            className="bg-red-500 hover:bg-red-600 text-white"
-                            onClick={() => openUpdateModal(lead)}
-                          >
-                            Update
-                          </Button>
+                    {filteredLeads.length > 0 ? (
+                      filteredLeads.map((lead) => (
+                        <tr key={lead.id} className="border-b hover:bg-gray-50">
+                          <td className="p-3">
+                            <Button 
+                              size="sm" 
+                              className="bg-red-500 hover:bg-red-600 text-white"
+                              onClick={() => openUpdateModal(lead)}
+                            >
+                              Update
+                            </Button>
+                          </td>
+                          <td className="p-3">
+                            <Badge 
+                              variant="outline"
+                              className={
+                                lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
+                                lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
+                                lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
+                                lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
+                                lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
+                                lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
+                                "bg-gray-100 text-gray-800"
+                              }
+                            >
+                              {lead.lead_status}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-sm text-gray-600">
+                            {lead.lead_status === "Called" ? "1 call" : "No calls"}
+                          </td>
+                          <td className="p-3 font-medium">{lead.customer_name}</td>
+                          <td className="p-3">{lead.customer_mobile_number}</td>
+                          <td className="p-3">{lead.source}</td>
+                          <td className="p-3">{lead.campaign}</td>
+                          <td className="p-3 text-sm">{lead.date}</td>
+                          <td className="p-3 text-sm font-mono">{lead.uid}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={9} className="p-8 text-center text-gray-500">
+                          No leads found for the selected criteria
                         </td>
-                        <td className="p-3">
-                          <Badge variant="outline">{lead.lead_status}</Badge>
-                        </td>
-                        <td className="p-3 text-sm text-gray-600">No calls</td>
-                        <td className="p-3 font-medium">{lead.customer_name}</td>
-                        <td className="p-3">{lead.customer_mobile_number}</td>
-                        <td className="p-3">{lead.source}</td>
-                        <td className="p-3">{lead.campaign}</td>
-                        <td className="p-3 text-sm">{lead.date}</td>
-                        <td className="p-3 text-sm font-mono">{lead.uid}</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
