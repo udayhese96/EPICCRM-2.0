@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   UsersIcon,
+  ArrowRightLeft,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -37,14 +38,14 @@ const getNavigationForRole = (role: string) => {
           icon: LayoutDashboard,
         },
         {
-          name: "Users",
-          href: "/admin/users",
-          icon: Users,
+          name: "Assign Leads",
+          href: "/admin/assign-leads",
+          icon: ArrowRightLeft,
         },
         {
-          name: "Add User",
-          href: "/admin/users/add",
-          icon: UserPlus,
+          name: "All Leads",
+          href: "/leads",
+          icon: Contact,
         },
         {
           name: "Manage CRE",
@@ -54,7 +55,12 @@ const getNavigationForRole = (role: string) => {
         {
           name: "Manage PS",
           href: "/admin/manage-ps",
-          icon: Users,
+          icon: UserPlus,
+        },
+        {
+          name: "Users",
+          href: "/admin/users",
+          icon: UsersIcon,
         },
         {
           name: "Branches",

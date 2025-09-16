@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Plus, Edit, Trash2, Users } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 interface CREUser {
   id: string
@@ -18,36 +18,14 @@ interface CREUser {
   username: string
   email: string
   phone: string
-  branch: string
   is_active: boolean
   created_at: string
 }
 
-const branches = ["Mount Road", "Vyasarpadi", "Cuddalore"]
 
 export default function ManageCREPage() {
-  const [creUsers, setCREUsers] = useState<CREUser[]>([
-    {
-      id: "1",
-      name: "Rajesh Kumar",
-      username: "rajesh.cre",
-      email: "rajesh@toyota.com",
-      phone: "9876543210",
-      branch: "Mount Road",
-      is_active: true,
-      created_at: "2025-01-15"
-    },
-    {
-      id: "2", 
-      name: "Priya Singh",
-      username: "priya.cre",
-      email: "priya@toyota.com",
-      phone: "9876543211",
-      branch: "Vyasarpadi",
-      is_active: true,
-      created_at: "2025-01-20"
-    }
-  ])
+  const [creUsers, setCREUsers] = useState<CREUser[]>([])
+  const [loading, setLoading] = useState(true)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<CREUser | null>(null)
@@ -56,42 +34,101 @@ export default function ManageCREPage() {
     username: "",
     email: "",
     phone: "",
-    branch: "",
     password: ""
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fetch CRE users from API
+  useEffect(() => {
+    fetchCREUsers()
+  }, [])
+
+  const fetchCREUsers = async () => {
+    try {
+      // Try Next.js API first
+      let response = await fetch('/api/cre-users', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      // If Next.js API fails, try FastAPI directly
+      if (!response.ok) {
+        console.log('Next.js API failed, trying FastAPI directly...')
+        response = await fetch('http://localhost:8000/api/cre-users', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      }
+      
+      if (response.ok) {
+        const users = await response.json()
+        setCREUsers(users)
+      } else {
+        console.error('Failed to fetch CRE users:', response.status, response.statusText)
+      }
+    } catch (error) {
+      console.error('Error fetching CRE users:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (editingUser) {
-      // Update existing user
-      setCREUsers(prev => prev.map(user => 
-        user.id === editingUser.id 
-          ? { ...user, ...formData, is_active: true }
-          : user
-      ))
-    } else {
-      // Add new user
-      const newUser: CREUser = {
-        id: Date.now().toString(),
-        ...formData,
-        is_active: true,
-        created_at: new Date().toISOString().split('T')[0]
+    try {
+      const url = editingUser ? `/api/cre-users/${editingUser.id}` : '/api/cre-users'
+      const fastApiUrl = editingUser ? `http://localhost:8000/api/cre-users/${editingUser.id}` : 'http://localhost:8000/api/cre-users'
+      const method = editingUser ? 'PUT' : 'POST'
+      
+      // Try Next.js API first
+      let response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      })
+
+      // If Next.js API fails, try FastAPI directly
+      if (!response.ok) {
+        console.log('Next.js API failed, trying FastAPI directly...')
+        response = await fetch(fastApiUrl, {
+          method,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(formData)
+        })
       }
-      setCREUsers(prev => [...prev, newUser])
+
+      if (response.ok) {
+        await fetchCREUsers() // Refresh the list
+        // Reset form
+        setFormData({
+          name: "",
+          username: "",
+          email: "",
+          phone: "",
+          password: ""
+        })
+        setEditingUser(null)
+        setIsDialogOpen(false)
+        alert('CRE user saved successfully!')
+      } else {
+        const errorData = await response.text()
+        console.error('Failed to save CRE user:', response.status, errorData)
+        alert(`Failed to save CRE user: ${response.status} ${response.statusText}`)
+      }
+    } catch (error) {
+      console.error('Error saving CRE user:', error)
+      alert('Error saving CRE user. Please check console for details.')
     }
-    
-    // Reset form
-    setFormData({
-      name: "",
-      username: "",
-      email: "",
-      phone: "",
-      branch: "",
-      password: ""
-    })
-    setEditingUser(null)
-    setIsDialogOpen(false)
   }
 
   const handleEdit = (user: CREUser) => {
@@ -101,22 +138,46 @@ export default function ManageCREPage() {
       username: user.username,
       email: user.email,
       phone: user.phone,
-      branch: user.branch,
       password: ""
     })
     setIsDialogOpen(true)
   }
 
-  const handleDelete = (userId: string) => {
-    setCREUsers(prev => prev.filter(user => user.id !== userId))
+  const handleDelete = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/cre-users/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+      if (response.ok) {
+        await fetchCREUsers() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error deleting CRE user:', error)
+    }
   }
 
-  const toggleUserStatus = (userId: string) => {
-    setCREUsers(prev => prev.map(user => 
-      user.id === userId 
-        ? { ...user, is_active: !user.is_active }
-        : user
-    ))
+  const toggleUserStatus = async (userId: string) => {
+    try {
+      const user = creUsers.find(u => u.id === userId)
+      if (!user) return
+
+      const response = await fetch(`/api/cre-users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ is_active: !user.is_active })
+      })
+      if (response.ok) {
+        await fetchCREUsers() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error updating CRE user status:', error)
+    }
   }
 
   return (
@@ -178,19 +239,6 @@ export default function ManageCREPage() {
                     onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                     required
                   />
-                </div>
-                <div>
-                  <Label htmlFor="branch">Branch</Label>
-                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((branch) => (
-                        <SelectItem key={branch} value={branch}>{branch}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="password">Password</Label>
@@ -256,7 +304,7 @@ export default function ManageCREPage() {
               <div className="flex items-center space-x-2">
                 <Users className="h-8 w-8 text-purple-600" />
                 <div>
-                  <p className="text-2xl font-bold">{branches.length}</p>
+                  <p className="text-2xl font-bold">3</p>
                   <p className="text-sm text-gray-600">Branches</p>
                 </div>
               </div>
@@ -279,57 +327,67 @@ export default function ManageCREPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Username</TableHead>
-                  <TableHead>Email</TableHead>
                   <TableHead>Phone</TableHead>
-                  <TableHead>Branch</TableHead>
+                  <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {creUsers.map((user) => (
+                {creUsers.map((user, index) => (
                   <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.username}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>{user.phone}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{user.branch}</Badge>
+                      <Badge className="bg-pink-100 text-pink-800">
+                        #{(index + 1).toString().padStart(2, '0')}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">{user.name}</TableCell>
+                    <TableCell className="text-purple-600">{user.username}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center text-sm">
+                        📞 {user.phone}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center text-sm text-pink-600">
+                        📧 {user.email}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge 
                         variant={user.is_active ? "default" : "destructive"}
                         className={user.is_active ? "bg-green-100 text-green-800" : ""}
                       >
-                        {user.is_active ? "Active" : "Inactive"}
+                        {user.is_active ? "ACTIVE" : "INACTIVE"}
                       </Badge>
                     </TableCell>
-                    <TableCell>{user.created_at}</TableCell>
+                    <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
                         <Button
                           size="sm"
-                          variant="outline"
-                          onClick={() => handleEdit(user)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={user.is_active ? "destructive" : "default"}
+                          className="bg-orange-500 hover:bg-orange-600 text-white"
                           onClick={() => toggleUserStatus(user.id)}
                         >
-                          {user.is_active ? "Deactivate" : "Activate"}
+                          🔄 Deactivate
                         </Button>
                         <Button
                           size="sm"
-                          variant="destructive"
+                          className="bg-pink-500 hover:bg-pink-600 text-white"
+                          onClick={() => handleEdit(user)}
+                        >
+                          ✏️ Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-red-500 hover:bg-red-600 text-white"
                           onClick={() => handleDelete(user.id)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          🗑️ Delete
                         </Button>
                       </div>
                     </TableCell>

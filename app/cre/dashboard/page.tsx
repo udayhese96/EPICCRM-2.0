@@ -40,6 +40,7 @@ interface Lead {
   campaign: string
   date: string
   lead_status: string
+  final_status?: string
   lead_category?: "Hot" | "Warm" | "Cold"
   follow_up_date?: string // ISO yyyy-mm-dd
   pending_reason?: string
@@ -48,6 +49,7 @@ interface Lead {
   customer_email?: string
   customer_location?: string
   remarks?: string
+  lead_remark?: string
 }
 
 export default function CREDashboard() {
@@ -56,7 +58,7 @@ export default function CREDashboard() {
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
   const [leads, setLeads] = useState<Lead[]>([])
   const [activeTab, setActiveTab] = useState<string>("fresh")
-  const [activeStatus, setActiveStatus] = useState<string>("all")
+  const [activeStatus, setActiveStatus] = useState<string>("Fresh")
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
 
@@ -65,77 +67,42 @@ export default function CREDashboard() {
     if (supabaseUser) {
       setUser(JSON.parse(supabaseUser))
     }
-    
-    // Load sample leads - in real app, fetch from database
-    setLeads([
-      {
-        id: "1",
-        uid: "MK-6742-3632",
-        customer_name: "Mohd kaleemuddin",
-        customer_mobile_number: "9133716742",
-        source: "META",
-        campaign: "Scratch And Win",
-        date: "2025-09-12",
-        lead_status: "Fresh",
-        lead_category: "Warm",
-        followup_count: 0,
-        customer_email: "mohd@example.com"
-      },
-      {
-        id: "2", 
-        uid: "MU-0460-3649",
-        customer_name: "Nani Nani",
-        customer_mobile_number: "9618140460",
-        source: "META",
-        campaign: "New 450x Video",
-        date: "2025-09-12",
-        lead_status: "Fresh",
-        lead_category: "Hot",
-        followup_count: 0
-      },
-      {
-        id: "3",
-        uid: "AB-1234-5678",
-        customer_name: "John Smith",
-        customer_mobile_number: "9876543210",
-        source: "Website",
-        campaign: "Test Drive",
-        date: "2025-09-11",
-        lead_status: "Called",
-        lead_category: "Cold",
-        followup_count: 0
-      },
-      {
-        id: "4",
-        uid: "CD-5678-9012",
-        customer_name: "Jane Doe",
-        customer_mobile_number: "8765432109",
-        source: "Referral",
-        campaign: "Referral Program",
-        date: "2025-09-10",
-        lead_status: "Follow Up",
-        lead_category: "Hot",
-        followup_count: 0,
-        follow_up_date: new Date().toISOString().slice(0,10)
-      },
-      {
-        id: "5",
-        uid: "EF-9012-3456",
-        customer_name: "Mike Johnson",
-        customer_mobile_number: "7654321098",
-        source: "META",
-        campaign: "New Campaign",
-        date: "2025-09-09",
-        lead_status: "Qualified",
-        lead_category: "Warm",
-        followup_count: 1,
-        follow_up_date: new Date().toISOString().slice(0,10),
-        call_logs: [
-          { date: new Date().toISOString().slice(0,10), outcome: "Connected", remarks: "Initial qualification done" }
-        ]
-      }
-    ])
+    fetchAssignedLeads()
   }, [])
+
+  const fetchAssignedLeads = async () => {
+    try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const username = parsed?.username || ''
+      const fullName = parsed?.full_name || parsed?.name || ''
+      const qs = new URLSearchParams({ username })
+      if (fullName) qs.append('name', fullName)
+      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
+      if (response.ok) {
+        const data = await response.json()
+        // Map API lead_master fields to UI fields
+        const mapped = (data || []).map((l: any) => ({
+          id: l.id || l.uid,
+          uid: l.uid,
+          customer_name: l.customer_name,
+          customer_mobile_number: l.customer_mobile_number,
+          source: l.source,
+          campaign: l.sub_source || l.model_interested || '',
+          date: (l.created_at || '').slice(0,10),
+          lead_status: (l.lead_status || '').trim(),
+          final_status: (l.final_status || '').trim(),
+          lead_category: l.lead_category || 'Warm',
+          followup_count: l.followup_count || 0,
+          follow_up_date: l.follow_up_date,
+          lead_remark: l.lead_remark || l.pending_reason || ''
+        }))
+        setLeads(mapped)
+      }
+    } catch (e) {
+      console.error('Failed to fetch assigned leads', e)
+    }
+  }
 
   const handleUpdateLead = (leadData: any) => {
     console.log("Updating lead:", leadData)
@@ -193,9 +160,8 @@ export default function CREDashboard() {
     // Filter by tab
     switch (activeTab) {
       case "fresh":
-        filteredLeads = leads.filter(lead => 
-          ["Fresh", "Called", "Follow Up"].includes(lead.lead_status)
-        )
+        // Fresh view base is all leads; sub-filters below handle subsets
+        filteredLeads = leads
         break
       case "followup":
         {
@@ -228,8 +194,22 @@ export default function CREDashboard() {
         filteredLeads = leads
     }
 
-    // Filter by status within tab
-    if (activeStatus !== "all") {
+    // Filter by status within tab using business rules
+    if (activeTab === "fresh") {
+      if (activeStatus === "Fresh") {
+        // Untouched: lead_status is null/empty AND final_status is Pending
+        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "") === "" && (lead.final_status ?? "").toLowerCase() === "pending")
+      } else if (activeStatus === "Called") {
+        // Called: leads explicitly marked as Called
+        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "") === "Called")
+      } else if (activeStatus === "Follow Up") {
+        // Follow Up: Pending where remark IS 'Call me back'
+        filteredLeads = filteredLeads.filter(lead => (lead.final_status ?? "").toLowerCase() === "pending" && (lead.lead_remark ?? lead.pending_reason ?? "").toLowerCase() === "call me back")
+      } else {
+        // Fallback to equality for any other status values
+        filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
+      }
+    } else if (activeStatus !== "all") {
       filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
     }
 
@@ -247,8 +227,11 @@ export default function CREDashboard() {
 
   const getTabCounts = () => {
     const today = new Date().toISOString().slice(0,10)
+    const isUntouched = (l: Lead) => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending"
+    const isCalled = (l: Lead) => (l.lead_status ?? "") === "Called"
+    const isFollowUp = (l: Lead) => (l.final_status ?? "").toLowerCase() === "pending" && (l.lead_remark ?? l.pending_reason ?? "").toLowerCase() === "call me back"
     return {
-      fresh: leads.filter(lead => ["Fresh", "Called", "Follow Up"].includes(lead.lead_status)).length,
+      fresh: leads.filter(l => isUntouched(l) || isCalled(l) || isFollowUp(l)).length,
       followup: leads.filter(lead => lead.follow_up_date === today).length,
       pending: leads.filter(lead => (lead.lead_status === "Qualified") || (lead.lead_status === "Pending" && lead.pending_reason === "Call me back")).length,
       qualified: leads.filter(lead => lead.lead_status === "Qualified").length,
@@ -258,11 +241,13 @@ export default function CREDashboard() {
   }
 
   const getStatusCounts = () => {
-    const freshLeads = leads.filter(lead => ["Fresh", "Called", "Follow Up"].includes(lead.lead_status))
+    const freshLeadsUntouched = leads.filter(l => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending")
+    const freshLeadsCalled = leads.filter(l => (l.lead_status ?? "") === "Called")
+    const freshLeadsFollowUp = leads.filter(l => (l.final_status ?? "").toLowerCase() === "pending" && (l.lead_remark ?? l.pending_reason ?? "").toLowerCase() === "call me back")
     return {
-      untouched: freshLeads.filter(lead => lead.lead_status === "Fresh").length,
-      called: freshLeads.filter(lead => lead.lead_status === "Called").length,
-      followup: freshLeads.filter(lead => lead.lead_status === "Follow Up").length
+      untouched: freshLeadsUntouched.length,
+      called: freshLeadsCalled.length,
+      followup: freshLeadsFollowUp.length
     }
   }
 
@@ -463,16 +448,9 @@ export default function CREDashboard() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* Status Tabs - Only show for Fresh Leads */}
+              {/* Status Tabs - Untouched, Called, Follow Up for Fresh Leads */}
               {activeTab === "fresh" && (
                 <div className="flex space-x-2 mb-4">
-                  <Badge 
-                    variant="secondary" 
-                    className={`cursor-pointer ${activeStatus === "all" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
-                    onClick={() => setActiveStatus("all")}
-                  >
-                    All <span className="ml-1 bg-gray-300 px-1 rounded">{tabCounts.fresh}</span>
-                  </Badge>
                   <Badge 
                     variant="secondary" 
                     className={`cursor-pointer ${activeStatus === "Fresh" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
@@ -518,9 +496,11 @@ export default function CREDashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead>
-                    <tr className="bg-gray-50">
+                    <tr className="bg-gradient-to-r from-teal-50 via-blue-50 to-indigo-50">
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ACTION</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LEAD STATUS</th>
+                      {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LEAD STATUS</th>
+                      )}
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CALL STATS</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CUSTOMER NAME</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>MOBILE</th>
@@ -544,22 +524,24 @@ export default function CREDashboard() {
                               Update
                             </Button>
                           </td>
-                          <td className="p-3">
-                            <Badge 
-                              variant="outline"
-                              className={
-                                lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
-                                lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
-                                lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
-                                lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
-                                lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
-                                lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
-                                "bg-gray-100 text-gray-800"
-                              }
-                            >
-                              {lead.lead_status}
-                            </Badge>
-                          </td>
+                          {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                            <td className="p-3">
+                              <Badge 
+                                variant="outline"
+                                className={
+                                  lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
+                                  lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
+                                  lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
+                                  lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
+                                  lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
+                                  lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
+                                  "bg-gray-100 text-gray-800"
+                                }
+                              >
+                                {lead.lead_status}
+                              </Badge>
+                            </td>
+                          )}
                           <td className="p-3 text-sm text-gray-600">
                             {lead.lead_status === "Called" ? "1 call" : "No calls"}
                           </td>
@@ -573,7 +555,7 @@ export default function CREDashboard() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={9} className="p-8 text-center text-gray-500">
+                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 8 : 9} className="p-8 text-center text-gray-500">
                           No leads found for the selected criteria
                         </td>
                       </tr>

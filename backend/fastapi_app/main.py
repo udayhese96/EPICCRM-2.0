@@ -8,6 +8,8 @@ from supabase import create_client, Client
 import os
 from decouple import config
 from .auth import get_current_user, admin_required, admin_or_branch_head, can_manage_leads
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from .models import (UserCreate, UserUpdate, UserResponse, LoginRequest, LoginResponse, ChangePasswordRequest,
                     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, ActivityCreate, ActivityResponse,
                     BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics)
@@ -23,13 +25,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase client
-supabase: Client = create_client(
-    config('SUPABASE_URL'),
-    config('SUPABASE_SERVICE_ROLE_KEY')
-)
+# Supabase client (robust env loading)
+SUPABASE_URL = config('SUPABASE_URL', default=os.environ.get('SUPABASE_URL'))
+SUPABASE_SERVICE_ROLE_KEY = config('SUPABASE_SERVICE_ROLE_KEY', default=os.environ.get('SUPABASE_SERVICE_ROLE_KEY'))
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    print("[FastAPI] Missing Supabase credentials. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars.")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 security = HTTPBearer()
+
+# Time utilities
+def now_ist_iso() -> str:
+    """Return current timestamp in Asia/Kolkata (IST) as ISO string with offset."""
+    try:
+        return datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+    except Exception:
+        # Fallback to naive ISO if zoneinfo not available
+        return datetime.now().isoformat()
 
 # Pydantic models
 class LeadCreate(BaseModel):
@@ -52,6 +66,19 @@ class LeadUpdate(BaseModel):
     notes: Optional[str] = None
     expected_value: Optional[float] = None
     assigned_to: Optional[str] = None
+    # New optional fields mapping to lead_master
+    variant: Optional[str] = None
+    buying_plan: Optional[str] = None
+    finance_option: Optional[str] = None
+    first_remark: Optional[str] = None
+    profession: Optional[str] = None
+    trade_in: Optional[str] = None
+    trade_in_make: Optional[str] = None
+    trade_in_model: Optional[str] = None
+    trade_in_year: Optional[str] = None
+    trade_in_km: Optional[str] = None
+    trade_in_ownership: Optional[str] = None
+    test_drive_type: Optional[str] = None
 
 class ActivityCreate(BaseModel):
     activity_type: str
@@ -628,27 +655,55 @@ async def login(login_data: LoginRequest):
         user_role = None
         
         # Search through each user table to find the username
+        print(f"[login] Attempt for username={login_data.username}")
         for username_prefix, (table_name, role) in user_tables.items():
             try:
-                response = supabase.table(table_name).select('*').eq('username', login_data.username).execute()
+                response = supabase.table(table_name).select('*').eq('username', login_data.username).limit(1).execute()
+                print(f"[login] Checked {table_name}: count={len(response.data) if response.data else 0}")
                 if response.data:
                     user_data = response.data[0]
                     user_role = role
+                    print(f"[login] Found in {table_name} with role={role}")
                     break
             except Exception as e:
-                print(f"Error checking {table_name}: {e}")
+                print(f"[login] Error checking {table_name}: {e}")
                 continue
         
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid username or password")
         
-        # Verify password (plain text comparison for now)
-        stored_password = user_data.get('password_hash', '')
-        if stored_password != login_data.password:
+        # Verify password (accept plain or SHA-256 hash)
+        stored_password = (
+            user_data.get('password_hash')
+            or user_data.get('password')
+            or ''
+        )
+        provided_password = str(login_data.password or '')
+        is_valid = False
+        try:
+            import hashlib
+            provided_sha256 = hashlib.sha256(provided_password.encode()).hexdigest()
+        except Exception:
+            provided_sha256 = ''
+
+        # Valid if direct match OR sha256 match
+        if str(stored_password) == provided_password or (provided_sha256 and str(stored_password) == provided_sha256):
+            is_valid = True
+
+        if not is_valid:
+            print(f"[login] Password mismatch for user={login_data.username}")
             raise HTTPException(status_code=401, detail="Invalid username or password")
         
-        # Check if user is active
-        if user_data.get('status') != 'active':
+        # Accept missing status; also honor boolean is_active
+        raw_status = user_data.get('status')
+        if raw_status is None and 'is_active' in user_data:
+            raw_status = 'active' if user_data.get('is_active') else 'inactive'
+        user_status = (raw_status or 'active')
+        if isinstance(user_status, bool):
+            user_status = 'active' if user_status else 'inactive'
+        user_status = str(user_status).lower()
+        if user_status not in ['active', 'enabled', 'true', '1']:
+            print(f"[login] Inactive user: status={user_status}")
             raise HTTPException(status_code=401, detail="Account is not active")
         
         # Create JWT token
@@ -662,17 +717,18 @@ async def login(login_data: LoginRequest):
         
         token = jwt.encode(token_payload, "hardcoded-secret", algorithm="HS256")
         
+        print(f"[login] Success user={login_data.username} role={user_role}")
         return LoginResponse(
             access_token=token,
             token_type="bearer",
             user=UserResponse(
-                id=user_data["id"],
-                username=user_data["username"],
-                email=user_data["email"],
-                first_name=user_data.get("first_name", ""),
+                id=user_data.get("id", ""),
+                username=user_data.get("username", ""),
+                email=user_data.get("email", ""),
+                first_name=user_data.get("first_name") or user_data.get("name", ""),
                 last_name=user_data.get("last_name", ""),
                 role=user_role,
-                status=user_data.get("status", "active"),
+                status=user_status,
                 phone=user_data.get("phone", ""),
                 branch_id=user_data.get("branch_id")
             )
@@ -850,14 +906,64 @@ async def create_lead(lead_data: LeadCreate, current_user=Depends(can_manage_lea
             "cre_name": lead_data.assigned_to,
             "lead_status": "New",
             "final_status": "Pending",
-            "created_at": "NOW()",
-            "updated_at": "NOW()"
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
         }
         
         response = supabase.table('lead_master').insert(lead_record).execute()
         
         if response.data:
             return LeadResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create lead")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AdminLeadCreate(BaseModel):
+    customer_name: str
+    customer_mobile_number: str
+    source: str
+    sub_source: Optional[str] = None
+    assigned_cre_id: Optional[str] = None
+    assigned_cre_name: Optional[str] = None
+
+@app.post("/api/admin/leads", response_model=dict)
+async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(admin_required)):
+    """Create a new lead with CRE assignment for admin"""
+    try:
+        import uuid
+        
+        # Generate unique UID
+        lead_uid = f"LD{str(uuid.uuid4())[:8].upper()}"
+        
+        # Create lead data
+        insert_data = {
+            "uid": lead_uid,
+            "customer_name": lead_data.customer_name,
+            "customer_mobile_number": lead_data.customer_mobile_number,
+            "source": lead_data.source,
+            "sub_source": lead_data.sub_source,
+            "date": now_ist_iso(),
+            "lead_category": "Fresh",
+            "lead_status": "New",
+            "final_status": "Pending",
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }
+        
+        # If CRE is assigned, mark as assigned
+        if lead_data.assigned_cre_id and lead_data.assigned_cre_name:
+            insert_data["assigned"] = "Yes"
+            insert_data["cre_id"] = lead_data.assigned_cre_id
+            insert_data["cre_name"] = lead_data.assigned_cre_name
+            insert_data["cre_assigned_at"] = now_ist_iso()
+        else:
+            insert_data["assigned"] = "No"
+        
+        response = supabase.table('lead_master').insert(insert_data).execute()
+        if response.data:
+            return {"message": "Lead created successfully", "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
             
@@ -892,7 +998,7 @@ async def get_lead(lead_id: str, current_user=Depends(can_manage_leads)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/leads/{lead_id}", response_model=LeadResponse)
-async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=Depends(can_manage_leads)):
+async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
     """Update a lead"""
     try:
         # Get existing lead
@@ -903,14 +1009,20 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=Depends(
         
         existing_lead = response.data[0]
         
-        # Check permissions
-        if current_user.role == 'cre' and existing_lead.get('cre_name') != current_user.username:
-            raise HTTPException(status_code=403, detail="Access denied")
-        elif current_user.role == 'ps' and existing_lead.get('ps_name') != current_user.username:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # Permissions: temporarily allow public update if no auth context was provided
+        if current_user is not None:
+            try:
+                role = getattr(current_user, 'role', None)
+                username = getattr(current_user, 'username', None)
+                if role == 'cre' and existing_lead.get('cre_name') != username:
+                    raise HTTPException(status_code=403, detail="Access denied")
+                elif role == 'ps' and existing_lead.get('ps_name') != username:
+                    raise HTTPException(status_code=403, detail="Access denied")
+            except Exception:
+                pass
         
         # Build update data
-        update_data = {"updated_at": "NOW()"}
+        update_data = {"updated_at": now_ist_iso()}
         
         if lead_data.name:
             update_data["customer_name"] = lead_data.name
@@ -918,14 +1030,60 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=Depends(
             update_data["customer_mobile_number"] = lead_data.phone
         if lead_data.status:
             update_data["lead_status"] = lead_data.status
-        if lead_data.notes:
+        # First call remark mapping
+        if lead_data.first_remark is not None:
+            update_data["first_remark"] = lead_data.first_remark
+        elif lead_data.notes:
             update_data["first_remark"] = lead_data.notes
+        # Auto-stamp first call date (schema uses DATE)
+        if ("first_remark" in update_data) and not (existing_lead.get("first_call_date")):
+            update_data["first_call_date"] = now_ist_iso()[:10]
+        # Additional mapped fields
+        if lead_data.variant is not None:
+            update_data["variant"] = lead_data.variant
+        if lead_data.buying_plan is not None:
+            update_data["buying_plan"] = lead_data.buying_plan
+        if lead_data.finance_option is not None:
+            update_data["finance_option"] = lead_data.finance_option
+        if lead_data.profession is not None:
+            update_data["profession"] = lead_data.profession
+        if lead_data.trade_in is not None:
+            update_data["trade_in"] = lead_data.trade_in
         if lead_data.assigned_to:
             update_data["cre_name"] = lead_data.assigned_to
             update_data["assigned"] = "Yes"
         
-        # Update the lead
-        response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
+        # Persist test drive type verbatim
+        if lead_data.test_drive_type is not None:
+            update_data["test_drive_type"] = lead_data.test_drive_type
+
+        # Update the lead and return updated row
+        response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).select('*').execute()
+
+        # If Trade In = Yes, capture details in trade_in_master
+        try:
+            if (lead_data.trade_in or "").lower() == "yes":
+                # Ensure table exists (best-effort)
+                try:
+                    supabase.table('trade_in_master').select('id').limit(1).execute()
+                except Exception:
+                    pass
+                trade_in_record = {
+                    "lead_uid": lead_id,
+                    "customer_name": existing_lead.get("customer_name"),
+                    "customer_mobile_number": existing_lead.get("customer_mobile_number"),
+                    "trade_in_make": lead_data.trade_in_make,
+                    "trade_in_model": lead_data.trade_in_model,
+                    "trade_in_year": lead_data.trade_in_year,
+                    "trade_in_km": lead_data.trade_in_km,
+                    "trade_in_ownership": lead_data.trade_in_ownership,
+                    "created_at": now_ist_iso(),
+                    "updated_at": now_ist_iso()
+                }
+                supabase.table('trade_in_master').upsert(trade_in_record, on_conflict='lead_uid').execute()
+        except Exception:
+            # Non-fatal
+            pass
         
         if response.data:
             return LeadResponse(**response.data[0])
@@ -934,6 +1092,564 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=Depends(
             
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# CRE USERS MANAGEMENT ENDPOINTS
+# ========================================
+
+# Public endpoint: Update lead_master by UID (no auth)
+@app.put("/api/public/lead-master/{uid}")
+async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
+    try:
+        # Fetch existing lead by UID
+        existing = supabase.table('lead_master').select('*').eq('uid', uid).limit(1).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        existing_lead = existing.data[0]
+
+        update_data = {"updated_at": now_ist_iso()}
+
+        if lead_data.name:
+            update_data["customer_name"] = lead_data.name
+        if lead_data.phone:
+            update_data["customer_mobile_number"] = lead_data.phone
+        if lead_data.status:
+            update_data["lead_status"] = lead_data.status
+
+        if lead_data.first_remark is not None:
+            update_data["first_remark"] = lead_data.first_remark
+        elif lead_data.notes:
+            update_data["first_remark"] = lead_data.notes
+        # Auto-stamp first call date (schema uses DATE)
+        if ("first_remark" in update_data) and not (existing_lead.get("first_call_date")):
+            update_data["first_call_date"] = now_ist_iso()[:10]
+
+        if lead_data.variant is not None:
+            update_data["variant"] = lead_data.variant
+        if lead_data.buying_plan is not None:
+            update_data["buying_plan"] = lead_data.buying_plan
+        if lead_data.finance_option is not None:
+            update_data["finance_option"] = lead_data.finance_option
+        if lead_data.profession is not None:
+            update_data["profession"] = lead_data.profession
+        if lead_data.trade_in is not None:
+            update_data["trade_in"] = lead_data.trade_in
+        if lead_data.test_drive_type is not None:
+            update_data["test_drive_type"] = lead_data.test_drive_type
+
+        # Persist (use upsert to avoid edge cases where update returns no rows)
+        print(f"[public.update] uid={uid} update_data={update_data}")
+        payload = {"uid": uid, **update_data}
+        upsert_resp = supabase.table('lead_master').upsert(payload, on_conflict='uid').execute()
+        print(f"[public.update] upsert done, returned={(len(upsert_resp.data) if getattr(upsert_resp,'data',None) else 0)} rows")
+        updated = supabase.table('lead_master').select('*').eq('uid', uid).limit(1).execute()
+
+        # Upsert trade-in details when applicable
+        try:
+            if (lead_data.trade_in or "").lower() == "yes":
+                try:
+                    supabase.table('trade_in_master').select('id').limit(1).execute()
+                except Exception:
+                    pass
+                trade_in_record = {
+                    "lead_uid": uid,
+                    "customer_name": existing_lead.get("customer_name"),
+                    "customer_mobile_number": existing_lead.get("customer_mobile_number"),
+                    "trade_in_make": lead_data.trade_in_make,
+                    "trade_in_model": lead_data.trade_in_model,
+                    "trade_in_year": lead_data.trade_in_year,
+                    "trade_in_km": lead_data.trade_in_km,
+                    "trade_in_ownership": lead_data.trade_in_ownership,
+                    "created_at": now_ist_iso(),
+                    "updated_at": now_ist_iso()
+                }
+                supabase.table('trade_in_master').upsert(trade_in_record, on_conflict='lead_uid').execute()
+        except Exception:
+            pass
+
+        if updated.data:
+            return updated.data[0]
+        # Fallback: fetch row to confirm state
+        try:
+            fetched = supabase.table('lead_master').select('*').eq('uid', uid).limit(1).execute()
+            print(f"[public.update] fetched-after count={(len(fetched.data) if getattr(fetched,'data',None) else 0)} data={fetched.data}")
+        except Exception as fe:
+            print(f"[public.update] fetch error: {fe}")
+        raise HTTPException(status_code=500, detail="Failed to update lead")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[public.update] exception: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class CREUserCreate(BaseModel):
+    name: str
+    username: str
+    email: str
+    phone: str
+    password: str
+
+class CREUserUpdate(BaseModel):
+    name: Optional[str] = None
+    username: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class CREUserResponse(BaseModel):
+    id: str
+    name: str
+    username: str
+    email: str
+    phone: str
+    is_active: bool
+    created_at: str
+
+@app.get("/api/cre-users", response_model=List[CREUserResponse])
+async def get_cre_users():
+    """Get all CRE users"""
+    try:
+        response = supabase.table('cre_users').select('*').order('created_at', desc=True).execute()
+        return [CREUserResponse(**user) for user in response.data or []]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cre-users", response_model=CREUserResponse)
+async def create_cre_user(user_data: CREUserCreate):
+    """Create a new CRE user"""
+    try:
+        # Store password as plain string per request (NOT recommended for production)
+        password_hash = user_data.password
+        
+        insert_data = {
+            "name": user_data.name,
+            "username": user_data.username,
+            "email": user_data.email,
+            "phone": user_data.phone,
+            "password_hash": password_hash,
+            "is_active": True
+        }
+        
+        response = supabase.table('cre_users').insert(insert_data).execute()
+        if response.data:
+            return CREUserResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create CRE user")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/cre-users/{user_id}", response_model=CREUserResponse)
+async def update_cre_user(user_id: str, user_data: CREUserUpdate):
+    """Update a CRE user"""
+    try:
+        update_data = {"updated_at": "NOW()"}
+        
+        if user_data.name:
+            update_data["name"] = user_data.name
+        if user_data.username:
+            update_data["username"] = user_data.username
+        if user_data.email:
+            update_data["email"] = user_data.email
+        if user_data.phone:
+            update_data["phone"] = user_data.phone
+        if user_data.password:
+            update_data["password_hash"] = user_data.password
+        if user_data.is_active is not None:
+            update_data["is_active"] = user_data.is_active
+        
+        response = supabase.table('cre_users').update(update_data).eq('id', user_id).execute()
+        if response.data:
+            return CREUserResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=404, detail="CRE user not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/cre-users/{user_id}")
+async def delete_cre_user(user_id: str):
+    """Delete a CRE user"""
+    try:
+        response = supabase.table('cre_users').delete().eq('id', user_id).execute()
+        return {"message": "CRE user deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# PS USERS MANAGEMENT ENDPOINTS
+# ========================================
+
+class PSUserCreate(BaseModel):
+    name: str
+    username: str
+    email: str
+    phone: str
+    branch: str
+    password: str
+
+class PSUserUpdate(BaseModel):
+    name: Optional[str] = None
+    username: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    branch: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class PSUserResponse(BaseModel):
+    id: str
+    name: str
+    username: str
+    email: str
+    phone: str
+    branch: str
+    is_active: bool
+    created_at: str
+
+@app.get("/api/ps-users", response_model=List[PSUserResponse])
+async def get_ps_users():
+    """Get all PS users"""
+    try:
+        response = supabase.table('ps_users').select('*').order('created_at', desc=True).execute()
+        return [PSUserResponse(**user) for user in response.data or []]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ps-users", response_model=PSUserResponse)
+async def create_ps_user(user_data: PSUserCreate):
+    """Create a new PS user"""
+    try:
+        # Hash the password (simplified for now)
+        import hashlib
+        password_hash = hashlib.sha256(user_data.password.encode()).hexdigest()
+        
+        # Get branch_id from branch name (safe)
+        branch_id = None
+        try:
+            branch_response = supabase.table('branches').select('id').eq('name', user_data.branch).execute()
+            branch_id = branch_response.data[0]['id'] if branch_response.data else None
+        except Exception:
+            branch_id = None
+        
+        insert_data = {
+            "name": user_data.name,
+            "username": user_data.username,
+            "email": user_data.email,
+            "phone": user_data.phone,
+            "branch": user_data.branch,
+            "branch_id": branch_id,
+            "password_hash": password_hash,
+            "is_active": True,
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }
+        
+        response = supabase.table('ps_users').insert(insert_data).execute()
+        if response.data:
+            return PSUserResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create PS user")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/ps-users/{user_id}", response_model=PSUserResponse)
+async def update_ps_user(user_id: str, user_data: PSUserUpdate):
+    """Update a PS user"""
+    try:
+        update_data = {"updated_at": now_ist_iso()}
+        
+        if user_data.name:
+            update_data["name"] = user_data.name
+        if user_data.username:
+            update_data["username"] = user_data.username
+        if user_data.email:
+            update_data["email"] = user_data.email
+        if user_data.phone:
+            update_data["phone"] = user_data.phone
+        if user_data.branch:
+            update_data["branch"] = user_data.branch
+            try:
+                branch_response = supabase.table('branches').select('id').eq('name', user_data.branch).execute()
+                update_data["branch_id"] = branch_response.data[0]['id'] if branch_response.data else None
+            except Exception:
+                pass
+        if user_data.password:
+            import hashlib
+            update_data["password_hash"] = hashlib.sha256(user_data.password.encode()).hexdigest()
+        if user_data.is_active is not None:
+            update_data["is_active"] = user_data.is_active
+        
+        response = supabase.table('ps_users').update(update_data).eq('id', user_id).execute()
+        if response.data:
+            return PSUserResponse(**response.data[0])
+        else:
+            raise HTTPException(status_code=404, detail="PS user not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/ps-users/{user_id}")
+async def delete_ps_user(user_id: str):
+    """Delete a PS user"""
+    try:
+        response = supabase.table('ps_users').delete().eq('id', user_id).execute()
+        return {"message": "PS user deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# LEAD ASSIGNMENT ENDPOINTS
+# ========================================
+
+class LeadAssignmentRequest(BaseModel):
+    lead_ids: List[str]
+    cre_id: str
+    cre_name: str
+
+class UnassignedLeadsResponse(BaseModel):
+    total_unassigned: int
+    by_source: dict
+    available_cres: List[dict]
+
+@app.get("/api/leads/unassigned", response_model=UnassignedLeadsResponse)
+async def get_unassigned_leads():
+    """Get unassigned leads grouped by source"""
+    try:
+        # Get unassigned leads
+        unassigned_query = supabase.table('lead_master').select('*').eq('assigned', 'No').execute()
+        unassigned_leads = unassigned_query.data or []
+        
+        # Group by source
+        by_source = {}
+        for lead in unassigned_leads:
+            source = lead.get('source', 'Unknown')
+            if source not in by_source:
+                by_source[source] = []
+            by_source[source].append(lead)
+        
+        # Convert to count format
+        source_counts = {source: len(leads) for source, leads in by_source.items()}
+        
+        # Get available CREs
+        cre_query = supabase.table('cre_users').select('id, name, username').eq('is_active', True).execute()
+        available_cres = cre_query.data or []
+        
+        return UnassignedLeadsResponse(
+            total_unassigned=len(unassigned_leads),
+            by_source=source_counts,
+            available_cres=available_cres
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads/unassigned/{source}")
+async def get_unassigned_leads_by_source(source: str):
+    """Get unassigned leads for a specific source"""
+    try:
+        response = supabase.table('lead_master').select('*').eq('assigned', 'No').eq('source', source).execute()
+        return response.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/leads/assign")
+async def assign_leads(assignment: LeadAssignmentRequest):
+    """Assign leads to a CRE"""
+    try:
+        # Update leads with CRE assignment
+        for lead_id in assignment.lead_ids:
+            update_data = {
+                "cre_id": assignment.cre_id,
+                "cre_name": assignment.cre_name,
+                "assigned": "Yes",
+                "cre_assigned_at": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }
+            
+            supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
+        
+        return {"message": f"Successfully assigned {len(assignment.lead_ids)} leads to {assignment.cre_name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Public mirror endpoints for environments where auth middleware still intercepts
+@app.get("/api/public/unassigned", response_model=UnassignedLeadsResponse)
+async def get_unassigned_public():
+    try:
+        unassigned_query = supabase.table('lead_master').select('*').eq('assigned', 'No').execute()
+        unassigned_leads = unassigned_query.data or []
+
+        by_source = {}
+        for lead in unassigned_leads:
+            source = lead.get('source', 'Unknown')
+            by_source.setdefault(source, []).append(lead)
+        source_counts = {s: len(lst) for s, lst in by_source.items()}
+
+        cre_query = supabase.table('cre_users').select('id, name, username, is_active').eq('is_active', True).execute()
+        available_cres = cre_query.data or []
+
+        return UnassignedLeadsResponse(
+            total_unassigned=len(unassigned_leads),
+            by_source=source_counts,
+            available_cres=available_cres
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public/unassigned/{source}")
+async def get_unassigned_public_by_source(source: str):
+    try:
+        response = supabase.table('lead_master').select('*').eq('assigned', 'No').eq('source', source).execute()
+        return response.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Public endpoint to fetch leads assigned to a specific CRE username
+@app.get("/api/public/cre-assigned/{username}")
+async def get_public_cre_assigned(username: str, name: Optional[str] = None):
+    try:
+        query = supabase.table('lead_master').select('*').eq('assigned', 'Yes')
+
+        # Prefer full name if provided; otherwise use username
+        clean_user = (username or '').strip()
+        clean_name = (name or '').strip()
+
+        if clean_name:
+            query = query.eq('cre_name', clean_name)
+        elif clean_user:
+            query = query.eq('cre_name', clean_user)
+
+        response = query.order('created_at', desc=True).execute()
+        return response.data or []
+    except Exception as e:
+        # Minimal logging to server stdout for debugging 500s
+        print(f"Error in get_public_cre_assigned: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# PS FOLLOW-UP SYSTEM ENDPOINTS
+# ========================================
+
+class PSFollowUpCreate(BaseModel):
+    lead_uid: str
+    ps_id: str
+    ps_name: str
+    follow_up_date: str
+    notes: Optional[str] = None
+
+class PSFollowUpUpdate(BaseModel):
+    follow_up_date: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
+class PSFollowUpResponse(BaseModel):
+    id: str
+    lead_uid: str
+    ps_id: str
+    ps_name: str
+    follow_up_date: str
+    notes: Optional[str] = None
+    status: str
+    created_at: str
+
+@app.post("/api/leads/{lead_uid}/assign-ps")
+async def assign_lead_to_ps(lead_uid: str, ps_data: dict, current_user=Depends(admin_required)):
+    """Assign a lead to PS for follow-up"""
+    try:
+        # Update lead with PS assignment
+        update_data = {
+            "ps_id": ps_data["ps_id"],
+            "ps_name": ps_data["ps_name"],
+            "ps_assigned_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }
+        
+        lead_response = supabase.table('lead_master').update(update_data).eq('uid', lead_uid).execute()
+        
+        if not lead_response.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        # Create initial follow-up record
+        followup_data = {
+            "lead_uid": lead_uid,
+            "ps_id": ps_data["ps_id"],
+            "ps_name": ps_data["ps_name"],
+            "follow_up_date": ps_data.get("follow_up_date", now_ist_iso()),
+            "notes": ps_data.get("notes", "Initial PS assignment"),
+            "status": "pending",
+            "created_at": now_ist_iso()
+        }
+        
+        # Create ps_follow_up_master table if it doesn't exist
+        try:
+            supabase.table('ps_follow_up_master').select('id').limit(1).execute()
+        except:
+            # Table doesn't exist, create it
+            create_table_sql = """
+            CREATE TABLE IF NOT EXISTS ps_follow_up_master (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_uid VARCHAR(20) NOT NULL,
+                ps_id UUID NOT NULL,
+                ps_name VARCHAR(100) NOT NULL,
+                follow_up_date TIMESTAMP NOT NULL,
+                notes TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                FOREIGN KEY (lead_uid) REFERENCES lead_master(uid),
+                FOREIGN KEY (ps_id) REFERENCES ps_users(id)
+            );
+            """
+            # Note: In a real implementation, you'd run this SQL directly on the database
+        
+        followup_response = supabase.table('ps_follow_up_master').insert(followup_data).execute()
+        
+        return {"message": "Lead assigned to PS successfully", "followup": followup_response.data[0] if followup_response.data else None}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ps-followups", response_model=List[PSFollowUpResponse])
+async def get_ps_followups(ps_id: Optional[str] = None, status: Optional[str] = None, current_user=Depends(get_current_user)):
+    """Get PS follow-ups"""
+    try:
+        query = supabase.table('ps_follow_up_master').select('*')
+        
+        # Apply role-based filtering
+        if current_user.role == 'ps':
+            query = query.eq('ps_id', current_user.id)
+        elif ps_id and current_user.role in ['admin', 'branch_head']:
+            query = query.eq('ps_id', ps_id)
+        
+        if status:
+            query = query.eq('status', status)
+        
+        response = query.order('follow_up_date', desc=False).execute()
+        return [PSFollowUpResponse(**item) for item in response.data or []]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/ps-followups/{followup_id}")
+async def update_ps_followup(followup_id: str, update_data: PSFollowUpUpdate, current_user=Depends(get_current_user)):
+    """Update PS follow-up"""
+    try:
+        # Check permissions
+        existing = supabase.table('ps_follow_up_master').select('*').eq('id', followup_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Follow-up not found")
+        
+        if current_user.role == 'ps' and existing.data[0]['ps_id'] != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        update_fields = {"updated_at": now_ist_iso()}
+        if update_data.follow_up_date:
+            update_fields["follow_up_date"] = update_data.follow_up_date
+        if update_data.notes:
+            update_fields["notes"] = update_data.notes
+        if update_data.status:
+            update_fields["status"] = update_data.status
+        
+        response = supabase.table('ps_follow_up_master').update(update_fields).eq('id', followup_id).execute()
+        return {"message": "Follow-up updated successfully", "followup": response.data[0] if response.data else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

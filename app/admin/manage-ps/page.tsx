@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Plus, Edit, Trash2, Users } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 interface PSUser {
   id: string
@@ -26,38 +26,8 @@ interface PSUser {
 const branches = ["Mount Road", "Vyasarpadi", "Cuddalore"]
 
 export default function ManagePSPage() {
-  const [psUsers, setPSUsers] = useState<PSUser[]>([
-    {
-      id: "1",
-      name: "Arjun Patel",
-      username: "arjun.ps",
-      email: "arjun@toyota.com",
-      phone: "9876543220",
-      branch: "Mount Road",
-      is_active: true,
-      created_at: "2025-01-15"
-    },
-    {
-      id: "2", 
-      name: "Meera Sharma",
-      username: "meera.ps",
-      email: "meera@toyota.com",
-      phone: "9876543221",
-      branch: "Vyasarpadi",
-      is_active: true,
-      created_at: "2025-01-20"
-    },
-    {
-      id: "3",
-      name: "Karthik Reddy",
-      username: "karthik.ps",
-      email: "karthik@toyota.com",
-      phone: "9876543222",
-      branch: "Cuddalore",
-      is_active: false,
-      created_at: "2025-01-25"
-    }
-  ])
+  const [psUsers, setPSUsers] = useState<PSUser[]>([])
+  const [loading, setLoading] = useState(true)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<PSUser | null>(null)
@@ -70,38 +40,65 @@ export default function ManagePSPage() {
     password: ""
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fetch PS users from API
+  useEffect(() => {
+    fetchPSUsers()
+  }, [])
+
+  const fetchPSUsers = async () => {
+    try {
+      const response = await fetch('/api/ps-users', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      if (response.ok) {
+        const users = await response.json()
+        setPSUsers(users)
+      }
+    } catch (error) {
+      console.error('Error fetching PS users:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (editingUser) {
-      // Update existing user
-      setPSUsers(prev => prev.map(user => 
-        user.id === editingUser.id 
-          ? { ...user, ...formData, is_active: true }
-          : user
-      ))
-    } else {
-      // Add new user
-      const newUser: PSUser = {
-        id: Date.now().toString(),
-        ...formData,
-        is_active: true,
-        created_at: new Date().toISOString().split('T')[0]
+    try {
+      const url = editingUser ? `/api/ps-users/${editingUser.id}` : '/api/ps-users'
+      const method = editingUser ? 'PUT' : 'POST'
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      })
+
+      if (response.ok) {
+        await fetchPSUsers() // Refresh the list
+        // Reset form
+        setFormData({
+          name: "",
+          username: "",
+          email: "",
+          phone: "",
+          branch: "",
+          password: ""
+        })
+        setEditingUser(null)
+        setIsDialogOpen(false)
+      } else {
+        console.error('Failed to save PS user')
       }
-      setPSUsers(prev => [...prev, newUser])
+    } catch (error) {
+      console.error('Error saving PS user:', error)
     }
-    
-    // Reset form
-    setFormData({
-      name: "",
-      username: "",
-      email: "",
-      phone: "",
-      branch: "",
-      password: ""
-    })
-    setEditingUser(null)
-    setIsDialogOpen(false)
   }
 
   const handleEdit = (user: PSUser) => {
@@ -117,16 +114,41 @@ export default function ManagePSPage() {
     setIsDialogOpen(true)
   }
 
-  const handleDelete = (userId: string) => {
-    setPSUsers(prev => prev.filter(user => user.id !== userId))
+  const handleDelete = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/ps-users/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+      if (response.ok) {
+        await fetchPSUsers() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error deleting PS user:', error)
+    }
   }
 
-  const toggleUserStatus = (userId: string) => {
-    setPSUsers(prev => prev.map(user => 
-      user.id === userId 
-        ? { ...user, is_active: !user.is_active }
-        : user
-    ))
+  const toggleUserStatus = async (userId: string) => {
+    try {
+      const user = psUsers.find(u => u.id === userId)
+      if (!user) return
+
+      const response = await fetch(`/api/ps-users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ is_active: !user.is_active })
+      })
+      if (response.ok) {
+        await fetchPSUsers() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error updating PS user status:', error)
+    }
   }
 
   return (
@@ -191,7 +213,7 @@ export default function ManagePSPage() {
                 </div>
                 <div>
                   <Label htmlFor="branch">Branch</Label>
-                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
+                  <Select value={formData.branch} onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select Branch" />
                     </SelectTrigger>
@@ -317,7 +339,7 @@ export default function ManagePSPage() {
                         {user.is_active ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
-                    <TableCell>{user.created_at}</TableCell>
+                    <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
                         <Button

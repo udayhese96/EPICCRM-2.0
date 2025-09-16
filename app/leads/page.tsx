@@ -17,43 +17,24 @@ interface User {
   last_name: string
 }
 
-// Sample leads data
-const SAMPLE_LEADS = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john@example.com",
-    phone: "+1234567890",
-    company: "Tech Corp",
-    status: "New",
-    source: "Website",
-    created_at: "2024-01-15"
-  },
-  {
-    id: "2", 
-    name: "Jane Smith",
-    email: "jane@example.com",
-    phone: "+1234567891",
-    company: "Business Inc",
-    status: "Contacted",
-    source: "Referral",
-    created_at: "2024-01-14"
-  },
-  {
-    id: "3",
-    name: "Mike Johnson",
-    email: "mike@example.com", 
-    phone: "+1234567892",
-    company: "StartUp LLC",
-    status: "Qualified",
-    source: "Social Media",
-    created_at: "2024-01-13"
-  }
-]
+interface Lead {
+  uid: string
+  customer_name: string
+  customer_mobile_number: string
+  source: string
+  lead_status: string
+  final_status: string
+  cre_name?: string
+  ps_name?: string
+  created_at: string
+  assigned: string
+}
 
 export default function LeadsPage() {
   const [user, setUser] = useState<User | null>(null)
+  const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [leadsLoading, setLeadsLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
@@ -95,6 +76,36 @@ export default function LeadsPage() {
 
     checkAuth()
   }, [router])
+
+  useEffect(() => {
+    if (user) {
+      fetchLeads()
+    }
+  }, [user])
+
+  const fetchLeads = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token')
+      const response = await fetch('/api/leads', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      if (response.ok) {
+        const leadsData = await response.json()
+        // For admin dashboard, hide already-assigned leads
+        const filtered = (user?.role === 'admin')
+          ? (leadsData || []).filter((l: any) => String(l.assigned).toLowerCase() !== 'yes')
+          : leadsData
+        setLeads(filtered)
+      }
+    } catch (error) {
+      console.error('Error fetching leads:', error)
+    } finally {
+      setLeadsLoading(false)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -147,30 +158,30 @@ export default function LeadsPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>Total Leads</CardDescription>
-              <CardTitle className="text-2xl">{SAMPLE_LEADS.length}</CardTitle>
+              <CardTitle className="text-2xl">{leads.length}</CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>New</CardDescription>
               <CardTitle className="text-2xl">
-                {SAMPLE_LEADS.filter(l => l.status === 'New').length}
+                {leads.filter(l => l.lead_status === 'New').length}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Contacted</CardDescription>
+              <CardDescription>Assigned</CardDescription>
               <CardTitle className="text-2xl">
-                {SAMPLE_LEADS.filter(l => l.status === 'Contacted').length}
+                {leads.filter(l => l.assigned === 'Yes').length}
               </CardTitle>
             </CardHeader>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Qualified</CardDescription>
+              <CardDescription>Unassigned</CardDescription>
               <CardTitle className="text-2xl">
-                {SAMPLE_LEADS.filter(l => l.status === 'Qualified').length}
+                {leads.filter(l => l.assigned === 'No').length}
               </CardTitle>
             </CardHeader>
           </Card>
@@ -187,52 +198,75 @@ export default function LeadsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Company</TableHead>
-                  <TableHead>Contact</TableHead>
+                  <TableHead>Phone</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Assignment</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {SAMPLE_LEADS.map((lead) => (
-                  <TableRow key={lead.id}>
-                    <TableCell className="font-medium">{lead.name}</TableCell>
-                    <TableCell>{lead.company}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col space-y-1">
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Mail className="h-3 w-3 mr-1" />
-                          {lead.email}
-                        </div>
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Phone className="h-3 w-3 mr-1" />
-                          {lead.phone}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(lead.status)}>
-                        {lead.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{lead.source}</TableCell>
-                    <TableCell>{new Date(lead.created_at).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button variant="outline" size="sm" asChild>
-                          <Link href={`/leads/${lead.id}`}>
-                            <Eye className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      </div>
+                {leadsLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-4">
+                      Loading leads...
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : leads.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-4">
+                      No leads found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  leads.map((lead) => (
+                    <TableRow key={lead.uid}>
+                      <TableCell className="font-medium">{lead.customer_name}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center text-sm">
+                          <Phone className="h-3 w-3 mr-1" />
+                          {lead.customer_mobile_number}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(lead.lead_status || 'New')}>
+                          {lead.lead_status || 'New'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {lead.assigned === 'Yes' ? (
+                          <div className="text-sm">
+                            <div className="text-green-600 font-medium">
+                              ✓ {lead.cre_name || lead.ps_name}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {lead.cre_name ? 'CRE' : 'PS'}
+                            </div>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="text-orange-600">
+                            Unassigned
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{lead.source}</TableCell>
+                      <TableCell>{new Date(lead.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <div className="flex space-x-2">
+                          <Button variant="outline" size="sm" asChild>
+                            <Link href={`/leads/${lead.uid}`}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

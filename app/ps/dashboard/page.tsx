@@ -45,9 +45,9 @@ export default function PSDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
         {/* Welcome Banner */}
-        <div className="bg-teal-50 border-l-4 border-teal-400 p-4 mx-6 mt-6 rounded-r-lg">
+        <div className="bg-gradient-to-r from-teal-50 to-cyan-50 border-l-4 border-teal-400 p-4 mx-6 mt-6 rounded-r-lg">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <CheckCircle className="h-5 w-5 text-teal-400 mr-2" />
@@ -63,7 +63,7 @@ export default function PSDashboard() {
         <div className="px-6 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-3 bg-blue-100 rounded-lg">
+              <div className="p-3 bg-blue-100 rounded-lg shadow-sm">
                 <UserCheck className="h-8 w-8 text-blue-600" />
               </div>
               <div>
@@ -72,11 +72,11 @@ export default function PSDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <Button variant="outline">
+              <Button variant="outline" className="border-blue-200">
                 <BarChart3 className="h-4 w-4 mr-2" />
                 Analytics
               </Button>
-              <Button className="bg-red-500 hover:bg-red-600 text-white">
+              <Button className="bg-red-500 hover:bg-red-600 text-white shadow">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Walk-in Lead
               </Button>
@@ -87,7 +87,7 @@ export default function PSDashboard() {
         <div className="px-6 space-y-6">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <Card className="bg-red-500 text-white">
+            <Card className="bg-gradient-to-br from-rose-500 to-red-500 text-white">
               <CardContent className="p-4">
                 <div>
                   <p className="text-red-100 text-sm">Fresh Leads</p>
@@ -100,8 +100,7 @@ export default function PSDashboard() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card className="bg-amber-500 text-white">
+            <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white">
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-amber-100 text-sm font-medium">17</p>
@@ -111,8 +110,7 @@ export default function PSDashboard() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card className="bg-teal-500 text-white">
+            <Card className="bg-gradient-to-br from-teal-500 to-emerald-500 text-white">
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-4xl font-bold">43</p>
@@ -122,8 +120,7 @@ export default function PSDashboard() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card className="bg-cyan-600 text-white">
+            <Card className="bg-gradient-to-br from-cyan-600 to-indigo-600 text-white">
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-4xl font-bold">12</p>
@@ -132,8 +129,7 @@ export default function PSDashboard() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card className="bg-red-500 text-white">
+            <Card className="bg-gradient-to-br from-red-500 to-rose-600 text-white">
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-4xl font-bold">37</p>

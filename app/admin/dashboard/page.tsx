@@ -62,7 +62,7 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/assign-leads')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">
                   <div className="p-2 bg-orange-100 rounded-lg">

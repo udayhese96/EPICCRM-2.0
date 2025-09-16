@@ -74,26 +74,57 @@ export default function DashboardPage() {
     conversionRate: "12.5%",
   }
 
-  const mockRecentLeads = [
-    {
-      id: 1,
-      first_name: "John",
-      last_name: "Doe",
-      email: "john.doe@example.com",
-      company: "Tech Corp",
-      status: "new",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 2,
-      first_name: "Jane",
-      last_name: "Smith",
-      email: "jane.smith@example.com",
-      company: "Business Inc",
-      status: "contacted",
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-    },
-  ]
+  const [recentLeads, setRecentLeads] = useState<any[]>([])
+  const [dashboardStats, setDashboardStats] = useState({
+    leads: 0,
+    users: 0,
+    branches: 0,
+    conversionRate: "0%"
+  })
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData()
+    }
+  }, [user])
+
+  const fetchDashboardData = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token')
+      
+      // Fetch leads statistics
+      const leadsResponse = await fetch('/api/leads/statistics', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (leadsResponse.ok) {
+        const leadsData = await leadsResponse.json()
+        setDashboardStats(prev => ({
+          ...prev,
+          leads: leadsData.total_leads || 0,
+          conversionRate: `${leadsData.conversion_rate || 0}%`
+        }))
+      }
+
+      // Fetch recent leads (first 5)
+      const recentResponse = await fetch('/api/leads?limit=5', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (recentResponse.ok) {
+        const recentData = await recentResponse.json()
+        setRecentLeads(recentData)
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -181,21 +212,29 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockRecentLeads.map((lead) => (
-                <div key={lead.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex-1">
-                    <h4 className="font-medium">
-                      {lead.first_name} {lead.last_name}
-                    </h4>
-                    <p className="text-sm text-gray-600">{lead.email}</p>
-                    <p className="text-sm text-gray-500">{lead.company}</p>
+              {recentLeads.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">No recent leads</div>
+              ) : (
+                recentLeads.map((lead) => (
+                  <div key={lead.uid} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex-1">
+                      <h4 className="font-medium">
+                        {lead.customer_name}
+                      </h4>
+                      <p className="text-sm text-gray-600">{lead.customer_mobile_number}</p>
+                      <p className="text-sm text-gray-500">{lead.source}</p>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <Badge className={getStatusColor(lead.lead_status || 'new')}>
+                        {(lead.lead_status || 'New').replace("_", " ").toUpperCase()}
+                      </Badge>
+                      <div className="text-sm text-gray-500">
+                        {new Date(lead.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-4">
-                    <Badge className={getStatusColor(lead.status)}>{lead.status.replace("_", " ").toUpperCase()}</Badge>
-                    <div className="text-sm text-gray-500">{new Date(lead.created_at).toLocaleDateString()}</div>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

@@ -36,7 +36,7 @@ interface Lead {
   test_drive?: boolean
   test_drive_type?: string
   trade_in?: string
-  lead_category?: string
+  // removed duplicate lead_category type
   customer_email?: string
   customer_location?: string
   remarks?: string
@@ -136,6 +136,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   
   const [availableVariants, setAvailableVariants] = useState<string[]>([])
   const [availablePS, setAvailablePS] = useState<string[]>([])
+  const [isTradeInDialogOpen, setIsTradeInDialogOpen] = useState(false)
 
   // Reset state whenever a new lead is opened
   useEffect(() => {
@@ -177,19 +178,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   }, [formData.model_interested])
 
   useEffect(() => {
-    // Mock PS data - in real app, fetch from database based on branch
-    const mockPSData = {
-      "Mount Road": ["PS1 Mount Road", "PS2 Mount Road", "PS3 Mount Road"],
-      "Vyasarpadi": ["PS1 Vyasarpadi", "PS2 Vyasarpadi"],
-      "Cuddalore": ["PS1 Cuddalore", "PS2 Cuddalore", "PS3 Cuddalore"]
-    }
-    
-    if (formData.branch && mockPSData[formData.branch as keyof typeof mockPSData]) {
-      setAvailablePS(mockPSData[formData.branch as keyof typeof mockPSData])
-    } else {
-      setAvailablePS([])
-    }
-  }, [formData.branch])
+    // Removing Branch/PS assignment from CRE flow
+    setAvailablePS([])
+  }, [])
 
   const handleStatusChange = (status: "qualified" | "unqualified" | "pending") => {
     setSelectedStatus(status)
@@ -200,8 +191,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     }))
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const isQualifiedWorkflow = lead?.lead_status === "Qualified" && !selectedStatus
+    const pendingMappedStatus = formData.pending_reason === "Call me back" ? "Follow Up" : "Called"
     const updateData = isQualifiedWorkflow
       ? {
           leadId: lead?.id,
@@ -218,18 +210,48 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           status: selectedStatus,
           ...formData,
           updated_at: new Date().toISOString(),
-          // Add specific handling for different statuses
+          // Lead status mapping per business rules
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
                        selectedStatus === "unqualified" ? "Lost" : 
-                       selectedStatus === "pending" ? "Pending" : "Fresh",
-          // Ensure follow up date exists when qualifying so it appears in Pending
+                       selectedStatus === "pending" ? pendingMappedStatus : "Fresh",
+          // Ensure follow up date exists when qualifying so it appears in Follow Up list when needed
           follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : formData.follow_up_date,
-          // Mark as lost if unqualified
           is_lost: selectedStatus === "unqualified",
-          // Mark for follow-up if pending with "Call me back"
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
     
+    try {
+      // Persist to backend (lead uid is the id we use)
+      const resp = await fetch(`/api/leads/${lead?.uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // map modal fields to backend
+          status: updateData.lead_status,
+          first_remark: formData.general_remarks, // First Call Remark
+          profession: formData.profession,
+          variant: formData.variant,
+          buying_plan: formData.buying_plan,
+          finance_option: formData.finance_option,
+          trade_in: formData.trade_in,
+          trade_in_make: formData.trade_in_make,
+          trade_in_model: formData.trade_in_model,
+          trade_in_year: formData.trade_in_year,
+          trade_in_km: formData.trade_in_km,
+          trade_in_ownership: formData.trade_in_ownership,
+          test_drive_type: formData.test_drive_type
+        })
+      })
+      if (!resp.ok) {
+        console.error('Failed to persist lead update')
+      } else {
+        // Force UI to refetch after save so tabs reflect updated status
+        try { await fetch('/api/cre-assigned?username=' + encodeURIComponent(localStorage.getItem('username')||'')) } catch {}
+      }
+    } catch (e) {
+      console.error('Failed to update lead', e)
+    }
+
     onUpdate(updateData)
     onClose()
   }
@@ -237,6 +259,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   if (!lead) return null
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -534,59 +557,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </Card>
               </div>
 
-              {/* Row 2: Branch & PS Assignment */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Building className="h-5 w-5 text-blue-600" />
-                      <span>Branch</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="branch" className="text-sm font-medium mb-2 block">Branch</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Branch" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {branches.map((branch) => (
-                            <SelectItem key={branch} value={branch}>{branch}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <User className="h-5 w-5 text-purple-600" />
-                      <span>Assign to PS</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="ps" className="text-sm font-medium mb-2 block">PS</Label>
-                      <Select 
-                        onValueChange={(value) => setFormData(prev => ({ ...prev, ps_assigned: value }))}
-                        disabled={!formData.branch}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select PS" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availablePS.map((ps) => (
-                            <SelectItem key={ps} value={ps}>{ps}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+              {/* Row 2 removed as per requirement: Branch & Assign PS */}
 
               {/* Row 3: Customer Details & Purchase Planning */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -708,7 +679,10 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   <CardContent className="space-y-6">
                     <div className="space-y-3">
                       <Label htmlFor="trade_in" className="text-sm font-medium mb-2 block">Trade In</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in: value }))}>
+                      <Select onValueChange={(value) => {
+                        setFormData(prev => ({ ...prev, trade_in: value }))
+                        if (value === "Yes") setIsTradeInDialogOpen(true)
+                      }}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select Trade In Option" />
                         </SelectTrigger>
@@ -742,7 +716,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </Card>
               </div>
 
-              {/* Row 6: Lead Category & General Remarks */}
+              {/* Row 6: Lead Category & First Call Remark */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader>
@@ -772,14 +746,14 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
                       <Calendar className="h-5 w-5 text-gray-600" />
-                      <span>General Remarks</span>
+                      <span>First Call Remark</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <div className="space-y-3">
-                      <Label htmlFor="general_remarks" className="text-sm font-medium mb-2 block">General Remarks</Label>
+                      <Label htmlFor="general_remarks" className="text-sm font-medium mb-2 block">First Call Remark</Label>
                       <Textarea 
-                        placeholder="Add general remarks about the lead..."
+                        placeholder="Add first call remark..."
                         value={formData.general_remarks}
                         onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
                         className="min-h-[80px]"
@@ -789,69 +763,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </Card>
               </div>
 
-              {/* Trade In Details (when Yes is selected) */}
-              {formData.trade_in === "Yes" && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Car className="h-5 w-5 text-purple-600" />
-                      <span>Trade In Vehicle Details</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      <div className="space-y-3">
-                        <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make</Label>
-                        <Input 
-                          placeholder="Vehicle Make"
-                          value={formData.trade_in_make}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trade_in_make: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-3">
-                        <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model</Label>
-                        <Input 
-                          placeholder="Vehicle Model"
-                          value={formData.trade_in_model}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trade_in_model: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-3">
-                        <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>
-                        <Input 
-                          type="number"
-                          placeholder="Manufacturing Year"
-                          value={formData.trade_in_year}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-3">
-                        <Label htmlFor="trade_in_km" className="text-sm font-medium mb-2 block">KM Driven</Label>
-                        <Input 
-                          type="number"
-                          placeholder="KM Driven"
-                          value={formData.trade_in_km}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))}
-                        />
-                      </div>
-                      <div className="space-y-3">
-                        <Label htmlFor="trade_in_ownership" className="text-sm font-medium mb-2 block">Ownership Type</Label>
-                        <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_ownership: value }))}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Ownership" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="first">First Owner</SelectItem>
-                            <SelectItem value="second">Second Owner</SelectItem>
-                            <SelectItem value="third">Third Owner</SelectItem>
-                            <SelectItem value="more">More than 3</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+              {/* Trade In details moved to popup */}
             </div>
           )}
 
@@ -956,5 +868,70 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         </div>
       </DialogContent>
     </Dialog>
+    {/* Trade-in Popup */}
+    <Dialog open={isTradeInDialogOpen} onOpenChange={setIsTradeInDialogOpen}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Trade In Vehicle Details</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-3">
+              <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make</Label>
+              <Input 
+                placeholder="Vehicle Make"
+                value={formData.trade_in_make}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_make: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model</Label>
+              <Input 
+                placeholder="Vehicle Model"
+                value={formData.trade_in_model}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_model: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>
+              <Input 
+                type="number"
+                placeholder="Manufacturing Year"
+                value={formData.trade_in_year}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label htmlFor="trade_in_km" className="text-sm font-medium mb-2 block">KM Driven</Label>
+              <Input 
+                type="number"
+                placeholder="KM Driven"
+                value={formData.trade_in_km}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label htmlFor="trade_in_ownership" className="text-sm font-medium mb-2 block">Ownership Type</Label>
+              <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_ownership: value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Ownership" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="first">First Owner</SelectItem>
+                  <SelectItem value="second">Second Owner</SelectItem>
+                  <SelectItem value="third">Third Owner</SelectItem>
+                  <SelectItem value="more">More than 3</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setIsTradeInDialogOpen(false)}>Close</Button>
+            <Button onClick={() => setIsTradeInDialogOpen(false)} className="bg-blue-600 hover:bg-blue-700">Save</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

@@ -28,75 +28,28 @@ export default function LoginPage() {
     console.log("🔐 Login attempt with:", { username, password })
 
     try {
-      let userInfo = null
-      let userRole = ""
-
-      // Try to find user in admin_users table
-      const { data: adminUser, error: adminError } = await supabase
-        .from('admin_users')
-        .select('*')
-        .eq('username', username)
-        .eq('password_hash', password) // Note: In production, use proper password hashing
-        .single()
-
-      if (adminUser && !adminError) {
-        userInfo = adminUser
-        userRole = "admin"
-      } else {
-        // Try CRE users
-        const { data: creUser, error: creError } = await supabase
-          .from('cre_users')
-          .select('*')
-          .eq('username', username)
-          .eq('password_hash', password)
-          .single()
-
-        if (creUser && !creError) {
-          userInfo = creUser
-          userRole = "cre"
-        } else {
-          // Try PS users
-          const { data: psUser, error: psError } = await supabase
-            .from('ps_users')
-            .select('*')
-            .eq('username', username)
-            .eq('password_hash', password)
-            .single()
-
-          if (psUser && !psError) {
-            userInfo = psUser
-            userRole = "ps"
-          } else {
-            // Try Branch Head users
-            const { data: bhUser, error: bhError } = await supabase
-              .from('bh_users')
-              .select('*')
-              .eq('username', username)
-              .eq('password_hash', password)
-              .single()
-
-            if (bhUser && !bhError) {
-              userInfo = bhUser
-              userRole = "branch_head"
-            }
-          }
-        }
+      // Use backend login (no hashes in DB)
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      if (!resp.ok) {
+        throw new Error('Invalid username or password')
       }
+      const data = await resp.json()
 
-      if (!userInfo) {
-        throw new Error("Invalid username or password")
-      }
-
-      console.log("✅ User found:", userInfo, "Role:", userRole)
-
-      // Create session in localStorage (skip Supabase auth)
-      const sessionData = {
-        ...userInfo,
-        role: userRole
-      }
-      localStorage.setItem("supabase_user", JSON.stringify(sessionData))
+      // Save minimal session (no secrets)
+      localStorage.setItem('supabase_user', JSON.stringify({
+        id: data.user.id,
+        username: data.user.username,
+        email: data.user.email,
+        role: data.user.role,
+        name: data.user.first_name || data.user.username
+      }))
 
       // Redirect based on role
+      const userRole = data.user.role
       console.log("🔄 Redirecting based on role:", userRole)
 
       switch (userRole) {

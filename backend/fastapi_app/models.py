@@ -29,10 +29,10 @@ class LeadSource(str, Enum):
 
 # User models
 class UserBase(BaseModel):
-    username: str  # Changed from email to username
+    username: str
     email: EmailStr
-    first_name: str
-    last_name: str
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
     role: UserRole
     phone: Optional[str] = None
     branch_id: Optional[str] = None
@@ -51,9 +51,9 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: str
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    is_active: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 # Authentication models
 class LoginRequest(BaseModel):
