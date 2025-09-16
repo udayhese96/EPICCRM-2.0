@@ -164,6 +164,21 @@ export default function CREDashboard() {
           : lead
       )
     )
+
+    // After update, route the view to the correct tab
+    const newStatus = leadData.lead_status
+    if (newStatus === "Qualified") {
+      setActiveTab("qualified")
+      setPendingCategory("all")
+      setActiveStatus("all")
+    } else if (newStatus === "Pending") {
+      setActiveTab("pending")
+      setPendingCategory("all")
+      setActiveStatus("all")
+    } else if (newStatus === "Lost" || newStatus === "Won") {
+      setActiveTab("wonlost")
+      setActiveStatus("all")
+    }
   }
 
   const openUpdateModal = (lead: Lead) => {
@@ -267,19 +282,20 @@ export default function CREDashboard() {
                 <User className="h-6 w-6 text-teal-600" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">CRE Dashboard</h1>
-                <p className="text-gray-600">Welcome back, {userName}!</p>
+                <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>CRE Dashboard</h1>
+                <p className="text-gray-600" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Welcome back, {userName}!</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <Button className="bg-green-600 hover:bg-green-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Lead
-              </Button>
-              <Button variant="outline">
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Analytics
-              </Button>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={() => window.location.assign('/leads/add')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Lead
+            </Button>
+            <Button variant="outline" onClick={() => window.location.assign('/analytics')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Analytics
+            </Button>
+            <Button variant="ghost" className="text-red-600" onClick={() => { localStorage.clear(); window.location.assign('/auth/login') }} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>Sign Out</Button>
             </div>
           </div>
         </div>
@@ -291,8 +307,8 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-blue-100 text-sm">Fresh Leads</p>
-                    <p className="text-3xl font-bold">{tabCounts.fresh}</p>
+                    <p className="text-blue-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Fresh Leads</p>
+                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>{tabCounts.fresh}</p>
                     <div className="flex items-center space-x-1 mt-2">
                       <Badge variant="secondary" className="bg-blue-600 text-white text-xs">{statusCounts.untouched}</Badge>
                       <Badge variant="secondary" className="bg-blue-400 text-white text-xs">{statusCounts.called}</Badge>
@@ -503,15 +519,15 @@ export default function CREDashboard() {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-gray-50">
-                      <th className="text-left p-3 font-medium text-gray-700">ACTION</th>
-                      <th className="text-left p-3 font-medium text-gray-700">LEAD STATUS</th>
-                      <th className="text-left p-3 font-medium text-gray-700">CALL STATS</th>
-                      <th className="text-left p-3 font-medium text-gray-700">CUSTOMER NAME</th>
-                      <th className="text-left p-3 font-medium text-gray-700">MOBILE</th>
-                      <th className="text-left p-3 font-medium text-gray-700">SOURCE</th>
-                      <th className="text-left p-3 font-medium text-gray-700">CAMPAIGN</th>
-                      <th className="text-left p-3 font-medium text-gray-700">DATE</th>
-                      <th className="text-left p-3 font-medium text-gray-700">UID</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ACTION</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LEAD STATUS</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CALL STATS</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CUSTOMER NAME</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>MOBILE</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>SOURCE</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CAMPAIGN</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>DATE</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>UID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -523,6 +539,7 @@ export default function CREDashboard() {
                               size="sm" 
                               className="bg-red-500 hover:bg-red-600 text-white"
                               onClick={() => openUpdateModal(lead)}
+                              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
                             >
                               Update
                             </Button>

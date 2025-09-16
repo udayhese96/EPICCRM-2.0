@@ -137,6 +137,37 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   const [availableVariants, setAvailableVariants] = useState<string[]>([])
   const [availablePS, setAvailablePS] = useState<string[]>([])
 
+  // Reset state whenever a new lead is opened
+  useEffect(() => {
+    if (!isOpen || !lead) return
+    setSelectedStatus(null)
+    setFormData(prev => ({
+      ...prev,
+      model_interested: "",
+      variant: "",
+      branch: "",
+      ps_assigned: "",
+      profession: "",
+      buying_plan: "",
+      finance_option: "",
+      test_drive: false,
+      test_drive_type: "",
+      trade_in: "",
+      trade_in_make: "",
+      trade_in_model: "",
+      trade_in_year: "",
+      trade_in_km: "",
+      trade_in_ownership: "",
+      follow_up_date: "",
+      lead_category: "",
+      lost_reason: "",
+      pending_reason: "",
+      general_remarks: "",
+      call_status: "",
+      sales_outcome: ""
+    }))
+  }, [isOpen, lead])
+
   useEffect(() => {
     if (formData.model_interested && toyotaModels[formData.model_interested as keyof typeof toyotaModels]) {
       setAvailableVariants(toyotaModels[formData.model_interested as keyof typeof toyotaModels])
@@ -191,6 +222,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? "Pending" : "Fresh",
+          // Ensure follow up date exists when qualifying so it appears in Pending
+          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : formData.follow_up_date,
           // Mark as lost if unqualified
           is_lost: selectedStatus === "unqualified",
           // Mark for follow-up if pending with "Call me back"
@@ -207,7 +240,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-gray-900">
+          <DialogTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
             Update Lead - {lead.uid}
           </DialogTitle>
         </DialogHeader>
@@ -318,7 +351,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           )}
 
           {/* Status Selection or Qualified Follow-up Workflow */}
-          {lead.lead_status !== "Qualified" ? (
+          {!(lead.lead_status === "Qualified" || lead.lead_status === "Won" || lead.lead_status === "Lost") ? (
             <Card>
               <CardHeader>
                 <CardTitle>Lead Status Update</CardTitle>
@@ -353,6 +386,15 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               </CardContent>
             </Card>
           ) : (
+            lead.lead_status !== "Qualified" ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {lead.lead_status === "Won" ? "Lead is Closed as Won" : "Lead is Closed as Lost"}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+            ) : (
             <Card>
               <CardHeader>
                 <CardTitle>Qualified Lead - Follow-up {((lead.followup_count || 0) + 1)} of 5</CardTitle>
@@ -432,10 +474,11 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </div>
               </CardContent>
             </Card>
+            )
           )}
 
-          {/* Qualified Section */}
-          {selectedStatus === "qualified" && (
+          {/* Qualified Section (only when moving from Fresh/Pending to Qualified) */}
+          {selectedStatus === "qualified" && lead.lead_status !== "Qualified" && (
             <div className="space-y-6">
               {/* Row 1: Model Interest & Variant */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -890,23 +933,25 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-6 border-t">
             <Button variant="outline" onClick={onClose}>
-              Cancel
+              Close
             </Button>
-            <Button 
-              onClick={handleSubmit}
-              disabled={(lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date)}
-              className={
-                selectedStatus === "unqualified" ? "bg-red-600 hover:bg-red-700" :
-                selectedStatus === "pending" ? "bg-yellow-600 hover:bg-yellow-700" :
-                "bg-blue-600 hover:bg-blue-700"
-              }
-            >
-              {lead.lead_status === "Qualified" ? "Save Follow-up" :
-               selectedStatus === "qualified" ? "Qualify Lead" :
-               selectedStatus === "unqualified" ? "Mark as Lost" :
-               selectedStatus === "pending" ? "Mark as Pending" :
-               "Update Lead"}
-            </Button>
+            {!(lead.lead_status === "Won" || lead.lead_status === "Lost") && (
+              <Button 
+                onClick={handleSubmit}
+                disabled={(lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date)}
+                className={
+                  selectedStatus === "unqualified" ? "bg-red-600 hover:bg-red-700" :
+                  selectedStatus === "pending" ? "bg-yellow-600 hover:bg-yellow-700" :
+                  "bg-blue-600 hover:bg-blue-700"
+                }
+              >
+                {lead.lead_status === "Qualified" ? "Save Follow-up" :
+                 selectedStatus === "qualified" ? "Qualify Lead" :
+                 selectedStatus === "unqualified" ? "Mark as Lost" :
+                 selectedStatus === "pending" ? "Mark as Pending" :
+                 "Update Lead"}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>

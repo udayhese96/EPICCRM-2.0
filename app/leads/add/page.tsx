@@ -161,15 +161,15 @@ export default function AddLeadPage() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Add New Lead</h1>
-            <p className="text-gray-600">Create a new lead in the system</p>
+            <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>Add New Lead</h1>
+            <p className="text-gray-600" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Create a new lead in the system</p>
           </div>
         </div>
 
         <Card className="max-w-4xl">
           <CardHeader>
-            <CardTitle>Lead Information</CardTitle>
-            <CardDescription>Fill in the details for the new lead</CardDescription>
+            <CardTitle style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>Lead Information</CardTitle>
+            <CardDescription style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Fill in the details for the new lead</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
