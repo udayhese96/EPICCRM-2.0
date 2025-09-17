@@ -28,6 +28,10 @@ ALTER TABLE IF EXISTS public.lead_master
 -- 3) Add new column for location (nullable, text)
 ALTER TABLE IF EXISTS public.lead_master
   ADD COLUMN IF NOT EXISTS customer_location TEXT;
+-- Ensure sixth call fields exist for F1 follow-up mapping
+ALTER TABLE IF EXISTS public.lead_master
+  ADD COLUMN IF NOT EXISTS sixth_call_date TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS sixth_remark TEXT NULL;
 
 -- 4) Create index for location queries
 CREATE INDEX IF NOT EXISTS idx_lead_master_location

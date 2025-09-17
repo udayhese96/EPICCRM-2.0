@@ -28,6 +28,7 @@ interface Lead {
   // Qualification summary fields (optional, shown in header if present)
   model_interested?: string
   variant?: string
+  final_status?: string
   branch?: string
   ps_assigned?: string
   profession?: string
@@ -40,6 +41,19 @@ interface Lead {
   customer_email?: string
   customer_location?: string
   remarks?: string
+  lead_remark?: string
+  first_call_date?: string
+  // Prior follow-up fields for display
+  second_call_date?: string
+  second_remark?: string
+  third_call_date?: string
+  third_remark?: string
+  fourth_call_date?: string
+  fourth_remark?: string
+  fifth_call_date?: string
+  fifth_remark?: string
+  sixth_call_date?: string
+  sixth_remark?: string
 }
 
 interface LeadUpdateModalProps {
@@ -131,7 +145,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     pending_reason: "",
     general_remarks: "",
     call_status: "",
-    sales_outcome: "", // Booked, Retailed, Lost
+    sales_outcome: "Pending", // Booked, Retailed, Lost, Pending
     customer_location: ""
   })
   
@@ -194,20 +208,24 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   }
 
   const handleSubmit = async () => {
-    const isQualifiedWorkflow = lead?.lead_status === "Qualified" && !selectedStatus
+    const leadStatus = (lead?.lead_status || "").trim()
+    const isClosed = leadStatus === "Won" || leadStatus === "Lost"
+    const isFollowUpWorkflow = !isClosed && leadStatus !== "" && !selectedStatus
     // For Pending flow: lead_status must match the exact pending reason chosen.
     // In Fresh tab routing, "Call me back" => Follow Up queue; all others => Called queue.
     const pendingExactStatus = formData.pending_reason || "Called"
-    const updateData = isQualifiedWorkflow
+    const updateData = isFollowUpWorkflow
       ? {
           leadId: lead?.id,
           updated_at: new Date().toISOString(),
           lead_status: formData.sales_outcome === "Lost" ? "Lost" :
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Qualified",
+          final_status: formData.sales_outcome === "Pending" ? "Pending" : (lead?.final_status || "Pending"),
           follow_up_date: formData.follow_up_date || today,
           followup_count: (lead?.followup_count || 0) + 1,
           call_status: formData.call_status,
-          general_remarks: formData.general_remarks
+          general_remarks: formData.general_remarks,
+          followup_note: formData.general_remarks
         }
       : {
           leadId: lead?.id,
@@ -224,11 +242,26 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
 
-    // If a specific call outcome was chosen, save it verbatim in lead_status
-    if (formData.call_status) {
+    // Qualified follow-up: do NOT change lead_status away from "Qualified".
+    // Only handle special case for next follow-up date when Call Me Back is selected.
+    if (formData.call_status && isFollowUpWorkflow) {
+      const normalized = formData.call_status.trim()
+      if (normalized.toLowerCase() === "call me back") {
+        ;(updateData as any).follow_up_date = formData.follow_up_date || today
+      } else if (!formData.follow_up_date) {
+        delete (updateData as any).follow_up_date
+      }
+    }
+
+    // For non-qualified flows (Fresh → Pending/Qualified/Lost), allow call_status to drive lead_status
+    if (formData.call_status && !isFollowUpWorkflow) {
       // Normalize to match option labels shown in menu
       const normalized = formData.call_status.trim()
       ;(updateData as any).lead_status = normalized
+      // If Not Interested via call outcome, close as Lost
+      if (normalized.toLowerCase() === "not interested") {
+        ;(updateData as any).final_status = "Lost"
+      }
       if (normalized.toLowerCase() === "call me back") {
         ;(updateData as any).follow_up_date = formData.follow_up_date || today
       } else if (!formData.follow_up_date) {
@@ -245,7 +278,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         body: JSON.stringify({
           // map modal fields to backend
           status: (updateData as any).lead_status,
-          first_remark: formData.general_remarks, // First Call Remark
+          final_status: (updateData as any).final_status,
+          // first_remark should only be sent during Qualify (first call). For follow-ups, we send followup_note instead
+          first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
           profession: formData.profession,
           variant: formData.variant,
           model_interested: formData.model_interested,
@@ -260,7 +295,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           trade_in_ownership: formData.trade_in_ownership,
           test_drive_type: formData.test_drive_type,
           follow_up_date: (updateData as any).follow_up_date ?? (formData.follow_up_date || undefined),
-          customer_location: formData.customer_location
+          customer_location: formData.customer_location,
+          followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined
         })
       })
       if (!resp.ok) {
@@ -275,6 +311,22 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   }
 
   if (!lead) return null
+  const currentStatus = (lead.lead_status || "").trim()
+  const isClosedStatus = currentStatus === "Won" || currentStatus === "Lost"
+  // Show follow-up ONLY after qualification: non-empty initial remark (lead_remark) and not closed
+  const hasInitialRemark = !!(lead.lead_remark && String(lead.lead_remark).trim())
+  const shouldShowFollowUp = !isClosedStatus && hasInitialRemark
+
+  // Derive completed follow-ups from stored remarks (second..sixth)
+  const followupRemarks = [
+    lead.second_remark,
+    lead.third_remark,
+    lead.fourth_remark,
+    lead.fifth_remark,
+    lead.sixth_remark
+  ]
+  const derivedFollowupCount = followupRemarks.filter(r => !!(r && String(r).trim())).length
+  const nextFollowupNumber = Math.min(derivedFollowupCount + 1, 5)
 
   return (
     <>
@@ -288,7 +340,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
         <div className="space-y-6">
           {/* Lead Details Card */}
-          <Card className="border-l-4 border-l-blue-500">
+            <Card className="border-l-4 border-l-blue-500">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center space-x-2">
                 <User className="h-5 w-5 text-blue-600" />
@@ -325,6 +377,29 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 <div className="flex items-center space-x-2">
                   <span className="font-medium">UID:</span>
                   <Badge variant="secondary">{lead.uid}</Badge>
+                </div>
+              </div>
+
+              {/* Previous Calls - placed right below customer info for visibility */}
+              <div className="rounded-md bg-gradient-to-r from-blue-50 to-indigo-50 p-4 border">
+                <div className="text-sm font-semibold text-blue-900 mb-1">Previous Calls</div>
+                <div className="text-sm text-gray-800 space-y-1">
+                  <div>Qualified: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.lead_remark || lead.remarks || '—'}</div>
+                  {lead.second_remark && (
+                    <div>Follow Up 1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_remark}</div>
+                  )}
+                  {lead.third_remark && (
+                    <div>Follow Up 2: <span className="font-medium">{(lead.third_call_date || '').slice(0,10)}</span> · {lead.third_remark}</div>
+                  )}
+                  {lead.fourth_remark && (
+                    <div>Follow Up 3: <span className="font-medium">{(lead.fourth_call_date || '').slice(0,10)}</span> · {lead.fourth_remark}</div>
+                  )}
+                  {lead.fifth_remark && (
+                    <div>Follow Up 4: <span className="font-medium">{(lead.fifth_call_date || '').slice(0,10)}</span> · {lead.fifth_remark}</div>
+                  )}
+                  {lead.sixth_remark && (
+                    <div>Follow Up 5: <span className="font-medium">{(lead.sixth_call_date || '').slice(0,10)}</span> · {lead.sixth_remark}</div>
+                  )}
                 </div>
               </div>
 
@@ -391,8 +466,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
             </Card>
           )}
 
-          {/* Status Selection or Qualified Follow-up Workflow */}
-          {!(lead.lead_status === "Qualified" || lead.lead_status === "Won" || lead.lead_status === "Lost") ? (
+          {/* Status Selection or Follow-up Workflow */}
+          {!shouldShowFollowUp ? (
             <Card>
               <CardHeader>
                 <CardTitle>Lead Status Update</CardTitle>
@@ -427,25 +502,26 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               </CardContent>
             </Card>
           ) : (
-            lead.lead_status !== "Qualified" ? (
+            isClosedStatus ? (
             <Card>
               <CardHeader>
                 <CardTitle>
-                  {lead.lead_status === "Won" ? "Lead is Closed as Won" : "Lead is Closed as Lost"}
+                  {currentStatus === "Won" ? "Lead is Closed as Won" : "Lead is Closed as Lost"}
                 </CardTitle>
               </CardHeader>
             </Card>
             ) : (
-            <Card>
+              <Card>
               <CardHeader>
-                <CardTitle>Qualified Lead - Follow-up {((lead.followup_count || 0) + 1)} of 5</CardTitle>
+                <CardTitle>Qualified Lead - Follow-up {nextFollowupNumber} of 5</CardTitle>
+                <span className="text-sm text-gray-500">Final: {lead.final_status || 'Pending'} · Status: {currentStatus || 'Qualified'}</span>
               </CardHeader>
               <CardContent>
                 {/* Stepper */}
                 <div className="flex items-center gap-3 mb-4">
                   {[1,2,3,4,5].map((step) => {
-                    const completed = (lead.followup_count || 0) >= step
-                    const current = (lead.followup_count || 0) + 1 === step
+                    const completed = derivedFollowupCount >= step
+                    const current = nextFollowupNumber === step
                     return (
                       <div key={step} className="flex items-center gap-2">
                         {completed ? (
@@ -489,18 +565,21 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     />
                   </div>
                 </div>
+                {/* Previous Calls removed from this section (shown under Customer Information) */}
+
                 {/* Sales Outcome - can close as Won/Lost anytime */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
                   <div className="space-y-2">
                     <Label>Sales Outcome</Label>
                     <Select onValueChange={(value) => setFormData(prev => ({ ...prev, sales_outcome: value }))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select outcome (Booked/Retailed/Lost)" />
+                        <SelectValue placeholder="Select outcome (Booked/Retailed/Lost/Pending)" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Booked">Booked</SelectItem>
                         <SelectItem value="Retailed">Retailed</SelectItem>
                         <SelectItem value="Lost">Lost</SelectItem>
+                        <SelectItem value="Pending">Pending</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

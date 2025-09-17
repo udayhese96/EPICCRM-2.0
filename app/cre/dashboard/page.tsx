@@ -105,8 +105,17 @@ export default function CREDashboard() {
           followup_count: l.followup_count || 0,
           follow_up_date: l.follow_up_date,
           first_call_date: l.first_call_date || l.first_call_done_date,
-          lead_remark: l.lead_remark || l.pending_reason || '',
-          pending_reason: l.pending_reason || ''
+          lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
+          pending_reason: l.pending_reason || '',
+          // Previous call history
+          second_call_date: l.second_call_date,
+          second_remark: l.second_remark,
+          third_call_date: l.third_call_date,
+          third_remark: l.third_remark,
+          fourth_call_date: l.fourth_call_date,
+          fourth_remark: l.fourth_remark,
+          fifth_call_date: l.fifth_call_date,
+          fifth_remark: l.fifth_remark
         }))
         console.log('Mapped leads:', mapped)
         console.log('Sample lead data:', mapped[0])

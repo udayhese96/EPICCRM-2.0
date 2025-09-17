@@ -85,6 +85,10 @@ class LeadUpdate(BaseModel):
     call_status: Optional[str] = None
     # New: location field to store into lead_master.customer_location
     customer_location: Optional[str] = None
+    # New: follow-up note for qualified workflow (maps to second..fifth remarks)
+    followup_note: Optional[str] = None
+    # New: allow updating final_status (Won/Lost/Pending)
+    final_status: Optional[str] = None
 
 class ActivityCreate(BaseModel):
     activity_type: str
@@ -1128,6 +1132,8 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["assigned"] = "Yes"
         if lead_data.customer_location is not None:
             update_data["customer_location"] = lead_data.customer_location
+        if lead_data.final_status is not None:
+            update_data["final_status"] = lead_data.final_status
         
         # Persist test drive type verbatim
         if lead_data.test_drive_type is not None:
@@ -1242,6 +1248,8 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["test_drive_type"] = lead_data.test_drive_type
         if lead_data.customer_location is not None:
             update_data["customer_location"] = lead_data.customer_location
+        if lead_data.final_status is not None:
+            update_data["final_status"] = lead_data.final_status
 
         # Handle follow-up date (accepts YYYY-MM-DD and full ISO; skip empty)
         if lead_data.follow_up_date is not None:
@@ -1252,6 +1260,23 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                     update_data["follow_up_date"] = f"{fud}T{current_time}"
                 else:
                     update_data["follow_up_date"] = fud
+
+        # If a follow-up note is provided (qualified flow), store it in the next available slot
+        if (lead_data.followup_note or "").strip():
+            note = (lead_data.followup_note or "").strip()
+            # Save into the next available slot among second..sixth
+            slots = [
+                ("second_call_date", "second_remark"),
+                ("third_call_date", "third_remark"),
+                ("fourth_call_date", "fourth_remark"),
+                ("fifth_call_date", "fifth_remark"),
+                ("sixth_call_date", "sixth_remark"),
+            ]
+            for date_key, remark_key in slots:
+                if not (existing_lead.get(remark_key) or "").strip():
+                    update_data[date_key] = now_ist_iso()
+                    update_data[remark_key] = note
+                    break
 
         # Persist (use upsert to avoid edge cases where update returns no rows)
         print(f"[public.update] uid={uid} update_data={update_data}")
