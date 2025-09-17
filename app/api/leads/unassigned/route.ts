@@ -4,10 +4,20 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${FASTAPI_URL}/api/public/unassigned`, {
+    const auth = request.headers.get('authorization') || ''
+    // Try private endpoint (requires auth)
+    let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Authorization: auth },
     })
+
+    // Fallback to public mirror if unauthorized
+    if (response.status === 401 || response.status === 403) {
+      response = await fetch(`${FASTAPI_URL}/api/public/unassigned`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    }
 
     if (!response.ok) {
       return NextResponse.json(

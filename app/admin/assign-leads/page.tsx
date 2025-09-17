@@ -75,7 +75,36 @@ export default function AssignLeadsPage() {
       })
       if (response.ok) {
         const data = await response.json()
-        setUnassignedData(data)
+        console.log('[assign-leads] /api/leads/unassigned summary:', data)
+        // Recompute accurate per-source counts using the per-source listing API
+        const sourceList: string[] = Object.keys(data?.by_source || {})
+        const results = await Promise.all(
+          sourceList.map(async (src) => {
+            try {
+              const r = await fetch(`/api/leads/unassigned/${encodeURIComponent(src)}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Cache-Control': 'no-store' }
+              })
+              if (!r.ok) return [src, 0] as const
+              const list: any[] = await r.json()
+              console.log(`[assign-leads] list for ${src}:`, list.length, list)
+              return [src, list.length] as const
+            } catch {
+              return [src, 0] as const
+            }
+          })
+        )
+        const by_source: Record<string, number> = {}
+        let total_unassigned = 0
+        for (const [src, cnt] of results) {
+          if (cnt > 0) by_source[src] = cnt
+          total_unassigned += cnt
+        }
+        console.log('[assign-leads] recomputed by_source:', by_source, 'total:', total_unassigned)
+        setUnassignedData({
+          ...data,
+          by_source,
+          total_unassigned,
+        })
       }
     } catch (error) {
       console.error('Error fetching unassigned leads:', error)
@@ -301,6 +330,8 @@ export default function AssignLeadsPage() {
     )
   }
 
+  const computedTotal = Object.values(unassignedData?.by_source || {}).reduce((t: number, n: any) => t + Number(n || 0), 0)
+
   return (
     <DashboardLayout>
       <DndContext onDragEnd={(e) => { handleDragEnd(e); handleDropOnSource(e) }}>
@@ -415,7 +446,7 @@ export default function AssignLeadsPage() {
                   <Users className="h-6 w-6 text-red-600" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{unassignedData?.total_unassigned || 0}</p>
+                  <p className="text-2xl font-bold">{computedTotal}</p>
                   <p className="text-sm text-gray-600">Total Unassigned Leads</p>
                 </div>
               </div>

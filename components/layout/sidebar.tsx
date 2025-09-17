@@ -86,16 +86,6 @@ const getNavigationForRole = (role: string) => {
           icon: LayoutDashboard,
         },
         {
-          name: "Fresh Leads",
-          href: "/leads",
-          icon: Contact,
-        },
-        {
-          name: "Follow-ups",
-          href: "/leads?tab=followups",
-          icon: Contact,
-        },
-        {
           name: "Analytics",
           href: "/analytics",
           icon: BarChart3,

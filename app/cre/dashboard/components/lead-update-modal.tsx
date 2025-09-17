@@ -131,7 +131,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     pending_reason: "",
     general_remarks: "",
     call_status: "",
-    sales_outcome: "" // Booked, Retailed, Lost
+    sales_outcome: "", // Booked, Retailed, Lost
+    customer_location: ""
   })
   
   const [availableVariants, setAvailableVariants] = useState<string[]>([])
@@ -165,7 +166,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       pending_reason: "",
       general_remarks: "",
       call_status: "",
-      sales_outcome: ""
+      sales_outcome: "",
+      customer_location: ""
     }))
   }, [isOpen, lead])
 
@@ -193,7 +195,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
   const handleSubmit = async () => {
     const isQualifiedWorkflow = lead?.lead_status === "Qualified" && !selectedStatus
-    const pendingMappedStatus = formData.pending_reason === "Call me back" ? "Follow Up" : "Called"
+    // For Pending flow: lead_status must match the exact pending reason chosen.
+    // In Fresh tab routing, "Call me back" => Follow Up queue; all others => Called queue.
+    const pendingExactStatus = formData.pending_reason || "Called"
     const updateData = isQualifiedWorkflow
       ? {
           leadId: lead?.id,
@@ -213,12 +217,25 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           // Lead status mapping per business rules
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
                        selectedStatus === "unqualified" ? "Lost" : 
-                       selectedStatus === "pending" ? pendingMappedStatus : "Fresh",
-          // Ensure follow up date exists when qualifying so it appears in Follow Up list when needed
-          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : formData.follow_up_date,
+                       selectedStatus === "pending" ? pendingExactStatus : "Fresh",
+          // Ensure follow up date exists only when needed
+          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
+
+    // If a specific call outcome was chosen, save it verbatim in lead_status
+    if (formData.call_status) {
+      // Normalize to match option labels shown in menu
+      const normalized = formData.call_status.trim()
+      ;(updateData as any).lead_status = normalized
+      if (normalized.toLowerCase() === "call me back") {
+        ;(updateData as any).follow_up_date = formData.follow_up_date || today
+      } else if (!formData.follow_up_date) {
+        // Avoid sending empty string which breaks backend timestamp parsing
+        delete (updateData as any).follow_up_date
+      }
+    }
     
     try {
       // Persist to backend (lead uid is the id we use)
@@ -227,10 +244,12 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           // map modal fields to backend
-          status: updateData.lead_status,
+          status: (updateData as any).lead_status,
           first_remark: formData.general_remarks, // First Call Remark
           profession: formData.profession,
           variant: formData.variant,
+          model_interested: formData.model_interested,
+          lead_category: formData.lead_category,
           buying_plan: formData.buying_plan,
           finance_option: formData.finance_option,
           trade_in: formData.trade_in,
@@ -239,14 +258,13 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           trade_in_year: formData.trade_in_year,
           trade_in_km: formData.trade_in_km,
           trade_in_ownership: formData.trade_in_ownership,
-          test_drive_type: formData.test_drive_type
+          test_drive_type: formData.test_drive_type,
+          follow_up_date: (updateData as any).follow_up_date ?? (formData.follow_up_date || undefined),
+          customer_location: formData.customer_location
         })
       })
       if (!resp.ok) {
         console.error('Failed to persist lead update')
-      } else {
-        // Force UI to refetch after save so tabs reflect updated status
-        try { await fetch('/api/cre-assigned?username=' + encodeURIComponent(localStorage.getItem('username')||'')) } catch {}
       }
     } catch (e) {
       console.error('Failed to update lead', e)
@@ -582,6 +600,14 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         </SelectContent>
                       </Select>
                     </div>
+                  <div className="space-y-3">
+                    <Label htmlFor="customer_location" className="text-sm font-medium mb-2 block">Location</Label>
+                    <Input 
+                      placeholder="Enter customer location"
+                      value={formData.customer_location}
+                      onChange={(e) => setFormData(prev => ({ ...prev, customer_location: e.target.value }))}
+                    />
+                  </div>
                   </CardContent>
                 </Card>
 

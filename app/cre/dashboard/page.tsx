@@ -18,8 +18,9 @@ import {
   Phone,
   User
 } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { LeadUpdateModal } from "./components/lead-update-modal"
+import { AddLeadModal } from "./components/add-lead-modal"
 
 interface User {
   id: string
@@ -43,6 +44,7 @@ interface Lead {
   final_status?: string
   lead_category?: "Hot" | "Warm" | "Cold"
   follow_up_date?: string // ISO yyyy-mm-dd
+  first_call_date?: string
   pending_reason?: string
   followup_count?: number // 0..5
   call_logs?: { date: string; outcome: string; remarks: string }[]
@@ -56,11 +58,13 @@ export default function CREDashboard() {
   const [user, setUser] = useState<User | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [leads, setLeads] = useState<Lead[]>([])
   const [activeTab, setActiveTab] = useState<string>("fresh")
   const [activeStatus, setActiveStatus] = useState<string>("Fresh")
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
+  const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -71,6 +75,7 @@ export default function CREDashboard() {
   }, [])
 
   const fetchAssignedLeads = async () => {
+    setIsLoading(true)
     try {
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
@@ -78,9 +83,13 @@ export default function CREDashboard() {
       const fullName = parsed?.full_name || parsed?.name || ''
       const qs = new URLSearchParams({ username })
       if (fullName) qs.append('name', fullName)
+      
+      console.log('Fetching leads for:', { username, fullName })
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
+      
       if (response.ok) {
         const data = await response.json()
+        console.log('API Response:', data)
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
           id: l.id || l.uid,
@@ -95,42 +104,28 @@ export default function CREDashboard() {
           lead_category: l.lead_category || 'Warm',
           followup_count: l.followup_count || 0,
           follow_up_date: l.follow_up_date,
-          lead_remark: l.lead_remark || l.pending_reason || ''
+          first_call_date: l.first_call_date || l.first_call_done_date,
+          lead_remark: l.lead_remark || l.pending_reason || '',
+          pending_reason: l.pending_reason || ''
         }))
+        console.log('Mapped leads:', mapped)
+        console.log('Sample lead data:', mapped[0])
         setLeads(mapped)
+      } else {
+        console.error('API Error:', response.status, response.statusText)
       }
     } catch (e) {
       console.error('Failed to fetch assigned leads', e)
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const handleUpdateLead = (leadData: any) => {
     console.log("Updating lead:", leadData)
-    // In real app, send to backend API
-    // Update leads state or refetch data
-    setLeads(prevLeads => 
-      prevLeads.map(lead => 
-        lead.id === leadData.leadId 
-          ? {
-              ...lead,
-              lead_status: leadData.lead_status || lead.lead_status,
-              updated_at: leadData.updated_at,
-              follow_up_date: leadData.follow_up_date ?? lead.follow_up_date,
-              followup_count: leadData.followup_count ?? lead.followup_count,
-              call_logs: leadData.call_status || leadData.general_remarks
-                ? [
-                    ...(lead.call_logs || []),
-                    {
-                      date: (leadData.follow_up_date || new Date().toISOString().slice(0,10)),
-                      outcome: leadData.call_status || "",
-                      remarks: leadData.general_remarks || ""
-                    }
-                  ]
-                : (lead.call_logs || [])
-            }
-          : lead
-      )
-    )
+    
+    // Refetch leads from API to ensure we have the latest data
+    fetchAssignedLeads()
 
     // After update, route the view to the correct tab
     const newStatus = leadData.lead_status
@@ -153,6 +148,26 @@ export default function CREDashboard() {
     setIsUpdateModalOpen(true)
   }
 
+  const handleAddLead = (leadData: any) => {
+    // Add the new lead to the leads list
+    const newLead = {
+      id: leadData.uid,
+      uid: leadData.uid,
+      customer_name: leadData.customer_name,
+      customer_mobile_number: leadData.customer_mobile_number,
+      source: leadData.source,
+      campaign: leadData.campaign || '',
+      date: leadData.created_at?.slice(0,10) || new Date().toISOString().slice(0,10),
+      lead_status: leadData.lead_status,
+      final_status: leadData.final_status,
+      lead_category: leadData.lead_category || 'Warm',
+      followup_count: 0,
+      follow_up_date: leadData.follow_up_date,
+      lead_remark: leadData.remarks || ''
+    }
+    setLeads(prevLeads => [newLead, ...prevLeads])
+  }
+
   // Filter leads based on active tab and status
   const getFilteredLeads = () => {
     let filteredLeads = leads
@@ -166,21 +181,26 @@ export default function CREDashboard() {
       case "followup":
         {
           const today = new Date().toISOString().slice(0,10)
-          filteredLeads = leads.filter(lead => lead.follow_up_date === today)
+        filteredLeads = leads.filter(lead => {
+          if (!lead.follow_up_date) return false
+          // Handle different date formats
+          const followUpDate = lead.follow_up_date.includes('T') 
+            ? lead.follow_up_date.slice(0,10) 
+            : lead.follow_up_date
+          return followUpDate === today
+        })
         }
         break
       case "pending":
-        filteredLeads = leads.filter(lead => {
-          const isQualified = lead.lead_status === "Qualified"
-          const isCallMeBack = lead.lead_status === "Pending" && lead.pending_reason === "Call me back"
-          return isQualified || isCallMeBack
-        })
+        // Pending = final_status Pending AND first call done
+        filteredLeads = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date))
         if (pendingCategory !== "all") {
           filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
         }
         break
       case "qualified":
-        filteredLeads = leads.filter(lead => lead.lead_status === "Qualified")
+        // Qualified tab: lead_status = Qualified AND final_status = Pending
+        filteredLeads = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending"))
         break
       case "wonlost":
         filteredLeads = leads.filter(lead => 
@@ -200,17 +220,16 @@ export default function CREDashboard() {
         // Untouched: lead_status is null/empty AND final_status is Pending
         filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "") === "" && (lead.final_status ?? "").toLowerCase() === "pending")
       } else if (activeStatus === "Called") {
-        // Called: leads explicitly marked as Called
-        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "") === "Called")
+        // Called: any of the non-CMB call outcomes
+        const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+        filteredLeads = filteredLeads.filter(lead => calledSet.has((lead.lead_status ?? "").toLowerCase()))
       } else if (activeStatus === "Follow Up") {
-        // Follow Up: Pending where remark IS 'Call me back'
-        filteredLeads = filteredLeads.filter(lead => (lead.final_status ?? "").toLowerCase() === "pending" && (lead.lead_remark ?? lead.pending_reason ?? "").toLowerCase() === "call me back")
+        // Follow Up: explicit 'Call me back'
+        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "").toLowerCase() === "call me back")
       } else {
         // Fallback to equality for any other status values
         filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
       }
-    } else if (activeStatus !== "all") {
-      filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
     }
 
     // Filter by search term
@@ -228,13 +247,24 @@ export default function CREDashboard() {
   const getTabCounts = () => {
     const today = new Date().toISOString().slice(0,10)
     const isUntouched = (l: Lead) => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending"
-    const isCalled = (l: Lead) => (l.lead_status ?? "") === "Called"
-    const isFollowUp = (l: Lead) => (l.final_status ?? "").toLowerCase() === "pending" && (l.lead_remark ?? l.pending_reason ?? "").toLowerCase() === "call me back"
+    const isCalled = (l: Lead) => {
+      const s = (l.lead_status ?? "").toLowerCase()
+      return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"].includes(s)
+    }
+    const isFollowUp = (l: Lead) => (l.lead_status ?? "").toLowerCase() === "call me back"
     return {
       fresh: leads.filter(l => isUntouched(l) || isCalled(l) || isFollowUp(l)).length,
-      followup: leads.filter(lead => lead.follow_up_date === today).length,
-      pending: leads.filter(lead => (lead.lead_status === "Qualified") || (lead.lead_status === "Pending" && lead.pending_reason === "Call me back")).length,
-      qualified: leads.filter(lead => lead.lead_status === "Qualified").length,
+      followup: leads.filter(lead => {
+        if (!lead.follow_up_date) return false
+        const followUpDate = lead.follow_up_date.includes('T') 
+          ? lead.follow_up_date.slice(0,10) 
+          : lead.follow_up_date
+        return followUpDate === today
+      }).length,
+      // Pending = final_status Pending AND first call done
+      pending: leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date)).length,
+      // Qualified = lead_status Qualified AND final_status Pending
+      qualified: leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending")).length,
       wonlost: leads.filter(lead => ["Won", "Lost"].includes(lead.lead_status)).length,
       events: leads.filter(lead => lead.source === "Event").length
     }
@@ -242,8 +272,9 @@ export default function CREDashboard() {
 
   const getStatusCounts = () => {
     const freshLeadsUntouched = leads.filter(l => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending")
-    const freshLeadsCalled = leads.filter(l => (l.lead_status ?? "") === "Called")
-    const freshLeadsFollowUp = leads.filter(l => (l.final_status ?? "").toLowerCase() === "pending" && (l.lead_remark ?? l.pending_reason ?? "").toLowerCase() === "call me back")
+    const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+    const freshLeadsCalled = leads.filter(l => calledSet.has((l.lead_status ?? "").toLowerCase()))
+    const freshLeadsFollowUp = leads.filter(l => (l.lead_status ?? "").toLowerCase() === "call me back")
     return {
       untouched: freshLeadsUntouched.length,
       called: freshLeadsCalled.length,
@@ -252,9 +283,13 @@ export default function CREDashboard() {
   }
 
   const userName = user?.first_name || user?.name || user?.username || "Kumari"
-  const filteredLeads = getFilteredLeads()
-  const tabCounts = getTabCounts()
-  const statusCounts = getStatusCounts()
+  
+  const filteredLeads = useMemo(() => {
+    return getFilteredLeads()
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory])
+  
+  const tabCounts = useMemo(() => getTabCounts(), [leads])
+  const statusCounts = useMemo(() => getStatusCounts(), [leads])
 
   return (
     <DashboardLayout>
@@ -272,9 +307,13 @@ export default function CREDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-            <Button className="bg-green-600 hover:bg-green-700" onClick={() => window.location.assign('/leads/add')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={() => setIsAddModalOpen(true)} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <Plus className="h-4 w-4 mr-2" />
               Add Lead
+            </Button>
+            <Button variant="outline" onClick={() => fetchAssignedLeads()} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+              <Search className="h-4 w-4 mr-2" />
+              Refresh
             </Button>
             <Button variant="outline" onClick={() => window.location.assign('/analytics')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <BarChart3 className="h-4 w-4 mr-2" />
@@ -511,7 +550,13 @@ export default function CREDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLeads.length > 0 ? (
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={9} className="p-8 text-center text-gray-500">
+                          Loading leads...
+                        </td>
+                      </tr>
+                    ) : filteredLeads.length > 0 ? (
                       filteredLeads.map((lead) => (
                         <tr key={lead.id} className="border-b hover:bg-gray-50">
                           <td className="p-3">
@@ -574,6 +619,14 @@ export default function CREDashboard() {
         onClose={() => setIsUpdateModalOpen(false)}
         lead={selectedLead}
         onUpdate={handleUpdateLead}
+      />
+
+      {/* Add Lead Modal */}
+      <AddLeadModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onAdd={handleAddLead}
+        user={user}
       />
     </DashboardLayout>
   )

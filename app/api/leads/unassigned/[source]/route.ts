@@ -8,11 +8,19 @@ export async function GET(
 ) {
   try {
     const { source } = await params
-    
-    const response = await fetch(`${FASTAPI_URL}/api/public/unassigned/${encodeURIComponent(source)}`, {
+    const auth = request.headers.get('authorization') || ''
+
+    let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned/${encodeURIComponent(source)}`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Authorization: auth },
     })
+
+    if (response.status === 401 || response.status === 403) {
+      response = await fetch(`${FASTAPI_URL}/api/public/unassigned/${encodeURIComponent(source)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    }
 
     if (!response.ok) {
       return NextResponse.json(

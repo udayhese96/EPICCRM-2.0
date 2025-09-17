@@ -67,6 +67,8 @@ class LeadUpdate(BaseModel):
     expected_value: Optional[float] = None
     assigned_to: Optional[str] = None
     # New optional fields mapping to lead_master
+    model_interested: Optional[str] = None
+    lead_category: Optional[str] = None
     variant: Optional[str] = None
     buying_plan: Optional[str] = None
     finance_option: Optional[str] = None
@@ -79,6 +81,10 @@ class LeadUpdate(BaseModel):
     trade_in_km: Optional[str] = None
     trade_in_ownership: Optional[str] = None
     test_drive_type: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    call_status: Optional[str] = None
+    # New: location field to store into lead_master.customer_location
+    customer_location: Optional[str] = None
 
 class ActivityCreate(BaseModel):
     activity_type: str
@@ -928,6 +934,24 @@ class AdminLeadCreate(BaseModel):
     assigned_cre_id: Optional[str] = None
     assigned_cre_name: Optional[str] = None
 
+class CRELeadCreate(BaseModel):
+    uid: str
+    customer_name: str
+    customer_mobile_number: str
+    customer_email: Optional[str] = None
+    customer_location: Optional[str] = None
+    source: str
+    campaign: Optional[str] = None
+    cre_name: str
+    cre_id: str
+    assigned: str = "Yes"
+    lead_status: str = "Fresh"
+    final_status: str = "Pending"
+    lead_category: str = "Warm"
+    remarks: Optional[str] = None
+    created_at: str
+    updated_at: str
+
 @app.post("/api/admin/leads", response_model=dict)
 async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(admin_required)):
     """Create a new lead with CRE assignment for admin"""
@@ -970,6 +994,47 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/cre/leads", response_model=dict)
+async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_current_user)):
+    """Create a new lead for CRE users"""
+    try:
+        # Verify the CRE user is creating the lead for themselves
+        if current_user.role != 'cre' or current_user.id != lead_data.cre_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Create lead record
+        lead_record = {
+            "uid": lead_data.uid,
+            "customer_name": lead_data.customer_name,
+            "customer_mobile_number": lead_data.customer_mobile_number,
+            "customer_email": lead_data.customer_email,
+            "customer_location": lead_data.customer_location,
+            "source": lead_data.source,
+            "campaign": lead_data.campaign,
+            "sub_source": lead_data.campaign,  # Map campaign to sub_source
+            "cre_name": lead_data.cre_name,
+            "cre_id": lead_data.cre_id,
+            "assigned": lead_data.assigned,
+            "lead_status": lead_data.lead_status,
+            "final_status": lead_data.final_status,
+            "lead_category": lead_data.lead_category,
+            "first_remark": lead_data.remarks,
+            "date": now_ist_iso(),
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso(),
+            "cre_assigned_at": now_ist_iso()
+        }
+        
+        response = supabase.table('lead_master').insert(lead_record).execute()
+        
+        if response.data:
+            return {"message": "Lead created successfully", "lead": response.data[0]}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create lead")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: str, current_user=Depends(can_manage_leads)):
     """Get a specific lead by ID or UID"""
@@ -1001,6 +1066,11 @@ async def get_lead(lead_id: str, current_user=Depends(can_manage_leads)):
 async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
     """Update a lead"""
     try:
+        # Debug: log incoming payload (safe fields)
+        try:
+            print("[lead.update] payload:", lead_data.model_dump())
+        except Exception:
+            pass
         # Get existing lead
         response = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
         
@@ -1035,12 +1105,16 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["first_remark"] = lead_data.first_remark
         elif lead_data.notes:
             update_data["first_remark"] = lead_data.notes
-        # Auto-stamp first call date (schema uses DATE)
+        # Auto-stamp first call date (now uses TIMESTAMP)
         if ("first_remark" in update_data) and not (existing_lead.get("first_call_date")):
-            update_data["first_call_date"] = now_ist_iso()[:10]
+            update_data["first_call_date"] = now_ist_iso()
         # Additional mapped fields
         if lead_data.variant is not None:
             update_data["variant"] = lead_data.variant
+        if lead_data.model_interested is not None:
+            update_data["model_interested"] = lead_data.model_interested
+        if lead_data.lead_category is not None:
+            update_data["lead_category"] = lead_data.lead_category
         if lead_data.buying_plan is not None:
             update_data["buying_plan"] = lead_data.buying_plan
         if lead_data.finance_option is not None:
@@ -1052,10 +1126,33 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
         if lead_data.assigned_to:
             update_data["cre_name"] = lead_data.assigned_to
             update_data["assigned"] = "Yes"
+        if lead_data.customer_location is not None:
+            update_data["customer_location"] = lead_data.customer_location
         
         # Persist test drive type verbatim
         if lead_data.test_drive_type is not None:
             update_data["test_drive_type"] = lead_data.test_drive_type
+        
+        # Handle follow-up date (skip empty strings)
+        if lead_data.follow_up_date is not None:
+            fud = (lead_data.follow_up_date or "").strip()
+            if fud:
+                # If client sent only a date (YYYY-MM-DD), add current IST time
+                if len(fud) == 10 and fud.count('-') == 2 and 'T' not in fud:
+                    current_time = now_ist_iso().split('T')[1]
+                    update_data["follow_up_date"] = f"{fud}T{current_time}"
+                else:
+                    update_data["follow_up_date"] = fud
+
+        # Save exact call outcome in lead_status when provided
+        if lead_data.call_status is not None:
+            update_data["lead_status"] = lead_data.call_status
+
+        # Debug: show final update data
+        try:
+            print("[lead.update] update_data:", update_data)
+        except Exception:
+            pass
 
         # Update the lead and return updated row
         response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).select('*').execute()
@@ -1122,12 +1219,17 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["first_remark"] = lead_data.first_remark
         elif lead_data.notes:
             update_data["first_remark"] = lead_data.notes
-        # Auto-stamp first call date (schema uses DATE)
+        # Auto-stamp first call date with full IST timestamp
         if ("first_remark" in update_data) and not (existing_lead.get("first_call_date")):
-            update_data["first_call_date"] = now_ist_iso()[:10]
+            update_data["first_call_date"] = now_ist_iso()
 
         if lead_data.variant is not None:
             update_data["variant"] = lead_data.variant
+        # Map model interested and lead category (missing earlier)
+        if lead_data.model_interested is not None:
+            update_data["model_interested"] = lead_data.model_interested
+        if lead_data.lead_category is not None:
+            update_data["lead_category"] = lead_data.lead_category
         if lead_data.buying_plan is not None:
             update_data["buying_plan"] = lead_data.buying_plan
         if lead_data.finance_option is not None:
@@ -1138,6 +1240,18 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["trade_in"] = lead_data.trade_in
         if lead_data.test_drive_type is not None:
             update_data["test_drive_type"] = lead_data.test_drive_type
+        if lead_data.customer_location is not None:
+            update_data["customer_location"] = lead_data.customer_location
+
+        # Handle follow-up date (accepts YYYY-MM-DD and full ISO; skip empty)
+        if lead_data.follow_up_date is not None:
+            fud = (lead_data.follow_up_date or "").strip()
+            if fud:
+                if len(fud) == 10 and fud.count('-') == 2 and 'T' not in fud:
+                    current_time = now_ist_iso().split('T')[1]
+                    update_data["follow_up_date"] = f"{fud}T{current_time}"
+                else:
+                    update_data["follow_up_date"] = fud
 
         # Persist (use upsert to avoid edge cases where update returns no rows)
         print(f"[public.update] uid={uid} update_data={update_data}")
@@ -1414,27 +1528,31 @@ class UnassignedLeadsResponse(BaseModel):
 
 @app.get("/api/leads/unassigned", response_model=UnassignedLeadsResponse)
 async def get_unassigned_leads():
-    """Get unassigned leads grouped by source"""
+    """Get unassigned leads grouped by source.
+    Business rule: unassigned = (assigned != 'Yes') OR (cre_name is null/empty).
+    """
     try:
-        # Get unassigned leads
-        unassigned_query = supabase.table('lead_master').select('*').eq('assigned', 'No').execute()
-        unassigned_leads = unassigned_query.data or []
-        
+        # Load all leads once; filter in app to support complex OR conditions reliably
+        all_query = supabase.table('lead_master').select('*').execute()
+        rows = all_query.data or []
+        def is_unassigned(lead: dict) -> bool:
+            assigned = (lead.get('assigned') or '').strip()
+            cre_name = (lead.get('cre_name') or '').strip()
+            return assigned != 'Yes' or cre_name == ''
+
+        unassigned_leads = [l for l in rows if is_unassigned(l)]
+
         # Group by source
-        by_source = {}
+        by_source: dict = {}
         for lead in unassigned_leads:
-            source = lead.get('source', 'Unknown')
-            if source not in by_source:
-                by_source[source] = []
-            by_source[source].append(lead)
-        
-        # Convert to count format
-        source_counts = {source: len(leads) for source, leads in by_source.items()}
-        
-        # Get available CREs
+            source = lead.get('source') or 'Unknown'
+            by_source.setdefault(source, []).append(lead)
+
+        source_counts = {src: len(lst) for src, lst in by_source.items()}
+
         cre_query = supabase.table('cre_users').select('id, name, username').eq('is_active', True).execute()
         available_cres = cre_query.data or []
-        
+
         return UnassignedLeadsResponse(
             total_unassigned=len(unassigned_leads),
             by_source=source_counts,
@@ -1445,10 +1563,15 @@ async def get_unassigned_leads():
 
 @app.get("/api/leads/unassigned/{source}")
 async def get_unassigned_leads_by_source(source: str):
-    """Get unassigned leads for a specific source"""
+    """Get unassigned leads for a specific source (see rule above)."""
     try:
-        response = supabase.table('lead_master').select('*').eq('assigned', 'No').eq('source', source).execute()
-        return response.data or []
+        response = supabase.table('lead_master').select('*').eq('source', source).execute()
+        rows = response.data or []
+        def is_unassigned(lead: dict) -> bool:
+            assigned = (lead.get('assigned') or '').strip()
+            cre_name = (lead.get('cre_name') or '').strip()
+            return assigned != 'Yes' or cre_name == ''
+        return [l for l in rows if is_unassigned(l)]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1476,8 +1599,15 @@ async def assign_leads(assignment: LeadAssignmentRequest):
 @app.get("/api/public/unassigned", response_model=UnassignedLeadsResponse)
 async def get_unassigned_public():
     try:
-        unassigned_query = supabase.table('lead_master').select('*').eq('assigned', 'No').execute()
-        unassigned_leads = unassigned_query.data or []
+        # Use the same business rule as the private endpoint
+        all_query = supabase.table('lead_master').select('*').execute()
+        rows = all_query.data or []
+        def is_unassigned(lead: dict) -> bool:
+            assigned = (lead.get('assigned') or '').strip()
+            cre_name = (lead.get('cre_name') or '').strip()
+            return assigned != 'Yes' or cre_name == ''
+
+        unassigned_leads = [l for l in rows if is_unassigned(l)]
 
         by_source = {}
         for lead in unassigned_leads:
@@ -1499,15 +1629,26 @@ async def get_unassigned_public():
 @app.get("/api/public/unassigned/{source}")
 async def get_unassigned_public_by_source(source: str):
     try:
-        response = supabase.table('lead_master').select('*').eq('assigned', 'No').eq('source', source).execute()
-        return response.data or []
+        response = supabase.table('lead_master').select('*').eq('source', source).execute()
+        rows = response.data or []
+        def is_unassigned(lead: dict) -> bool:
+            assigned = (lead.get('assigned') or '').strip()
+            cre_name = (lead.get('cre_name') or '').strip()
+            return assigned != 'Yes' or cre_name == ''
+        return [l for l in rows if is_unassigned(l)]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Test endpoint to check if API is working
+@app.get("/api/test")
+async def test_endpoint():
+    return {"message": "API is working", "timestamp": now_ist_iso()}
 
 # Public endpoint to fetch leads assigned to a specific CRE username
 @app.get("/api/public/cre-assigned/{username}")
 async def get_public_cre_assigned(username: str, name: Optional[str] = None):
     try:
+        print(f"Fetching leads for username: {username}, name: {name}")
         query = supabase.table('lead_master').select('*').eq('assigned', 'Yes')
 
         # Prefer full name if provided; otherwise use username
@@ -1520,10 +1661,34 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
             query = query.eq('cre_name', clean_user)
 
         response = query.order('created_at', desc=True).execute()
+        print(f"Found {len(response.data or [])} leads")
         return response.data or []
     except Exception as e:
         # Minimal logging to server stdout for debugging 500s
         print(f"Error in get_public_cre_assigned: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Alternative endpoint with query parameters
+@app.get("/api/cre-assigned")
+async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] = None):
+    try:
+        print(f"Fetching leads for username: {username}, name: {name}")
+        query = supabase.table('lead_master').select('*').eq('assigned', 'Yes')
+
+        # Prefer full name if provided; otherwise use username
+        clean_user = (username or '').strip()
+        clean_name = (name or '').strip()
+
+        if clean_name:
+            query = query.eq('cre_name', clean_name)
+        elif clean_user:
+            query = query.eq('cre_name', clean_user)
+
+        response = query.order('created_at', desc=True).execute()
+        print(f"Found {len(response.data or [])} leads")
+        return response.data or []
+    except Exception as e:
+        print(f"Error in get_cre_assigned: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
