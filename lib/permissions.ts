@@ -1,5 +1,5 @@
 // Role hierarchy and permissions system
-export type UserRole = "admin" | "branch_head" | "cre" | "ps" | "receptionist"
+export type UserRole = "admin" | "branch_head" | "cre_team_leader" | "cre" | "ps" | "receptionist"
 
 export interface Permission {
   resource: string
@@ -8,8 +8,9 @@ export interface Permission {
 
 // Define role hierarchy (higher roles inherit permissions from lower roles)
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
-  admin: 5,
-  branch_head: 4,
+  admin: 6,
+  branch_head: 5,
+  cre_team_leader: 4,
   cre: 3,
   ps: 2,
   receptionist: 1,
@@ -33,6 +34,15 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { resource: "leads", action: "manage" }, // Full lead management in their branch
     { resource: "reports", action: "read" }, // Branch reports
     { resource: "branches", action: "read" },
+  ],
+  cre_team_leader: [
+    // CRE Team Leader permissions
+    { resource: "qualified_leads", action: "manage" }, // Manage qualified leads
+    { resource: "ps_assignment", action: "manage" }, // Assign leads to PS
+    { resource: "leads", action: "read" }, // Read all leads
+    { resource: "ps_users", action: "read" }, // Read PS users for assignment
+    { resource: "branches", action: "read" }, // Read branches
+    { resource: "reports", action: "read" }, // Read reports
   ],
   cre: [
     // Customer relationship management

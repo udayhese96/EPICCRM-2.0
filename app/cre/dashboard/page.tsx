@@ -52,6 +52,9 @@ interface Lead {
   customer_location?: string
   remarks?: string
   lead_remark?: string
+  branch?: string
+  ps_name?: string
+  ps_id?: string
 }
 
 export default function CREDashboard() {
@@ -65,6 +68,11 @@ export default function CREDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
   const [isLoading, setIsLoading] = useState(false)
+  const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
+  const [dateFrom, setDateFrom] = useState<string>("")
+  const [dateTo, setDateTo] = useState<string>("")
+  const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
+  const [showRangePicker, setShowRangePicker] = useState(false)
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -105,6 +113,9 @@ export default function CREDashboard() {
           followup_count: l.followup_count || 0,
           follow_up_date: l.follow_up_date,
           first_call_date: l.first_call_date || l.first_call_done_date,
+          branch: l.branch,
+          ps_name: l.ps_name,
+          ps_id: l.ps_id,
           lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
           pending_reason: l.pending_reason || '',
           // Previous call history
@@ -181,47 +192,87 @@ export default function CREDashboard() {
   const getFilteredLeads = () => {
     let filteredLeads = leads
 
+    const todayIso = new Date().toISOString().slice(0,10)
+    const startOfWeek = (() => {
+      const d = new Date()
+      const day = d.getDay() || 7
+      if (day !== 1) d.setHours(-24 * (day - 1))
+      return d.toISOString().slice(0,10)
+    })()
+
+    const withinDateFilter = (lead: any) => {
+      const created = (lead.date || '').slice(0,10)
+      if (dateMode === 'All Time') return true
+      if (dateMode === 'Today') return created === todayIso
+      if (dateMode === 'This Week') return created >= startOfWeek && created <= todayIso
+      if (dateMode === 'Date Range') {
+        if (!dateFrom && !dateTo) return true
+        if (dateFrom && !dateTo) return created >= dateFrom
+        if (!dateFrom && dateTo) return created <= dateTo
+        return created >= dateFrom && created <= dateTo
+      }
+      return true
+    }
+
+    const isFinalizedWon = (lead: any) => {
+      const fs = (lead.final_status || '').toLowerCase()
+      return fs === 'booked' || fs === 'retailed'
+    }
+
     // Filter by tab
     switch (activeTab) {
       case "fresh":
         // Fresh view base is all leads; sub-filters below handle subsets
-        filteredLeads = leads
+        filteredLeads = leads.filter(l => !isFinalizedWon(l))
         break
       case "followup":
         {
           const today = new Date().toISOString().slice(0,10)
-        filteredLeads = leads.filter(lead => {
-          if (!lead.follow_up_date) return false
-          // Handle different date formats
-          const followUpDate = lead.follow_up_date.includes('T') 
-            ? lead.follow_up_date.slice(0,10) 
-            : lead.follow_up_date
-          return followUpDate === today
-        })
+          filteredLeads = leads.filter(lead => {
+            if (!lead.follow_up_date) return false
+            const followUpDate = lead.follow_up_date.includes('T')
+              ? lead.follow_up_date.slice(0,10)
+              : lead.follow_up_date
+            // Include due today or overdue
+            return followUpDate <= today
+          })
         }
         break
       case "pending":
         // Pending = final_status Pending AND first call done
-        filteredLeads = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date))
+        filteredLeads = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead))
         if (pendingCategory !== "all") {
           filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
         }
         break
       case "qualified":
         // Qualified tab: lead_status = Qualified AND final_status = Pending
-        filteredLeads = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending"))
+        filteredLeads = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead))
         break
       case "wonlost":
-        filteredLeads = leads.filter(lead => 
-          ["Won", "Lost"].includes(lead.lead_status)
-        )
+        filteredLeads = leads.filter(lead => {
+          const isLost = lead.lead_status === 'Lost'
+          const isBooked = (lead.final_status || '').toLowerCase() === 'booked'
+          const isRetailed = (lead.final_status || '').toLowerCase() === 'retailed'
+          let ok = isLost || isBooked || isRetailed
+          if (!ok) return false
+          if (wonLostFilter === 'Booked') return isBooked
+          if (wonLostFilter === 'Retailed') return isRetailed
+          if (wonLostFilter === 'Lost') return isLost
+          return true
+        })
         break
-      case "events":
-        filteredLeads = leads.filter(lead => lead.source === "Event")
+      case "lostconfirm":
+        filteredLeads = []
+        break
+      case "walkin":
+        filteredLeads = []
         break
       default:
         filteredLeads = leads
     }
+
+    filteredLeads = filteredLeads.filter(withinDateFilter)
 
     // Filter by status within tab using business rules
     if (activeTab === "fresh") {
@@ -255,6 +306,10 @@ export default function CREDashboard() {
 
   const getTabCounts = () => {
     const today = new Date().toISOString().slice(0,10)
+    const isFinalizedWon = (l: Lead) => {
+      const fs = (l.final_status || '').toLowerCase()
+      return fs === 'booked' || fs === 'retailed'
+    }
     const isUntouched = (l: Lead) => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending"
     const isCalled = (l: Lead) => {
       const s = (l.lead_status ?? "").toLowerCase()
@@ -262,20 +317,25 @@ export default function CREDashboard() {
     }
     const isFollowUp = (l: Lead) => (l.lead_status ?? "").toLowerCase() === "call me back"
     return {
-      fresh: leads.filter(l => isUntouched(l) || isCalled(l) || isFollowUp(l)).length,
+      fresh: leads.filter(l => (isUntouched(l) || isCalled(l) || isFollowUp(l)) && !isFinalizedWon(l)).length,
       followup: leads.filter(lead => {
         if (!lead.follow_up_date) return false
         const followUpDate = lead.follow_up_date.includes('T') 
           ? lead.follow_up_date.slice(0,10) 
           : lead.follow_up_date
-        return followUpDate === today
+        return followUpDate <= today && !isFinalizedWon(lead)
       }).length,
       // Pending = final_status Pending AND first call done
-      pending: leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date)).length,
+      pending: leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead)).length,
       // Qualified = lead_status Qualified AND final_status Pending
-      qualified: leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending")).length,
-      wonlost: leads.filter(lead => ["Won", "Lost"].includes(lead.lead_status)).length,
-      events: leads.filter(lead => lead.source === "Event").length
+      qualified: leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
+      wonlost: leads.filter(lead => {
+        const isLost = lead.lead_status === 'Lost'
+        const fs = (lead.final_status || '').toLowerCase()
+        return isLost || fs === 'booked' || fs === 'retailed'
+      }).length,
+      lostconfirm: 0,
+      walkin: 0
     }
   }
 
@@ -403,11 +463,11 @@ export default function CREDashboard() {
             </Card>
           </div>
 
-          {/* Filter Tabs */}
-          <div className="flex flex-wrap gap-2">
+          {/* Filter Tabs (compact) */}
+          <div className="flex flex-wrap gap-2 text-sm">
             <Button 
               variant={activeTab === "fresh" ? "default" : "outline"}
-              className={activeTab === "fresh" ? "bg-gray-900 text-white" : ""}
+              className={`${activeTab === "fresh" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
               onClick={() => setActiveTab("fresh")}
             >
               <Star className="h-4 w-4 mr-2" />
@@ -415,7 +475,7 @@ export default function CREDashboard() {
             </Button>
             <Button 
               variant={activeTab === "followup" ? "default" : "outline"}
-              className={activeTab === "followup" ? "bg-gray-900 text-white" : ""}
+              className={`${activeTab === "followup" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
               onClick={() => setActiveTab("followup")}
             >
               <Calendar className="h-4 w-4 mr-2" />
@@ -423,7 +483,7 @@ export default function CREDashboard() {
             </Button>
             <Button 
               variant={activeTab === "pending" ? "default" : "outline"}
-              className={activeTab === "pending" ? "bg-gray-900 text-white" : ""}
+              className={`${activeTab === "pending" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
               onClick={() => setActiveTab("pending")}
             >
               <AlertCircle className="h-4 w-4 mr-2" />
@@ -431,7 +491,7 @@ export default function CREDashboard() {
             </Button>
             <Button 
               variant={activeTab === "qualified" ? "default" : "outline"}
-              className={activeTab === "qualified" ? "bg-gray-900 text-white" : ""}
+              className={`${activeTab === "qualified" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
               onClick={() => setActiveTab("qualified")}
             >
               <Users className="h-4 w-4 mr-2" />
@@ -439,19 +499,27 @@ export default function CREDashboard() {
             </Button>
             <Button 
               variant={activeTab === "wonlost" ? "default" : "outline"}
-              className={activeTab === "wonlost" ? "bg-gray-900 text-white" : ""}
+              className={`${activeTab === "wonlost" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
               onClick={() => setActiveTab("wonlost")}
             >
               <Trophy className="h-4 w-4 mr-2" />
               Won/Lost Leads ({tabCounts.wonlost})
             </Button>
             <Button 
-              variant={activeTab === "events" ? "default" : "outline"}
-              className={activeTab === "events" ? "bg-gray-900 text-white" : ""}
-              onClick={() => setActiveTab("events")}
+              variant={activeTab === "lostconfirm" ? "default" : "outline"}
+              className={`${activeTab === "lostconfirm" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              onClick={() => setActiveTab("lostconfirm")}
             >
               <Calendar className="h-4 w-4 mr-2" />
-              Event Leads ({tabCounts.events})
+              Lost Confirmation ({tabCounts.lostconfirm})
+            </Button>
+            <Button 
+              variant={activeTab === "walkin" ? "default" : "outline"}
+              className={`${activeTab === "walkin" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              onClick={() => setActiveTab("walkin")}
+            >
+              <User className="h-4 w-4 mr-2" />
+              Walk-in Leads ({tabCounts.walkin})
             </Button>
           </div>
 
@@ -466,16 +534,43 @@ export default function CREDashboard() {
                     {activeTab === "pending" && "Pending Leads"}
                     {activeTab === "qualified" && "Qualified Leads"}
                     {activeTab === "wonlost" && "Won/Lost Leads"}
-                    {activeTab === "events" && "Event Leads"}
+                    {activeTab === "lostconfirm" && "Lost Confirmation"}
+                    {activeTab === "walkin" && "Walk-in Leads"}
                     {" "}({filteredLeads.length})
                   </CardTitle>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <select className="border border-gray-300 rounded px-3 py-1 text-sm">
+                  <select className="border border-gray-300 rounded px-3 py-1 text-sm" value={dateMode} onChange={(e) => setDateMode(e.target.value as any)}>
                     <option>All Time</option>
                     <option>Today</option>
                     <option>This Week</option>
+                    <option>Date Range</option>
                   </select>
+                  {dateMode === "Date Range" && (
+                    <div className="relative">
+                      <Button variant="outline" size="sm" onClick={() => setShowRangePicker(v => !v)} className="h-8">
+                        {dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : 'Select date range'}
+                      </Button>
+                      {showRangePicker && (
+                        <div className="absolute right-0 mt-2 z-20 bg-white border rounded shadow-lg p-3">
+                          <div className="flex gap-2">
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-500">From</label>
+                              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-500">To</label>
+                              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-2 mt-3">
+                            <Button size="sm" variant="ghost" onClick={() => { setDateFrom(""); setDateTo(""); }}>Clear</Button>
+                            <Button size="sm" onClick={() => setShowRangePicker(false)} className="bg-blue-600 hover:bg-blue-700 text-white">Apply</Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="relative">
                     <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                     <Input 
@@ -540,6 +635,22 @@ export default function CREDashboard() {
                 </div>
               )}
 
+              {activeTab === "wonlost" && (
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-sm text-gray-600">Filter:</span>
+                  {(["all", "Booked", "Retailed", "Lost"] as const).map(cat => (
+                    <Badge
+                      key={cat}
+                      variant="secondary"
+                      className={`cursor-pointer ${wonLostFilter === cat ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                      onClick={() => setWonLostFilter(cat)}
+                    >
+                      {cat.toString()}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
               {/* Leads Table */}
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
@@ -554,6 +665,8 @@ export default function CREDashboard() {
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>MOBILE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>SOURCE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CAMPAIGN</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>BRANCH</th>
+                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>GEM</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>DATE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>UID</th>
                     </tr>
@@ -566,7 +679,10 @@ export default function CREDashboard() {
                         </td>
                       </tr>
                     ) : filteredLeads.length > 0 ? (
-                      filteredLeads.map((lead) => (
+                      filteredLeads.map((lead) => {
+                        const followUpDate = lead.follow_up_date ? (lead.follow_up_date.includes('T') ? lead.follow_up_date.slice(0,10) : lead.follow_up_date) : ""
+                        const overdueDays = followUpDate && followUpDate < new Date().toISOString().slice(0,10) ? Math.ceil((Date.now() - new Date(followUpDate + 'T00:00:00').getTime())/86400000) : 0
+                        return (
                         <tr key={lead.id} className="border-b hover:bg-gray-50">
                           <td className="p-3">
                             <Button 
@@ -594,6 +710,9 @@ export default function CREDashboard() {
                               >
                                 {lead.lead_status}
                               </Badge>
+                              {activeTab === "followup" && overdueDays > 0 && (
+                                <Badge variant="secondary" className="ml-2 bg-red-600 text-white">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
+                              )}
                             </td>
                           )}
                           <td className="p-3 text-sm text-gray-600">
@@ -603,10 +722,21 @@ export default function CREDashboard() {
                           <td className="p-3">{lead.customer_mobile_number}</td>
                           <td className="p-3">{lead.source}</td>
                           <td className="p-3">{lead.campaign}</td>
+                          <td className="p-3">
+                            <Badge variant="outline" className="bg-blue-100 text-blue-800">
+                              {lead.branch || '—'}
+                            </Badge>
+                          </td>
+                          <td className="p-3">
+                            <Badge variant="outline" className={lead.ps_name ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}>
+                              {lead.ps_name || 'Unassigned'}
+                            </Badge>
+                          </td>
                           <td className="p-3 text-sm">{lead.date}</td>
                           <td className="p-3 text-sm font-mono">{lead.uid}</td>
                         </tr>
-                      ))
+                        )
+                      })
                     ) : (
                       <tr>
                         <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 8 : 9} className="p-8 text-center text-gray-500">

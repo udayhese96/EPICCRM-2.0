@@ -1,225 +1,396 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { 
-  Plus, 
-  BarChart3, 
-  Star,
-  Calendar,
-  Users,
-  Trophy,
-  AlertCircle,
-  Search,
-  X,
-  CheckCircle,
-  UserCheck,
-  Building
-} from "lucide-react"
-import { useState, useEffect } from "react"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { toast } from "sonner"
+import { Calendar, Phone, MessageSquare, CheckCircle, XCircle } from "lucide-react"
 
-interface User {
+interface PSFollowUp {
   id: string
-  username: string
-  email: string
-  first_name?: string
-  last_name?: string
-  name?: string
-  role: string
+  lead_uid: string
+  ps_name: string
+  ps_id: string
+  ps_branch: string
+  customer_name: string
+  customer_mobile_number: string
+  alternate_mobile_number: string
+  source: string
+  cre_name: string
+  cre_id: string
+  lead_category: string
+  model_interested: string
+  follow_up_date: string
+  lead_status: string
+  first_call_date: string
+  first_call_remark: string
+  second_call_date: string
+  second_call_remark: string
+  third_call_date: string
+  third_call_remark: string
+  fourth_call_date: string
+  fourth_call_remark: string
+  fifth_call_date: string
+  fifth_call_remark: string
+  sixth_call_date: string
+  sixth_call_remark: string
+  seventh_call_date: string
+  seventh_call_remark: string
+  final_status: string
+  test_drive_done: boolean
+  tat: number
+  created_at: string
+  updated_at: string
+  ps_assigned_at: string
+  won_timestamp: string
+  lost_timestamp: string
+  variant: string
+  buying_plan: string
+  finance_option: string
 }
 
 export default function PSDashboard() {
-  const [user, setUser] = useState<User | null>(null)
+  const [followUps, setFollowUps] = useState<PSFollowUp[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [selectedFollowUp, setSelectedFollowUp] = useState<PSFollowUp | null>(null)
+  const [updateDialog, setUpdateDialog] = useState(false)
+  const [callNumber, setCallNumber] = useState(1)
+  const [callRemark, setCallRemark] = useState("")
+  const [followUpDate, setFollowUpDate] = useState("")
+  const [finalStatus, setFinalStatus] = useState("")
 
   useEffect(() => {
-    const supabaseUser = localStorage.getItem("supabase_user")
-    if (supabaseUser) {
-      setUser(JSON.parse(supabaseUser))
-    }
+    loadFollowUps()
   }, [])
 
-  const userName = user?.first_name || user?.name || user?.username || "Mohan"
+  const loadFollowUps = async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/ps-followup', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies
+      })
+      if (response.ok) {
+        const data = await response.json()
+        console.log('PS Follow-ups loaded:', data)
+        setFollowUps(data)
+      } else {
+        const errorData = await response.json()
+        console.error('Error loading follow-ups:', errorData)
+        toast.error(errorData.error || 'Failed to load follow-ups')
+      }
+    } catch (error) {
+      console.error('Error loading follow-ups:', error)
+      toast.error('Failed to load follow-ups')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleUpdateFollowUp = async () => {
+    if (!selectedFollowUp) return
+
+    try {
+      const updateData: any = {
+        id: selectedFollowUp.id,
+        follow_up_date: followUpDate || selectedFollowUp.follow_up_date,
+        final_status: finalStatus || selectedFollowUp.final_status
+      }
+
+      // Add call remark based on call number
+      const callFields = [
+        'first_call_remark',
+        'second_call_remark', 
+        'third_call_remark',
+        'fourth_call_remark',
+        'fifth_call_remark',
+        'sixth_call_remark',
+        'seventh_call_remark'
+      ]
+
+      if (callRemark && callNumber <= callFields.length) {
+        updateData[callFields[callNumber - 1]] = callRemark
+        updateData[`${callFields[callNumber - 1].replace('_remark', '_date')}`] = new Date().toISOString()
+      }
+
+      const response = await fetch('/api/ps-followup', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies
+        body: JSON.stringify(updateData),
+      })
+
+      if (response.ok) {
+        toast.success('Follow-up updated successfully')
+        setUpdateDialog(false)
+        setSelectedFollowUp(null)
+        setCallRemark("")
+        setFollowUpDate("")
+        setFinalStatus("")
+        loadFollowUps()
+      } else {
+        const errorData = await response.json()
+        toast.error(errorData.error || 'Failed to update follow-up')
+      }
+    } catch (error) {
+      console.error('Error updating follow-up:', error)
+      toast.error('Failed to update follow-up')
+    }
+  }
+
+  const openUpdateDialog = (followUp: PSFollowUp) => {
+    setSelectedFollowUp(followUp)
+    setUpdateDialog(true)
+    setCallNumber(1)
+    setCallRemark("")
+    setFollowUpDate(followUp.follow_up_date)
+    setFinalStatus(followUp.final_status)
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'won':
+        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Won</Badge>
+      case 'lost':
+        return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Lost</Badge>
+      case 'pending':
+        return <Badge variant="outline">Pending</Badge>
+      case 'hot':
+        return <Badge className="bg-orange-100 text-orange-800">Hot</Badge>
+      case 'warm':
+        return <Badge className="bg-yellow-100 text-yellow-800">Warm</Badge>
+      default:
+        return <Badge variant="secondary">{status || 'Pending'}</Badge>
+    }
+  }
+
+  const getNextCallNumber = (followUp: PSFollowUp) => {
+    const calls = [
+      followUp.first_call_remark,
+      followUp.second_call_remark,
+      followUp.third_call_remark,
+      followUp.fourth_call_remark,
+      followUp.fifth_call_remark,
+      followUp.sixth_call_remark,
+      followUp.seventh_call_remark
+    ]
+    
+    for (let i = 0; i < calls.length; i++) {
+      if (!calls[i]) return i + 1
+    }
+    return 7
+  }
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A'
+    return new Date(dateString).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
-        {/* Welcome Banner */}
-        <div className="bg-gradient-to-r from-teal-50 to-cyan-50 border-l-4 border-teal-400 p-4 mx-6 mt-6 rounded-r-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <CheckCircle className="h-5 w-5 text-teal-400 mr-2" />
-              <p className="text-teal-700 font-medium">Welcome! Logged in as PS</p>
-            </div>
-            <Button variant="ghost" size="sm">
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">GEM Dashboard</h1>
+          <Button onClick={loadFollowUps} disabled={isLoading}>
+            {isLoading ? 'Loading...' : 'Refresh'}
+          </Button>
         </div>
 
-        {/* Header */}
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-3 bg-blue-100 rounded-lg shadow-sm">
-                <UserCheck className="h-8 w-8 text-blue-600" />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Product Specialist Dashboard</h1>
-                <p className="text-gray-600">Welcome, {userName} | Branch: VANASTHALIPURAM</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <Button variant="outline" className="border-blue-200">
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Analytics
-              </Button>
-              <Button className="bg-red-500 hover:bg-red-600 text-white shadow">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Walk-in Lead
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <div className="px-6 space-y-6">
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <Card className="bg-gradient-to-br from-rose-500 to-red-500 text-white">
-              <CardContent className="p-4">
-                <div>
-                  <p className="text-red-100 text-sm">Fresh Leads</p>
-                  <p className="text-4xl font-bold">2</p>
-                  <div className="flex items-center space-x-1 mt-3">
-                    <Badge variant="secondary" className="bg-red-600 text-white text-xs">0</Badge>
-                    <Badge variant="secondary" className="bg-red-400 text-white text-xs">2</Badge>
-                    <Badge variant="secondary" className="bg-red-600 text-white text-xs">0</Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-amber-100 text-sm font-medium">17</p>
-                  <p className="text-2xl font-bold">TODAY'S</p>
-                  <p className="text-lg font-semibold">FOLLOW-UPS</p>
-                  <CheckCircle className="h-6 w-6 mx-auto mt-2 text-amber-200" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-teal-500 to-emerald-500 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-4xl font-bold">43</p>
-                  <p className="text-lg font-semibold">PENDING</p>
-                  <p className="text-lg font-semibold">LEADS</p>
-                  <CheckCircle className="h-6 w-6 mx-auto mt-2 text-teal-200" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-cyan-600 to-indigo-600 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-4xl font-bold">12</p>
-                  <p className="text-lg font-semibold">WON LEADS</p>
-                  <Trophy className="h-8 w-8 mx-auto mt-2 text-cyan-200" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-red-500 to-rose-600 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-4xl font-bold">37</p>
-                  <p className="text-lg font-semibold">LOST LEADS</p>
-                  <X className="h-8 w-8 mx-auto mt-2 text-red-200" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Filter Tabs */}
-          <div className="flex flex-wrap gap-2">
-            <Button variant="default" className="bg-gray-900 text-white">
-              <Star className="h-4 w-4 mr-2" />
-              Fresh Leads
-            </Button>
-            <Button variant="outline">
-              <Calendar className="h-4 w-4 mr-2" />
-              Today's Follow-ups
-            </Button>
-            <Button variant="outline">
-              <AlertCircle className="h-4 w-4 mr-2" />
-              Pending Leads
-            </Button>
-            <Button variant="outline">
-              <Trophy className="h-4 w-4 mr-2" />
-              Won/Lost
-            </Button>
-            <Button variant="outline">
-              <Calendar className="h-4 w-4 mr-2" />
-              Event Leads
-            </Button>
-            <Button variant="outline">
-              <Building className="h-4 w-4 mr-2" />
-              Walkin Leads
-            </Button>
-          </div>
-
-          {/* Filter Controls */}
-          <div className="flex items-center space-x-3">
-            <Button className="bg-red-500 hover:bg-red-600 text-white">
-              All Time
-            </Button>
-            <Button variant="outline" size="sm">
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Fresh Leads Section */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-xl">Fresh Leads (2)</CardTitle>
-                <div className="relative">
-                  <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <Input 
-                    placeholder="Search by UID, name..." 
-                    className="pl-10 w-64"
-                  />
-                  <Button size="sm" variant="outline" className="ml-2">
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Total Assigned</CardTitle>
             </CardHeader>
             <CardContent>
-              {/* Status Tabs */}
-              <div className="flex space-x-2 mb-6">
-                <Badge variant="secondary" className="bg-gray-100">
-                  Untouched <span className="ml-1 bg-gray-300 px-1 rounded">0</span>
-                </Badge>
-                <Badge variant="secondary" className="bg-gray-100">
-                  Called <span className="ml-1 bg-gray-300 px-1 rounded">2</span>
-                </Badge>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-800">
-                  Follow Up <span className="ml-1 bg-amber-300 px-1 rounded">0</span>
-                </Badge>
+              <div className="text-2xl font-bold">{followUps.length}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Pending</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {followUps.filter(f => f.final_status?.toLowerCase() === 'pending').length}
               </div>
-
-              {/* No Leads Message */}
-              <div className="text-center py-12">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <AlertCircle className="h-8 w-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No untouched leads</h3>
-                <p className="text-gray-500">All your fresh leads have been processed.</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Won</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {followUps.filter(f => f.final_status?.toLowerCase() === 'won').length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Lost</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {followUps.filter(f => f.final_status?.toLowerCase() === 'lost').length}
               </div>
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Assigned Leads</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Lead UID</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Mobile</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Follow-up Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Next Call</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {followUps.map((followUp) => (
+                  <TableRow key={followUp.id}>
+                    <TableCell className="font-medium">{followUp.lead_uid}</TableCell>
+                    <TableCell>{followUp.customer_name}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Phone className="w-3 h-3" />
+                        {followUp.customer_mobile_number}
+                      </div>
+                    </TableCell>
+                    <TableCell>{followUp.model_interested}</TableCell>
+                    <TableCell>{formatDate(followUp.follow_up_date)}</TableCell>
+                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        Call #{getNextCallNumber(followUp)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        onClick={() => openUpdateDialog(followUp)}
+                      >
+                        <MessageSquare className="w-3 h-3 mr-1" />
+                        Update
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Update Follow-up</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {selectedFollowUp && (
+                <div className="space-y-2">
+                  <div>
+                    <Label>Lead UID: {selectedFollowUp.lead_uid}</Label>
+                  </div>
+                  <div>
+                    <Label>Customer: {selectedFollowUp.customer_name}</Label>
+                  </div>
+                  <div>
+                    <Label>Mobile: {selectedFollowUp.customer_mobile_number}</Label>
+                  </div>
+                </div>
+              )}
+              
+              <div>
+                <Label htmlFor="callNumber">Call Number</Label>
+                <Select value={callNumber.toString()} onValueChange={(value) => setCallNumber(parseInt(value))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5, 6, 7].map((num) => (
+                      <SelectItem key={num} value={num.toString()}>
+                        Call #{num}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="callRemark">Call Remark</Label>
+                <Textarea
+                  id="callRemark"
+                  value={callRemark}
+                  onChange={(e) => setCallRemark(e.target.value)}
+                  placeholder="Enter call details..."
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="followUpDate">Next Follow-up Date</Label>
+                <Input
+                  id="followUpDate"
+                  type="datetime-local"
+                  value={followUpDate}
+                  onChange={(e) => setFollowUpDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="finalStatus">Final Status</Label>
+                <Select value={finalStatus} onValueChange={setFinalStatus}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pending">Pending</SelectItem>
+                    <SelectItem value="Hot">Hot</SelectItem>
+                    <SelectItem value="Warm">Warm</SelectItem>
+                    <SelectItem value="Won">Won</SelectItem>
+                    <SelectItem value="Lost">Lost</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setUpdateDialog(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleUpdateFollowUp}>
+                  Update Follow-up
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   )

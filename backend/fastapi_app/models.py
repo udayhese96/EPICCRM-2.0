@@ -6,6 +6,7 @@ from enum import Enum
 class UserRole(str, Enum):
     admin = "admin"
     branch_head = "branch_head"
+    cre_team_leader = "cre_team_leader"
     cre = "cre"
     ps = "ps"
     receptionist = "receptionist"

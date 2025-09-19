@@ -18,7 +18,17 @@ export async function POST(request: NextRequest) {
     }
     try {
       const data = JSON.parse(text)
-      return NextResponse.json(data)
+      const res = NextResponse.json(data)
+      if (data.access_token) {
+        res.cookies.set('access_token', data.access_token, {
+          httpOnly: true,
+          sameSite: 'lax',
+          path: '/',
+          secure: false, // set true in production with HTTPS
+          maxAge: 60 * 60 * 24,
+        })
+      }
+      return res
     } catch {
       return NextResponse.json({ ok: true }, { status: 200 })
     }

@@ -39,13 +39,14 @@ export default function LoginPage() {
       }
       const data = await resp.json()
 
-      // Save minimal session (no secrets)
+      // Save minimal session with access token
       localStorage.setItem('supabase_user', JSON.stringify({
         id: data.user.id,
         username: data.user.username,
         email: data.user.email,
         role: data.user.role,
-        name: data.user.first_name || data.user.username
+        name: data.user.first_name || data.user.username,
+        access_token: data.access_token
       }))
 
       // Redirect based on role
@@ -60,6 +61,10 @@ export default function LoginPage() {
         case "branch_head":
           console.log("🏢 Redirecting to branch head dashboard")
           router.push("/branch-head/dashboard")
+          break
+        case "cre_team_leader":
+          console.log("🧭 Redirecting to CRE Team Leader dashboard")
+          router.push("/cre-team-leader/dashboard")
           break
         case "cre":
           console.log("📊 Redirecting to CRE dashboard")

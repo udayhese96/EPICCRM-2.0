@@ -91,6 +91,24 @@ const getNavigationForRole = (role: string) => {
           icon: BarChart3,
         },
       ]
+    case "cre_team_leader":
+      return [
+        {
+          name: "CRE Team Leader Dashboard",
+          href: "/cre-team-leader/dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Qualified Leads",
+          href: "/cre-team-leader/qualified",
+          icon: Contact,
+        },
+        {
+          name: "Analytics",
+          href: "/analytics",
+          icon: BarChart3,
+        },
+      ]
     case "ps":
       return [
         {

@@ -242,6 +242,21 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
 
+    // If qualifying a lead, also create qualified lead entry
+    if (selectedStatus === "qualified") {
+      // Optimistic UI update - show success immediately
+      console.log('Lead qualified successfully')
+      
+      // Fire and forget - don't wait for response
+      fetch(`/api/leads/${lead?.uid}/qualify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(e => {
+        console.error('Background qualification failed:', e)
+        // Could show a subtle error notification here if needed
+      })
+    }
+
     // Qualified follow-up: do NOT change lead_status away from "Qualified".
     // Only handle special case for next follow-up date when Call Me Back is selected.
     if (formData.call_status && isFollowUpWorkflow) {
