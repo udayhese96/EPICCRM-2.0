@@ -112,7 +112,7 @@ const getNavigationForRole = (role: string) => {
     case "ps":
       return [
         {
-          name: "PS Dashboard", 
+          name: "GEM Dashboard", 
           href: "/ps/dashboard",
           icon: LayoutDashboard,
         },

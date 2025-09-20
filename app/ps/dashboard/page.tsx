@@ -206,89 +206,108 @@ export default function PSDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">GEM Dashboard</h1>
-          <Button onClick={loadFollowUps} disabled={isLoading}>
+      <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
+          <div className="flex items-center justify-between">
+              <div>
+            <h1 className="text-3xl font-bold text-gray-800">
+              GEM Dashboard
+            </h1>
+            <p className="text-gray-600 mt-1">Manage your assigned leads and follow-ups</p>
+              </div>
+          <Button 
+            onClick={loadFollowUps} 
+            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+          >
             {isLoading ? 'Loading...' : 'Refresh'}
-          </Button>
+              </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <Card className="bg-white border-l-4 border-blue-500 shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total Assigned</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600">Total Assigned</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{followUps.length}</div>
-            </CardContent>
-          </Card>
-          <Card>
+              <div className="text-3xl font-bold text-gray-800">{followUps.length}</div>
+              <p className="text-gray-500 text-sm">All leads assigned to you</p>
+              </CardContent>
+            </Card>
+          <Card className="bg-white border-l-4 border-yellow-500 shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Pending</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600">Pending</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="text-3xl font-bold text-gray-800">
                 {followUps.filter(f => f.final_status?.toLowerCase() === 'pending').length}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
+                </div>
+              <p className="text-gray-500 text-sm">Awaiting follow-up</p>
+              </CardContent>
+            </Card>
+          <Card className="bg-white border-l-4 border-green-500 shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Won</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600">Won</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="text-3xl font-bold text-gray-800">
                 {followUps.filter(f => f.final_status?.toLowerCase() === 'won').length}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
+                </div>
+              <p className="text-gray-500 text-sm">Successful conversions</p>
+              </CardContent>
+            </Card>
+          <Card className="bg-white border-l-4 border-red-500 shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Lost</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600">Lost</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="text-3xl font-bold text-gray-800">
                 {followUps.filter(f => f.final_status?.toLowerCase() === 'lost').length}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                </div>
+              <p className="text-gray-500 text-sm">Unsuccessful leads</p>
+              </CardContent>
+            </Card>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Assigned Leads</CardTitle>
+        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
+          <CardHeader className="bg-gray-800 text-white">
+            <CardTitle className="text-xl font-bold">Assigned Leads</CardTitle>
+            <p className="text-gray-300 text-sm">Manage and update your assigned leads</p>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Lead UID</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Mobile</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Follow-up Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Next Call</TableHead>
-                  <TableHead>Actions</TableHead>
+                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
+                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {followUps.map((followUp) => (
-                  <TableRow key={followUp.id}>
-                    <TableCell className="font-medium">{followUp.lead_uid}</TableCell>
-                    <TableCell>{followUp.customer_name}</TableCell>
+                {followUps.map((followUp, index) => (
+                  <TableRow 
+                    key={followUp.id} 
+                    className={`hover:bg-gray-50 transition-colors ${
+                      index % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+                    }`}
+                  >
+                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
+                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Phone className="w-3 h-3" />
-                        {followUp.customer_mobile_number}
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-500" />
+                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
                       </div>
                     </TableCell>
-                    <TableCell>{followUp.model_interested}</TableCell>
-                    <TableCell>{formatDate(followUp.follow_up_date)}</TableCell>
+                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
+                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
                     <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">
+                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">
                         Call #{getNextCallNumber(followUp)}
                       </Badge>
                     </TableCell>
@@ -296,10 +315,11 @@ export default function PSDashboard() {
                       <Button
                         size="sm"
                         onClick={() => openUpdateDialog(followUp)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                       >
                         <MessageSquare className="w-3 h-3 mr-1" />
                         Update
-                      </Button>
+            </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -342,7 +362,7 @@ export default function PSDashboard() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+          </div>
 
               <div>
                 <Label htmlFor="callRemark">Call Remark</Label>
@@ -352,11 +372,11 @@ export default function PSDashboard() {
                   onChange={(e) => setCallRemark(e.target.value)}
                   placeholder="Enter call details..."
                 />
-              </div>
+          </div>
 
               <div>
                 <Label htmlFor="followUpDate">Next Follow-up Date</Label>
-                <Input
+                  <Input 
                   id="followUpDate"
                   type="datetime-local"
                   value={followUpDate}
@@ -386,9 +406,9 @@ export default function PSDashboard() {
                 </Button>
                 <Button onClick={handleUpdateFollowUp}>
                   Update Follow-up
-                </Button>
+                  </Button>
+                </div>
               </div>
-            </div>
           </DialogContent>
         </Dialog>
       </div>

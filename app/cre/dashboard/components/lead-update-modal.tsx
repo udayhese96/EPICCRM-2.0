@@ -12,6 +12,108 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Calendar, Phone, Mail, MapPin, Building, User, Car, Clock, DollarSign, Home, Users, CheckCircle2, Lock, Circle } from "lucide-react"
 
+// Car make and model data
+const CAR_DATA = {
+  "Maruti": [
+    "Wagon R", "Baleno", "Swift", "Swift Dzire", "Ciaz", "Vitara Brezza",
+    "Alto 800", "Alto K10", "Ertiga", "Celerio", "Ritz", "SX4", "Alto",
+    "Eeco", "Ignis", "S-Presso", "Zen Estilo", "XL6", "800", "Gypsy",
+    "Wagon R Stingray", "Zen", "Esteem", "Kizashi", "Omni", "Celerio X",
+    "A-Star", "S-Cross", "Grand Vitara", "Jimny"
+  ],
+  "Hyundai": [
+    "Creta", "i20", "i10", "Grand i10", "Verna", "Santro Xing", "Venue",
+    "Xcent", "Eon", "Elantra", "Tucson", "Santa Fe", "Alcazar", "i20 Active",
+    "Accent", "Santro", "Grand i10 Nios", "Aura", "IONIQ", "Kona"
+  ],
+  "Honda": [
+    "City", "Amaze", "Jazz", "Brio", "Civic", "WR-V", "Mobilio", "Accord",
+    "BR-V", "CR-V"
+  ],
+  "Toyota": [
+    "Fortuner", "Innova Crysta", "Corolla Altis", "Innova", "Etios Liva",
+    "Etios", "Camry", "Glanza", "Yaris", "Etios Cross", "Land Cruiser",
+    "Corolla", "Land Cruiser Prado", "Urban Cruiser", "Platinum Etios",
+    "Hyryder"
+  ],
+  "Mahindra": [
+    "Scorpio", "XUV500", "Thar", "TUV300", "KUV100", "Quanto", "Bolero",
+    "XUV300", "KUV100 Nxt", "XUV700", "Xylo", "Alturas G4", "Marazzo",
+    "Bolero Power Plus", "Nuvo Sport", "XUV400"
+  ],
+  "Mercedes-Benz": [
+    "E-Class", "C-Class", "GLC", "CLA", "GLS", "S-Class", "GLA Class", "GLE",
+    "M-Class", "GL-Class", "A-Class", "SLK-Class", "A-Class Limousine",
+    "B-Class", "V-Class", "A 35", "GLA", "SLC", "E-Class All-Terrain", "EQC",
+    "C-Class 2021", "AMG GLC", "AMG GLE", "EQA", "EQB", "C 63 AMG",
+    "ML 250 CDI", "R 350", "CLS 250 CDI", "AMG A35", "MAYBACH GLS 400 4M",
+    "GLB", "AMG GLA 35 4MATIC", "AMG C43", "ML 350 CDI", "GL 350 CDI"
+  ],
+  "Audi": [
+    "A6", "A4", "Q3", "Q7", "Q5", "A3", "Q2", "A8", "A3 Cabriolet", "S5", "Q8"
+  ],
+  "BMW": [
+    "3 Series", "5 Series", "X1", "X5", "7 Series", "X3", "3 Series GT",
+    "6 Series", "X7", "1 Series", "2 Series", "M Series", "X6", "X4",
+    "220 I", "745 LE X DRIVE"
+  ],
+  "Ford": [
+    "Ecosport", "Endeavour", "Figo", "Fiesta", "Mustang", "Figo Aspire",
+    "Ikon", "Freestyle"
+  ],
+  "Renault": [
+    "Kwid", "Duster", "Triber", "Captur", "Kiger", "Fluence", "Koleos",
+    "Scala", "Lodgy", "Pulse"
+  ],
+  "Tata": [
+    "Harrier", "Nexon", "Tiago", "Safari Storme", "Hexa", "Altroz", "Safari",
+    "Zest", "Tigor", "Indica", "Indigo", "Nexon EV", "Bolt", "Manza",
+    "Nano", "Sumo", "Indica Vista"
+  ],
+  "Volkswagen": [
+    "Polo", "Vento", "Beetle", "Ameo", "Jetta", "Tiguan", "Passat", "T-Roc",
+    "Virtus", "Taigun"
+  ],
+  "Land Rover": [
+    "Range Rover Evoque", "Discovery Sport", "Freelander 2", "Range Rover",
+    "Range Rover Sport", "Range Rover Velar", "Discovery"
+  ],
+  "MG": [
+    "Hector", "Hector Plus", "ZS EV", "Astor", "Gloster", "Comet EV", "Windsor"
+  ],
+  "Kia": ["Seltos", "Sonet", "Carnival", "Carens", "EV6"],
+  "Skoda": [
+    "Rapid", "Superb", "Kushaq", "Fabia", "Laura", "Octavia", "Kodiaq",
+    "KAROQ BSIV", "Slavia"
+  ],
+  "Nissan": ["Terrano", "Sunny", "Micra", "Kicks", "Magnite", "X-Trail"],
+  "Jaguar": ["XF", "XE", "F-Pace", "XJ"],
+  "Jeep": ["Compass"],
+  "Porsche": ["Porsche"],
+  "Volvo": [
+    "S60", "S90", "XC40", "XC90", "XC60", "V40", "V40 Cross Country"
+  ],
+  "Chevrolet": [
+    "Beat", "Cruze", "Aveo U-VA", "Spark", "Captiva", "Enjoy", "Sail",
+    "Optra", "Tavera", "Trailblazer"
+  ],
+  "Mini": [
+    "Cooper", "3 Door", "5 Door", "Cooper Countryman", "Cooper Convertible",
+    "Cooper SE", "Mini Cooper Convertible"
+  ],
+  "Datsun": ["Redi Go", "Go", "Go+"],
+  "Mitsubishi": ["Pajero", "Outlander", "Lancer"],
+  "Isuzu": ["D-Max", "MU-X", "MU-7"],
+  "Fiat": ["Grande Punto", "Linea", "Linea Classic", "Palio", "Punto Evo"],
+  "Mahindra Ssangyong": ["Rexton"],
+  "Bentley": ["Continental"],
+  "Hindustan Motors": ["Ambassador"],
+  "Lamborghini": ["Huracan EVO"],
+  "Maserati": ["Maserati"],
+  "Lexus": ["Lexus"],
+  "Citroen": ["C3", "eC3", "C5 Aircross"]
+}
+
 interface Lead {
   id: string
   uid: string
@@ -220,7 +322,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           updated_at: new Date().toISOString(),
           lead_status: formData.sales_outcome === "Lost" ? "Lost" :
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Qualified",
-          final_status: formData.sales_outcome === "Pending" ? "Pending" : (lead?.final_status || "Pending"),
+          final_status: formData.sales_outcome === "Lost" ? "Lost" :
+                       (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Pending",
           follow_up_date: formData.follow_up_date || today,
           followup_count: (lead?.followup_count || 0) + 1,
           call_status: formData.call_status,
@@ -236,6 +339,10 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? pendingExactStatus : "Fresh",
+          // Final status mapping - when qualified, final_status should be Pending
+          final_status: selectedStatus === "qualified" ? "Pending" :
+                       selectedStatus === "unqualified" ? "Lost" : 
+                       selectedStatus === "pending" ? "Pending" : "Pending",
           // Ensure follow up date exists only when needed
           follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
@@ -998,19 +1105,42 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="space-y-3">
               <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make</Label>
-              <Input 
-                placeholder="Vehicle Make"
-                value={formData.trade_in_make}
-                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_make: e.target.value }))}
-              />
+              <Select 
+                value={formData.trade_in_make} 
+                onValueChange={(value) => {
+                  setFormData(prev => ({ 
+                    ...prev, 
+                    trade_in_make: value,
+                    trade_in_model: "" // Reset model when make changes
+                  }))
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Vehicle Make" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(CAR_DATA).map((make) => (
+                    <SelectItem key={make} value={make}>{make}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-3">
               <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model</Label>
-              <Input 
-                placeholder="Vehicle Model"
-                value={formData.trade_in_model}
-                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_model: e.target.value }))}
-              />
+              <Select 
+                value={formData.trade_in_model} 
+                onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_model: value }))}
+                disabled={!formData.trade_in_make}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Vehicle Model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {formData.trade_in_make && CAR_DATA[formData.trade_in_make as keyof typeof CAR_DATA]?.map((model) => (
+                    <SelectItem key={model} value={model}>{model}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-3">
               <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>

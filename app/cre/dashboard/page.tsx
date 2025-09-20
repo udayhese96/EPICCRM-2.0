@@ -98,6 +98,7 @@ export default function CREDashboard() {
       if (response.ok) {
         const data = await response.json()
         console.log('API Response:', data)
+        console.log('Sample lead data:', data[0]) // Debug: log first lead
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
           id: l.id || l.uid,
@@ -147,20 +148,7 @@ export default function CREDashboard() {
     // Refetch leads from API to ensure we have the latest data
     fetchAssignedLeads()
 
-    // After update, route the view to the correct tab
-    const newStatus = leadData.lead_status
-    if (newStatus === "Qualified") {
-      setActiveTab("qualified")
-      setPendingCategory("all")
-      setActiveStatus("all")
-    } else if (newStatus === "Pending") {
-      setActiveTab("pending")
-      setPendingCategory("all")
-      setActiveStatus("all")
-    } else if (newStatus === "Lost" || newStatus === "Won") {
-      setActiveTab("wonlost")
-      setActiveStatus("all")
-    }
+    // Removed automatic navigation - user stays on current tab
   }
 
   const openUpdateModal = (lead: Lead) => {
@@ -240,14 +228,20 @@ export default function CREDashboard() {
         break
       case "pending":
         // Pending = final_status Pending AND first call done
-        filteredLeads = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead))
+        console.log('Filtering pending leads:', leads.length, 'total leads')
+        const pendingCandidates = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead))
+        console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
+        filteredLeads = pendingCandidates
         if (pendingCategory !== "all") {
           filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
         }
         break
       case "qualified":
         // Qualified tab: lead_status = Qualified AND final_status = Pending
-        filteredLeads = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead))
+        console.log('Filtering qualified leads:', leads.length, 'total leads')
+        const qualifiedCandidates = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead))
+        console.log('Qualified candidates:', qualifiedCandidates.length, qualifiedCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status })))
+        filteredLeads = qualifiedCandidates
         break
       case "wonlost":
         filteredLeads = leads.filter(lead => {

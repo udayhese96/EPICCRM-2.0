@@ -19,22 +19,25 @@ interface QualifiedLead {
   customer_name: string
   customer_mobile_number: string
   source: string
-  sub_source: string
-  cre_name: string
-  lead_category: string
-  model_interested: string
-  first_remark: string
-  variant: string
-  buying_plan: string
-  finance_option: string
-  profession: string
-  test_drive_type: string
-  trade_in: string
-  branch: string
-  ps_name: string
-  icrop_id: string
+  sub_source?: string
+  cre_name?: string
+  lead_category?: string
+  model_interested?: string
+  first_remark?: string
+  variant?: string
+  buying_plan?: string
+  finance_option?: string
+  profession?: string
+  test_drive_type?: string
+  trade_in?: string
+  branch?: string
+  ps_name?: string
+  ps_id?: string
+  icrop_id?: string
   created_at: string
-  updated_at: string
+  updated_at?: string
+  lead_status: string
+  final_status?: string
 }
 
 interface GemUser {
@@ -80,7 +83,7 @@ export default function CRETeamLeaderDashboard() {
     try {
       // Load all data in parallel for maximum speed
       const [leadsResponse, gemResponse, branchesResponse] = await Promise.all([
-        fetch('/api/qualified-leads'),
+        fetch('/api/cre-team-leader/qualified-leads'),
         fetch('/api/ps-users'),
         fetch('/api/branches')
       ])
@@ -464,8 +467,8 @@ export default function CRETeamLeaderDashboard() {
           </div>
 
           {/* Qualified Leads Table */}
-          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-            <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-lg">
+          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm rounded-xl">
+            <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-xl">
               <CardTitle className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 Assigned Leads

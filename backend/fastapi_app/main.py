@@ -1935,7 +1935,16 @@ class QualifiedLeadAssignment(BaseModel):
 
 @app.get("/api/qualified-leads")
 async def get_qualified_leads(current_user=Depends(get_current_user)):
-    """Get all qualified leads (raw)"""
+    """Get qualified leads with final_status = Pending"""
+    try:
+        response = supabase.table('qualified_leads').select('*').eq('final_status', 'Pending').order('created_at', desc=True).execute()
+        return response.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/cre-team-leader/qualified-leads")
+async def get_cre_team_leader_qualified_leads(current_user=Depends(get_current_user)):
+    """Get qualified leads from qualified_leads table for CRE Team Leader dashboard"""
     try:
         response = supabase.table('qualified_leads').select('*').order('created_at', desc=True).execute()
         return response.data or []
@@ -1991,6 +2000,15 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
             lead_response = supabase.table('qualified_leads').select('*').eq('id', lead_id).execute()
             if lead_response.data:
                 lead_data = lead_response.data[0]
+                
+                # SYNC BACK TO lead_master - This is the missing piece!
+                lead_master_update = {
+                    "ps_name": assignment.ps_name,
+                    "ps_id": assignment.ps_id,
+                    "branch": assignment.ps_branch,
+                    "updated_at": now_ist_iso()
+                }
+                supabase.table('lead_master').update(lead_master_update).eq('uid', lead_data['lead_uid']).execute()
                 
                 # Create entry in ps_followup_master
                 followup_data = {
@@ -2177,7 +2195,7 @@ async def qualify_lead(lead_uid: str, current_user=Depends(get_current_user)):
         
         # 1. Update lead_master (optimized)
         lead_update_data = {
-            "final_status": "Qualified",
+            "final_status": "Pending",  # Keep as Pending, not Qualified
             "updated_at": current_time
         }
         
@@ -2201,6 +2219,7 @@ async def qualify_lead(lead_uid: str, current_user=Depends(get_current_user)):
             "branch": lead_data.get('branch', ''),
             "ps_name": lead_data.get('ps_name', ''),
             "icrop_id": lead_data.get('icrop_id', ''),
+            "final_status": "Pending",  # Add final_status for qualified leads
             "created_at": current_time,
             "updated_at": current_time
         }
