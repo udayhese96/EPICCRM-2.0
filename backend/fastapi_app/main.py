@@ -2219,7 +2219,6 @@ async def qualify_lead(lead_uid: str, current_user=Depends(get_current_user)):
             "branch": lead_data.get('branch', ''),
             "ps_name": lead_data.get('ps_name', ''),
             "icrop_id": lead_data.get('icrop_id', ''),
-            "final_status": "Pending",  # Add final_status for qualified leads
             "created_at": current_time,
             "updated_at": current_time
         }
