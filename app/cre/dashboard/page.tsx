@@ -55,6 +55,7 @@ interface Lead {
   branch?: string
   ps_name?: string
   ps_id?: string
+  icrop_id?: string
 }
 
 export default function CREDashboard() {
@@ -68,11 +69,13 @@ export default function CREDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
   const [dateFrom, setDateFrom] = useState<string>("")
   const [dateTo, setDateTo] = useState<string>("")
   const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
   const [showRangePicker, setShowRangePicker] = useState(false)
+  const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -80,7 +83,39 @@ export default function CREDashboard() {
       setUser(JSON.parse(supabaseUser))
     }
     fetchAssignedLeads()
+    checkRedisWorkerStatus()
+    
+    // Set up periodic refresh every 2 minutes to catch ICROP ID updates
+    const interval = setInterval(() => {
+      fetchAssignedLeads()
+    }, 120000) // 2 minutes - reduced frequency to avoid excessive loading
+    
+    return () => clearInterval(interval)
   }, [])
+
+  const checkRedisWorkerStatus = async () => {
+    try {
+      const response = await fetch('/api/jobs/queue-stats')
+      if (response.ok) {
+        const stats = await response.json()
+        console.log('🔍 [Redis Worker] Queue stats:', stats)
+        
+        if (stats.redis_connected && stats.queues?.lead_queue?.status === 'active') {
+          console.log('✅ [Redis Worker] Redis connected and lead queue active!')
+          setRedisWorkerStatus('connected')
+        } else {
+          console.log('⚠️ [Redis Worker] Redis connected but queues inactive')
+          setRedisWorkerStatus('disconnected')
+        }
+      } else {
+        console.log('❌ [Redis Worker] Failed to get queue stats')
+        setRedisWorkerStatus('disconnected')
+      }
+    } catch (error) {
+      console.log('⚠️ [Redis Worker] Status check failed:', error)
+      setRedisWorkerStatus('disconnected')
+    }
+  }
 
   const fetchAssignedLeads = async () => {
     setIsLoading(true)
@@ -92,7 +127,8 @@ export default function CREDashboard() {
       const qs = new URLSearchParams({ username })
       if (fullName) qs.append('name', fullName)
       
-      console.log('Fetching leads for:', { username, fullName })
+      console.log('📊 [CRE Dashboard] Fetching leads for:', { username, fullName })
+      console.log('⚡ [Redis Worker] All lead operations will use background processing for ultra-fast UI!')
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
       
       if (response.ok) {
@@ -145,8 +181,42 @@ export default function CREDashboard() {
   const handleUpdateLead = (leadData: any) => {
     console.log("Updating lead:", leadData)
     
-    // Refetch leads from API to ensure we have the latest data
-    fetchAssignedLeads()
+    // ⚡ OPTIMISTIC UI UPDATE - Remove lead immediately for better UX
+    const shouldRemoveFromUI = leadData.status === 'qualified' || 
+                              (activeTab === "fresh" && activeStatus === "Fresh") // Remove any updated fresh lead
+    
+    if (shouldRemoveFromUI) {
+      console.log('🚀 [Optimistic] Lead updated - removing from current list instantly!')
+      
+      // Remove the lead from current leads list immediately
+      setLeads(prevLeads => {
+        const leadUid = leadData.uid || leadData.leadId // Use uid if available, fallback to leadId
+        const updatedLeads = prevLeads.filter(lead => lead.uid !== leadUid)
+        console.log(`✅ [Optimistic] Removed lead ${leadUid} from list. Count: ${prevLeads.length} → ${updatedLeads.length}`)
+        return updatedLeads
+      })
+      
+      // Update counts optimistically (counts will update automatically via useMemo)
+      console.log('📊 [Optimistic] Counts will update automatically via useMemo')
+    } else {
+      // For other updates (like follow-ups in pending section), just refresh normally
+      fetchAssignedLeads()
+    }
+    
+    // Show a subtle success indicator based on the update type
+    if (shouldRemoveFromUI) {
+      // For leads being removed from UI (qualifications, fresh updates), just show brief success
+      setIsRefreshing(true)
+      setTimeout(() => setIsRefreshing(false), 1000) // Hide after 1 second
+    } else {
+      // For leads staying in UI (follow-ups), refresh to sync data
+      setIsRefreshing(true)
+      setTimeout(() => {
+        console.log('🔄 [Real-time] Syncing updated data...')
+        fetchAssignedLeads()
+        setIsRefreshing(false)
+      }, 2000) // Single refresh after 2 seconds
+    }
 
     // Removed automatic navigation - user stays on current tab
   }
@@ -328,6 +398,11 @@ export default function CREDashboard() {
         const fs = (lead.final_status || '').toLowerCase()
         return isLost || fs === 'booked' || fs === 'retailed'
       }).length,
+      won: leads.filter(lead => {
+        const fs = (lead.final_status || '').toLowerCase()
+        return fs === 'booked' || fs === 'retailed'
+      }).length,
+      lost: leads.filter(lead => lead.lead_status === 'Lost').length,
       lostconfirm: 0,
       walkin: 0
     }
@@ -370,6 +445,17 @@ export default function CREDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+            {/* Redis Worker Status Indicator */}
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                redisWorkerStatus === 'connected' ? 'bg-green-500' : 
+                redisWorkerStatus === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+              }`}></div>
+              <span className="text-xs text-gray-600">
+                {redisWorkerStatus === 'connected' ? 'Redis Active' : 
+                 redisWorkerStatus === 'disconnected' ? 'Redis Offline' : 'Checking...'}
+              </span>
+            </div>
             <Button className="bg-green-600 hover:bg-green-700" onClick={() => setIsAddModalOpen(true)} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <Plus className="h-4 w-4 mr-2" />
               Add Lead
@@ -440,7 +526,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-green-100 text-sm">Won Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.wonlost}</p>
+                  <p className="text-3xl font-bold">{tabCounts.won}</p>
                   <Trophy className="h-6 w-6 mx-auto mt-2 text-green-200" />
                 </div>
               </CardContent>
@@ -450,7 +536,7 @@ export default function CREDashboard() {
               <CardContent className="p-4">
                 <div className="text-center">
                   <p className="text-red-100 text-sm">Lost Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.wonlost}</p>
+                  <p className="text-3xl font-bold">{tabCounts.lost}</p>
                   <X className="h-6 w-6 mx-auto mt-2 text-red-200" />
                 </div>
               </CardContent>
@@ -645,6 +731,14 @@ export default function CREDashboard() {
                 </div>
               )}
 
+              {/* Subtle Refreshing Indicator */}
+              {isRefreshing && (
+                <div className="mb-2 flex items-center justify-center text-sm text-blue-600 bg-blue-50 py-2 px-4 rounded-lg">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                  Syncing data...
+                </div>
+              )}
+
               {/* Leads Table */}
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
@@ -660,6 +754,9 @@ export default function CREDashboard() {
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>SOURCE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CAMPAIGN</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>BRANCH</th>
+                      {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ICROP ID</th>
+                      )}
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>GEM</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>DATE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>UID</th>
@@ -668,7 +765,7 @@ export default function CREDashboard() {
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={9} className="p-8 text-center text-gray-500">
+                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 8 : 9} className="p-8 text-center text-gray-500">
                           Loading leads...
                         </td>
                       </tr>
@@ -717,10 +814,17 @@ export default function CREDashboard() {
                           <td className="p-3">{lead.source}</td>
                           <td className="p-3">{lead.campaign}</td>
                           <td className="p-3">
-                            <Badge variant="outline" className="bg-blue-100 text-blue-800">
-                              {lead.branch || '—'}
+                            <Badge variant="outline" className={lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}>
+                              {lead.branch || 'Unassigned'}
                             </Badge>
                           </td>
+                          {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                            <td className="p-3">
+                              <Badge variant="outline" className={lead.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
+                                {lead.icrop_id || 'Pending'}
+                              </Badge>
+                            </td>
+                          )}
                           <td className="p-3">
                             <Badge variant="outline" className={lead.ps_name ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}>
                               {lead.ps_name || 'Unassigned'}

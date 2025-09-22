@@ -312,13 +312,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   const handleSubmit = async () => {
     const leadStatus = (lead?.lead_status || "").trim()
     const isClosed = leadStatus === "Won" || leadStatus === "Lost"
-    const isFollowUpWorkflow = !isClosed && leadStatus !== "" && !selectedStatus
+    // For qualified leads, always treat as follow-up workflow
+    const isFollowUpWorkflow = !isClosed && leadStatus === "Qualified"
+    console.log('🔍 [Debug] isFollowUpWorkflow:', isFollowUpWorkflow, 'leadStatus:', leadStatus, 'isClosed:', isClosed)
     // For Pending flow: lead_status must match the exact pending reason chosen.
     // In Fresh tab routing, "Call me back" => Follow Up queue; all others => Called queue.
     const pendingExactStatus = formData.pending_reason || "Called"
     const updateData = isFollowUpWorkflow
       ? {
           leadId: lead?.id,
+          uid: lead?.uid,
           updated_at: new Date().toISOString(),
           lead_status: formData.sales_outcome === "Lost" ? "Lost" :
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Qualified",
@@ -332,6 +335,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         }
       : {
           leadId: lead?.id,
+          uid: lead?.uid,
           status: selectedStatus,
           ...formData,
           updated_at: new Date().toISOString(),
@@ -352,14 +356,48 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     // If qualifying a lead, also create qualified lead entry
     if (selectedStatus === "qualified") {
       // Optimistic UI update - show success immediately
-      console.log('Lead qualified successfully')
+      console.log('🚀 [Redis Worker] Lead qualification started - UI responding instantly!')
+      console.log('⚡ [Ultra-Fast] Form closing immediately, processing in background...')
+      
+      // Get authentication token
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
       
       // Fire and forget - don't wait for response
       fetch(`/api/leads/${lead?.uid}/qualify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }).catch(e => {
-        console.error('Background qualification failed:', e)
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          trade_in_make: formData.trade_in_make || '',
+          trade_in_model: formData.trade_in_model || '',
+          trade_in_year: formData.trade_in_year || '',
+          trade_in_km: formData.trade_in_km || '',
+          trade_in_ownership: formData.trade_in_ownership || '',
+          // Additional form fields for qualified_leads
+          model_interested: formData.model_interested || '',
+          variant: formData.variant || '',
+          first_remark: formData.general_remarks || '',
+          profession: formData.profession || '',
+          buying_plan: formData.buying_plan || '',
+          finance_option: formData.finance_option || '',
+          test_drive_type: formData.test_drive_type || '',
+          lead_category: formData.lead_category || '',
+          trade_in: formData.trade_in || ''
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('✅ [Redis Worker] Qualification completed in background:', data)
+        if (data.has_trade_in) {
+          console.log('🚗 [Trade-in] Lead has trade-in vehicle - details logged!')
+        }
+      })
+      .catch(e => {
+        console.error('❌ [Redis Worker] Background qualification failed:', e)
         // Could show a subtle error notification here if needed
       })
     }
@@ -392,44 +430,84 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       }
     }
     
-    try {
-      // Persist to backend (lead uid is the id we use)
-      const resp = await fetch(`/api/leads/${lead?.uid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // map modal fields to backend
-          status: (updateData as any).lead_status,
-          final_status: (updateData as any).final_status,
-          // first_remark should only be sent during Qualify (first call). For follow-ups, we send followup_note instead
-          first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
-          profession: formData.profession,
-          variant: formData.variant,
-          model_interested: formData.model_interested,
-          lead_category: formData.lead_category,
-          buying_plan: formData.buying_plan,
-          finance_option: formData.finance_option,
-          trade_in: formData.trade_in,
-          trade_in_make: formData.trade_in_make,
-          trade_in_model: formData.trade_in_model,
-          trade_in_year: formData.trade_in_year,
-          trade_in_km: formData.trade_in_km,
-          trade_in_ownership: formData.trade_in_ownership,
-          test_drive_type: formData.test_drive_type,
-          follow_up_date: (updateData as any).follow_up_date ?? (formData.follow_up_date || undefined),
-          customer_location: formData.customer_location,
-          followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined
-        })
-      })
-      if (!resp.ok) {
-        console.error('Failed to persist lead update')
-      }
-    } catch (e) {
-      console.error('Failed to update lead', e)
-    }
-
+    // Close form immediately for ultra-fast UI
     onUpdate(updateData)
     onClose()
+    
+    // Get authentication token
+    const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+    const parsed = session ? JSON.parse(session) : null
+    const token = parsed?.access_token || ''
+    
+    // Fire and forget - don't wait for response
+    console.log('🚀 [Redis Worker] Lead update started - using background processing for ultra-fast UI!')
+    console.log('⚡ [Ultra-Fast] Form closed immediately, data saving in background...')
+    
+    fetch(`/api/leads/${lead?.uid}`, {
+      method: 'PUT',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        // map modal fields to backend
+        status: (updateData as any).lead_status,
+        final_status: (updateData as any).final_status,
+        // first_remark should only be sent during Qualify (first call). For follow-ups, we send followup_note instead
+        first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
+        profession: formData.profession,
+        variant: formData.variant,
+        model_interested: formData.model_interested,
+        lead_category: formData.lead_category,
+        buying_plan: formData.buying_plan,
+        finance_option: formData.finance_option,
+        trade_in: formData.trade_in,
+        trade_in_make: formData.trade_in_make,
+        trade_in_model: formData.trade_in_model,
+        trade_in_year: formData.trade_in_year,
+        trade_in_km: formData.trade_in_km,
+        trade_in_ownership: formData.trade_in_ownership,
+        test_drive_type: formData.test_drive_type,
+        follow_up_date: (updateData as any).follow_up_date ?? (formData.follow_up_date || undefined),
+        customer_location: formData.customer_location,
+        followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined
+      })
+    })
+    .then(resp => {
+      if (!resp.ok) {
+        console.error('❌ [Redis Worker] Failed to persist lead update')
+        throw new Error(`HTTP error! status: ${resp.status}`)
+      }
+      return resp.json()
+    })
+    .then(data => {
+      // 🔍 Enhanced Debug Logging
+      const payloadSent = {
+        first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
+        followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined,
+        isFollowUpWorkflow: isFollowUpWorkflow
+      }
+      
+      console.log('🔍 [Frontend Debug] Request body analysis:', {
+        leadId: lead?.uid,
+        leadStatus: lead?.lead_status,
+        isClosed: lead?.lead_status === "Won" || lead?.lead_status === "Lost",
+        isFollowUpWorkflow: isFollowUpWorkflow,
+        general_remarks: formData.general_remarks,
+        payload: payloadSent,
+        followup_note_present: 'followup_note' in payloadSent,
+        followup_note_value: payloadSent.followup_note,
+        followup_note_truthy: !!payloadSent.followup_note,
+        first_remark_present: 'first_remark' in payloadSent,
+        first_remark_value: payloadSent.first_remark
+      })
+      
+      console.log('✅ [Redis Worker] Lead update queued for background processing!')
+      console.log('⚡ [Ultra-Fast] Data saved successfully in background!')
+    })
+    .catch(e => {
+      console.error('❌ [Redis Worker] Failed to update lead:', e)
+    })
   }
 
   if (!lead) return null

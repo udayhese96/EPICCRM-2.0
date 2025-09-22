@@ -221,13 +221,17 @@ class AuditLogger:
         details: dict = None
     ):
         """Log access attempts"""
-        from supabase import create_client
-        from decouple import config
-        
-        supabase = create_client(
-            config('SUPABASE_URL'),
-            config('SUPABASE_SERVICE_ROLE_KEY')
-        )
+        try:
+            from supabase import create_client
+            from decouple import config
+            
+            supabase = create_client(
+                config('SUPABASE_URL'),
+                config('SUPABASE_SERVICE_ROLE_KEY')
+            )
+        except ImportError:
+            print("Warning: Supabase not available for audit logging")
+            return
         
         log_entry = {
             "user_id": current_user.id,

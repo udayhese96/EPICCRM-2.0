@@ -48,6 +48,7 @@ interface PSFollowUp {
   test_drive_done: boolean
   tat: number
   created_at: string
+  icrop_id?: string
   updated_at: string
   ps_assigned_at: string
   won_timestamp: string
@@ -69,6 +70,13 @@ export default function PSDashboard() {
 
   useEffect(() => {
     loadFollowUps()
+    
+    // Set up real-time refresh every 30 seconds to catch ICROP ID updates
+    const interval = setInterval(() => {
+      loadFollowUps()
+    }, 30000) // 30 seconds
+    
+    return () => clearInterval(interval)
   }, [])
 
   const loadFollowUps = async () => {
@@ -279,6 +287,7 @@ export default function PSDashboard() {
                 <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
                   <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
                   <TableHead className="font-semibold text-gray-700">Customer</TableHead>
+                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
                   <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
                   <TableHead className="font-semibold text-gray-700">Model</TableHead>
                   <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
@@ -297,6 +306,11 @@ export default function PSDashboard() {
                   >
                     <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
                     <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={followUp.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
+                        {followUp.icrop_id || 'Pending'}
+                      </Badge>
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Phone className="w-4 h-4 text-gray-500" />

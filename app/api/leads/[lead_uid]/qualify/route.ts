@@ -6,12 +6,16 @@ export async function POST(request: NextRequest, { params }: { params: { lead_ui
   try {
     const bearer = request.headers.get('Authorization') || (request.cookies.get('access_token') ? `Bearer ${request.cookies.get('access_token')!.value}` : '')
     
+    // Get the request body from the frontend
+    const body = await request.json()
+    
     const response = await fetch(`${FASTAPI_URL}/api/leads/${params.lead_uid}/qualify`, {
       method: 'POST',
       headers: {
         'Authorization': bearer,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(body) // Forward the request body
     })
 
     if (!response.ok) {

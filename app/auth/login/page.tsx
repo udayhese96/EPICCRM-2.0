@@ -66,6 +66,10 @@ export default function LoginPage() {
           console.log("🧭 Redirecting to CRE Team Leader dashboard")
           router.push("/cre-team-leader/dashboard")
           break
+        case "cre_icrop":
+          console.log("🎯 Redirecting to CRE ICROP dashboard")
+          router.push("/cre-icrop/dashboard")
+          break
         case "cre":
           console.log("📊 Redirecting to CRE dashboard")
           router.push("/cre/dashboard")

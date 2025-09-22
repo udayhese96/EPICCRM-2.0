@@ -7,6 +7,7 @@ class UserRole(str, Enum):
     admin = "admin"
     branch_head = "branch_head"
     cre_team_leader = "cre_team_leader"
+    cre_icrop = "cre_icrop"
     cre = "cre"
     ps = "ps"
     receptionist = "receptionist"
@@ -120,6 +121,26 @@ class LeadUpdate(BaseModel):
     notes: Optional[str] = None
     expected_value: Optional[float] = None
     assigned_to: Optional[str] = None
+    # Follow-up fields
+    followup_note: Optional[str] = None
+    first_remark: Optional[str] = None
+    # Additional fields for comprehensive lead updates
+    model_interested: Optional[str] = None
+    variant: Optional[str] = None
+    lead_category: Optional[str] = None
+    buying_plan: Optional[str] = None
+    finance_option: Optional[str] = None
+    profession: Optional[str] = None
+    test_drive_type: Optional[str] = None
+    trade_in: Optional[str] = None
+    trade_in_make: Optional[str] = None
+    trade_in_model: Optional[str] = None
+    trade_in_year: Optional[str] = None
+    trade_in_km: Optional[str] = None
+    trade_in_ownership: Optional[str] = None
+    customer_location: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    final_status: Optional[str] = None
 
 class LeadResponse(LeadBase):
     id: str

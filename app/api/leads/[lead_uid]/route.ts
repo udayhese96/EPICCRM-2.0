@@ -5,13 +5,35 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 export async function PUT(request: NextRequest, { params }: { params: { lead_uid: string } }) {
   try {
     const body = await request.json()
+    
+    // 🔍 Enhanced Debug Logging
+    console.log('🔄 [API Route] Received request for lead:', params.lead_uid)
+    console.log('🔄 [API Route] Request body:', JSON.stringify(body, null, 2))
+    console.log('🔍 [API Route] followup_note analysis:', {
+      has_followup_note: 'followup_note' in body,
+      followup_note_value: body.followup_note,
+      followup_note_type: typeof body.followup_note,
+      followup_note_truthy: !!body.followup_note,
+      all_keys: Object.keys(body)
+    })
+    
     const resp = await fetch(`${FASTAPI_URL}/api/public/lead-master/${encodeURIComponent(params.lead_uid)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
+    
+    // 🔍 Log what we're sending to FastAPI
+    console.log('📤 [API Route] Forwarding to FastAPI:', JSON.stringify(body, null, 2))
+    
     const text = await resp.text()
+    
+    // 🔍 Log FastAPI response
+    console.log('📥 [API Route] FastAPI response status:', resp.status)
+    console.log('📥 [API Route] FastAPI response body:', text)
+    
     if (!resp.ok) {
+      console.error('❌ [API Route] FastAPI error:', resp.status, text)
       return NextResponse.json({ error: 'Upstream error', body: text }, { status: resp.status })
     }
     try {
@@ -21,6 +43,7 @@ export async function PUT(request: NextRequest, { params }: { params: { lead_uid
       return NextResponse.json({ ok: true }, { status: 200 })
     }
   } catch (e: any) {
+    console.error('❌ [API Route] Error:', e)
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })
   }
 }
