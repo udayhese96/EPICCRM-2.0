@@ -6,13 +6,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    // Get token from cookie if not in header
-    const token = request.headers.get('Authorization') || request.cookies.get('access_token')?.value
+    // Get token from Authorization header
+    const authHeader = request.headers.get('Authorization')
     
     const response = await fetch(`${FASTAPI_URL}/api/qualified-leads/assign-branch`, {
       method: 'POST',
       headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
+        'Authorization': authHeader || '',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),

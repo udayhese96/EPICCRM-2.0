@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
+import { RefreshCw, Users, CheckCircle, XCircle, AlertCircle, UserCheck, UserX, Building2, MapPin, Calendar, Phone, Mail, Car, FileText, TrendingUp, BarChart3, Filter, Search, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 
 interface QualifiedLead {
   id: string
@@ -56,16 +57,29 @@ interface Branch {
 
 export default function CRETeamLeaderDashboard() {
   const [qualifiedLeads, setQualifiedLeads] = useState<QualifiedLead[]>([])
+  const [filteredLeads, setFilteredLeads] = useState<QualifiedLead[]>([])
   const [gemUsers, setGemUsers] = useState<GemUser[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [selectedBranch, setSelectedBranch] = useState<string>("")
   const [filteredGemUsers, setFilteredGemUsers] = useState<GemUser[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
   const [assignmentDialog, setAssignmentDialog] = useState(false)
   const [selectedGem, setSelectedGem] = useState("")
+  const [user, setUser] = useState<any>(null)
+  const [selectedGems, setSelectedGems] = useState<{[leadId: string]: string}>({})
+  
+  // Date range filter states
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
+    // Initialize user from localStorage
+    const supabaseUser = localStorage.getItem("supabase_user")
+    if (supabaseUser) {
+      setUser(JSON.parse(supabaseUser))
+    }
     loadData()
     // Only refresh when user manually clicks refresh or when leads are assigned
   }, [])
@@ -77,6 +91,37 @@ export default function CRETeamLeaderDashboard() {
       setFilteredGemUsers(gemUsers)
     }
   }, [selectedBranch, gemUsers])
+
+  // Filter leads based on search term and date range
+  useEffect(() => {
+    let filtered = qualifiedLeads
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(lead => 
+        lead.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.customer_mobile_number.includes(searchTerm) ||
+        lead.lead_uid.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Apply date range filter
+    if (startDate || endDate) {
+      filtered = filtered.filter(lead => {
+        const leadDate = new Date(lead.created_at)
+        const start = startDate ? new Date(startDate) : null
+        const end = endDate ? new Date(endDate) : null
+        
+        if (start && leadDate < start) return false
+        if (end && leadDate > end) return false
+        return true
+      })
+    }
+
+    setFilteredLeads(filtered)
+  }, [searchTerm, qualifiedLeads, startDate, endDate])
 
   const loadData = async () => {
     setIsLoading(true)
@@ -95,6 +140,10 @@ export default function CRETeamLeaderDashboard() {
         branchesResponse.ok ? branchesResponse.json() : []
       ])
 
+      console.log('📊 [CRE TL] Loaded qualified leads:', leadsData.length)
+      console.log('📊 [CRE TL] Sample lead data:', leadsData[0])
+      console.log('📊 [CRE TL] Lead with ps_name:', leadsData.find((l: any) => l.lead_uid === 'LD000546'))
+      
       setQualifiedLeads(leadsData)
       setGemUsers(gemData)
       setBranches(branchesData)
@@ -133,10 +182,15 @@ export default function CRETeamLeaderDashboard() {
 
   const handleBranchAssignment = async (leadId: string, branch: string) => {
     try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+      
       const response = await fetch('/api/qualified-leads/assign-branch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           lead_id: leadId,
@@ -164,63 +218,19 @@ export default function CRETeamLeaderDashboard() {
     }
   }
 
-  const handleGemAssignment = async (leadId: string, gemName: string) => {
-    try {
-      // Find the GEM user by name
-      const gemUser = gemUsers.find(gem => gem.name === gemName)
-      if (!gemUser) {
-        toast.error('GEM user not found')
-        return
-      }
-
-      // Update the lead in the local state immediately (optimistic update)
-      setQualifiedLeads(prev => 
-        prev.map(lead => 
-          lead.id === leadId 
-            ? { ...lead, ps_name: gemName, ps_id: gemUser.id }
-            : lead
-        )
-      )
-
-      const response = await fetch('/api/qualified-leads/assign', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          lead_ids: [leadId],
-          ps_id: gemUser.id,
-          ps_name: gemUser.name,
-          ps_branch: gemUser.branch
-        }),
-      })
-
-      if (response.ok) {
-        toast.success(`Lead assigned to ${gemName}`)
-      } else {
-        // Revert the optimistic update on error
-        setQualifiedLeads(prev => 
-          prev.map(lead => 
-            lead.id === leadId 
-              ? { ...lead, ps_name: '', ps_id: '' }
-              : lead
-          )
-        )
-        const errorData = await response.json()
-        toast.error(errorData.error || 'Failed to assign GEM')
-      }
-    } catch (error) {
-      // Revert the optimistic update on error
-      setQualifiedLeads(prev => 
-        prev.map(lead => 
-          lead.id === leadId 
-            ? { ...lead, ps_name: '', ps_id: '' }
-            : lead
-        )
-      )
-      console.error('Error assigning GEM:', error)
-      toast.error('Failed to assign GEM')
+  const handleGemSelection = (leadId: string, gemName: string) => {
+    // Find the GEM user by name
+    const gemUser = gemUsers.find(gem => gem.name === gemName)
+    if (!gemUser) {
+      toast.error('GEM user not found')
+      return
     }
+
+    // Update the selected GEM state (doesn't affect actual assignment)
+    setSelectedGems(prev => ({
+      ...prev,
+      [leadId]: gemName
+    }))
   }
 
   const handleIndividualAssignment = async (leadId: string) => {
@@ -236,22 +246,28 @@ export default function CRETeamLeaderDashboard() {
         return
       }
 
-      // Find GEM users for the lead's branch
-      const branchGems = gemUsers.filter(gem => gem.branch === lead.branch)
-      
-      if (branchGems.length === 0) {
-        toast.error(`No GEM users available for ${lead.branch} branch`)
+      const selectedGemName = selectedGems[leadId]
+      if (!selectedGemName) {
+        toast.error('Please select a GEM from the dropdown first')
         return
       }
 
-      // For now, assign to the first available GEM user
-      // In a real scenario, you might want to show a dialog to select GEM
-      const gemUser = branchGems[0]
+      // Find the selected GEM user
+      const gemUser = gemUsers.find(gem => gem.name === selectedGemName)
+      if (!gemUser) {
+        toast.error('Selected GEM user not found')
+        return
+      }
 
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+      
       const response = await fetch('/api/qualified-leads/assign', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           lead_ids: [leadId],
@@ -271,6 +287,12 @@ export default function CRETeamLeaderDashboard() {
               : l
           )
         )
+        // Clear the selected GEM for this lead
+        setSelectedGems(prev => {
+          const newSelectedGems = { ...prev }
+          delete newSelectedGems[leadId]
+          return newSelectedGems
+        })
       } else {
         const errorData = await response.json()
         toast.error(errorData.error || 'Failed to assign lead')
@@ -278,6 +300,47 @@ export default function CRETeamLeaderDashboard() {
     } catch (error) {
       console.error('Error assigning lead:', error)
       toast.error('Failed to assign lead')
+    }
+  }
+
+  const handleDeassignment = async (leadId: string) => {
+    try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+      
+      console.log('🔍 [Auth] Session data:', { session: !!session, parsed: !!parsed, token: !!token })
+      console.log('🔍 [Auth] Token preview:', token ? token.substring(0, 50) + '...' : 'No token')
+      console.log('🔍 [Auth] Parsed data keys:', parsed ? Object.keys(parsed) : 'No parsed data')
+      
+      const response = await fetch('/api/qualified-leads/deassign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          lead_id: leadId
+        }),
+      })
+
+      if (response.ok) {
+        toast.success('Lead deassigned successfully')
+        // Update the lead in the local state
+        setQualifiedLeads(prev => 
+          prev.map(lead => 
+            lead.id === leadId 
+              ? { ...lead, ps_name: '', ps_id: '' }
+              : lead
+          )
+        )
+      } else {
+        const errorData = await response.json()
+        toast.error(errorData.error || 'Failed to deassign lead')
+      }
+    } catch (error) {
+      console.error('Error deassigning lead:', error)
+      toast.error('Failed to deassign lead')
     }
   }
 
@@ -299,10 +362,15 @@ export default function CRETeamLeaderDashboard() {
         return
       }
 
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+      
       const response = await fetch('/api/qualified-leads/assign', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           lead_ids: selectedLeads,
@@ -466,6 +534,75 @@ export default function CRETeamLeaderDashboard() {
             </Card>
           </div>
 
+          {/* Search and Filters */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            {/* Search */}
+            <Card className="shadow-lg">
+              <CardContent className="p-6">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search by customer name, phone, lead UID, PS name..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Date Range Filter */}
+            <Card className="shadow-lg">
+              <CardContent className="p-6">
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Filter className="h-4 w-4 text-gray-400" />
+                    <Label className="text-sm font-medium">Date Range</Label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="start-date" className="text-xs text-gray-500">From</Label>
+                      <Input
+                        id="start-date"
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="end-date" className="text-xs text-gray-500">To</Label>
+                      <Input
+                        id="end-date"
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Clear Filters */}
+            <Card className="shadow-lg">
+              <CardContent className="p-6 flex items-center justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSearchTerm('')
+                    setStartDate('')
+                    setEndDate('')
+                  }}
+                  className="w-full"
+                >
+                  Clear Filters
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Qualified Leads Table */}
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm rounded-xl">
             <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-xl">
@@ -492,7 +629,7 @@ export default function CRETeamLeaderDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {qualifiedLeads
+                    {filteredLeads
                       .sort((a, b) => {
                         // Unassigned leads first, then assigned leads
                         if (!a.ps_name && b.ps_name) return -1
@@ -544,8 +681,8 @@ export default function CRETeamLeaderDashboard() {
                         </TableCell>
                         <TableCell className="text-gray-700">
                           <Select 
-                            value={lead.ps_name || ''} 
-                            onValueChange={(gemName) => handleGemAssignment(lead.id, gemName)}
+                            value={selectedGems[lead.id] || ''} 
+                            onValueChange={(gemName) => handleGemSelection(lead.id, gemName)}
                             disabled={!!lead.ps_name}
                           >
                             <SelectTrigger className="w-32 h-8">
@@ -563,14 +700,26 @@ export default function CRETeamLeaderDashboard() {
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="sm"
-                            onClick={() => handleIndividualAssignment(lead.id)}
-                            disabled={!!lead.ps_name || !lead.branch}
-                            className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-xs px-3 py-1"
-                          >
-                            {lead.ps_name ? 'Assigned' : 'Assign'}
-                          </Button>
+                          <div className="flex gap-2">
+                            {!lead.ps_name ? (
+                              <Button
+                                size="sm"
+                                onClick={() => handleIndividualAssignment(lead.id)}
+                                disabled={!lead.branch || !selectedGems[lead.id]}
+                                className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-xs px-3 py-1"
+                              >
+                                Assign
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => handleDeassignment(lead.id)}
+                                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-xs px-3 py-1"
+                              >
+                                Deassign
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>{getStatusBadge(lead)}</TableCell>
                       </TableRow>

@@ -339,6 +339,21 @@ export default function CREDashboard() {
         const data = await response.json()
         console.log('API Response:', data)
         console.log('Sample lead data:', data[0]) // Debug: log first lead
+        
+        // DEBUG: Check for LD000529 specifically
+        const targetLead = data.find((l: any) => l.uid === 'LD000529')
+        if (targetLead) {
+          console.log('🎯 [DEBUG] Found target lead LD000529 in API response:')
+          console.log('   - UID:', targetLead.uid)
+          console.log('   - Customer:', targetLead.customer_name)
+          console.log('   - Raw icrop_id:', targetLead.icrop_id)
+          console.log('   - icrop_id type:', typeof targetLead.icrop_id)
+          console.log('   - All keys:', Object.keys(targetLead))
+        } else {
+          console.log('❌ [DEBUG] Target lead LD000529 NOT found in API response')
+          console.log('   - Available UIDs:', data.map((l: any) => l.uid))
+        }
+        
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
           id: l.id || l.uid,
@@ -357,6 +372,7 @@ export default function CREDashboard() {
           branch: l.branch,
           ps_name: l.ps_name,
           ps_id: l.ps_id,
+          icrop_id: l.icrop_id, // Add ICROP ID mapping
           lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
           pending_reason: l.pending_reason || '',
           // Previous call history
@@ -369,6 +385,19 @@ export default function CREDashboard() {
           fifth_call_date: l.fifth_call_date,
           fifth_remark: l.fifth_remark
         }))
+        
+        // DEBUG: Check mapped data for LD000529
+        const mappedTargetLead = mapped.find((l: any) => l.uid === 'LD000529')
+        if (mappedTargetLead) {
+          console.log('🎯 [DEBUG] Mapped target lead LD000529:')
+          console.log('   - UID:', mappedTargetLead.uid)
+          console.log('   - Customer:', mappedTargetLead.customer_name)
+          console.log('   - Mapped icrop_id:', mappedTargetLead.icrop_id)
+          console.log('   - Mapped icrop_id type:', typeof mappedTargetLead.icrop_id)
+        } else {
+          console.log('❌ [DEBUG] Target lead LD000529 NOT found in mapped data')
+        }
+        
         console.log('Mapped leads:', mapped)
         console.log('Sample lead data:', mapped[0])
         setLeads(mapped)

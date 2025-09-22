@@ -102,8 +102,9 @@ except Exception as e:
 security = HTTPBearer()
 
 # JWT settings (must match main.py)
-JWT_SECRET = config('JWT_SECRET', default='your-jwt-secret-key-here')
-JWT_ALGORITHM = config('JWT_ALGORITHM', default='HS256')
+import os
+JWT_SECRET = config('JWT_SECRET', default=os.environ.get('JWT_SECRET', 'your-jwt-secret-key-here'))
+JWT_ALGORITHM = config('JWT_ALGORITHM', default=os.environ.get('JWT_ALGORITHM', 'HS256'))
 
 class CurrentUser:
     def __init__(self, user_id: str, username: str, email: str, role: str, branch_id: Optional[str] = None):
@@ -117,19 +118,23 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     """Get current authenticated user from JWT token"""
     try:
         token = credentials.credentials
+        print(f"[Auth] Received token: {token[:50]}..." if token else "[Auth] No token received")
         
         # 1) Try to decode our app-issued JWT (from /api/auth/login)
         try:
+            print(f"[Auth] Attempting to decode token with secret: {JWT_SECRET[:20]}...")
             decoded_token = jwt.decode(
                 token,
                 JWT_SECRET,
                 algorithms=[JWT_ALGORITHM]
             )
+            print(f"[Auth] Successfully decoded token: {decoded_token}")
             user_id = decoded_token.get('user_id')
             username = decoded_token.get('username')
             email = decoded_token.get('email')
             role = decoded_token.get('role')
             if user_id and username and role:
+                print(f"[Auth] Creating CurrentUser: {username} with role {role}")
                 return CurrentUser(
                     user_id=user_id,
                     username=username,
@@ -137,7 +142,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     role=role,
                     branch_id=None
                 )
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            print(f"[Auth] JWT decode failed: {e}")
             pass
         
         # 2) Fallback: decode JWT token with Supabase secret (if present)
