@@ -18,7 +18,8 @@ import {
   Phone,
   User
 } from "lucide-react"
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { LeadUpdateModal } from "./components/lead-update-modal"
 import { AddLeadModal } from "./components/add-lead-modal"
 
@@ -76,6 +77,8 @@ export default function CREDashboard() {
   const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
   const [showRangePicker, setShowRangePicker] = useState(false)
   const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
+  const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting')
+  const [countsUpdating, setCountsUpdating] = useState(false)
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -85,13 +88,201 @@ export default function CREDashboard() {
     fetchAssignedLeads()
     checkRedisWorkerStatus()
     
-    // Set up periodic refresh every 2 minutes to catch ICROP ID updates
-    const interval = setInterval(() => {
-      fetchAssignedLeads()
-    }, 120000) // 2 minutes - reduced frequency to avoid excessive loading
+    // Set up real-time subscriptions instead of polling
+    const cleanup = setupRealtimeSubscriptions()
     
-    return () => clearInterval(interval)
-  }, [])
+    // Primary polling system (more reliable than real-time)
+    const primaryPolling = setInterval(() => {
+      if (!isLoading && !isRefreshing) {
+        console.log('🔄 [Primary] Automatic refresh...')
+        fetchAssignedLeads()
+      }
+    }, 3000) // 3 seconds - even more aggressive polling
+    
+    // Secondary polling for count updates
+    const countPolling = setInterval(() => {
+      if (!isLoading && !isRefreshing) {
+        console.log('📊 [Count] Checking for count updates...')
+        fetchAssignedLeads()
+      }
+    }, 15000) // 15 seconds - less frequent count checks
+    
+    // Redis worker status check
+    const workerStatusCheck = setInterval(() => {
+      checkRedisWorkerStatus()
+    }, 3000) // Check worker status every 3 seconds
+    
+    return () => {
+      // Cleanup real-time subscriptions
+      if (cleanup) {
+        cleanup()
+      }
+      // Cleanup polling intervals
+      clearInterval(primaryPolling)
+      clearInterval(countPolling)
+      clearInterval(workerStatusCheck)
+    }
+  }, [user?.username])
+
+  const setupRealtimeSubscriptions = () => {
+    // Only setup if we have a user
+    if (!user?.username) {
+      console.log('⚠️ [Real-time] No user found, skipping real-time setup')
+      return
+    }
+    
+    console.log('🔌 [Real-time] Setting up Supabase real-time subscriptions for user:', user.username)
+    
+    try {
+      const supabase = createClient()
+      console.log('✅ [Real-time] Supabase client created successfully')
+    
+    // Subscribe to lead_master changes for this CRE user
+    console.log('🔌 [Real-time] Setting up lead_master subscription with filter: cre_name=eq.' + user.username)
+    const leadSubscription = supabase
+      .channel(`lead_master_changes_${user.username}`)
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'lead_master',
+          filter: `cre_name=eq.${user.username}`
+        }, 
+        (payload) => {
+          console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, payload.new || payload.old)
+          
+          // Check if this affects pending/qualified counts
+          const newRecord = payload.new as any
+          const oldRecord = payload.old as any
+          
+          if (newRecord) {
+            const affectsPending = newRecord?.final_status === 'pending' && newRecord?.first_call_date
+            const affectsQualified = newRecord?.lead_status === 'Qualified' && newRecord?.final_status === 'pending'
+            
+            if (affectsPending || affectsQualified) {
+              console.log('📊 [Real-time] Count-affecting change detected - refreshing data immediately')
+              setCountsUpdating(true)
+              setTimeout(() => {
+                if (!isLoading && !isRefreshing) {
+                  fetchAssignedLeads()
+                  setTimeout(() => setCountsUpdating(false), 1000)
+                }
+              }, 500) // Faster refresh for count-affecting changes
+            } else {
+              // Regular refresh for other changes
+              setTimeout(() => {
+                if (!isLoading && !isRefreshing) {
+                  fetchAssignedLeads()
+                }
+              }, 1000)
+            }
+          } else {
+            // For deletions, always refresh
+            setTimeout(() => {
+              if (!isLoading && !isRefreshing) {
+                fetchAssignedLeads()
+              }
+            }, 500)
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 [Real-time] Lead master subscription status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Real-time] Lead master subscription active')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ [Real-time] Lead master subscription error')
+        }
+      })
+    
+    // Subscribe to qualified_leads changes for this CRE user
+    const qualifiedSubscription = supabase
+      .channel(`qualified_leads_changes_${user.username}`)
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'qualified_leads',
+          filter: `cre_name=eq.${user.username}`
+        }, 
+        (payload) => {
+          console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, payload.new || payload.old)
+          
+          // Qualified leads changes always affect counts, so refresh immediately
+          console.log('📊 [Real-time] Qualified leads change - refreshing counts immediately')
+          setCountsUpdating(true)
+          setTimeout(() => {
+            if (!isLoading && !isRefreshing) {
+              fetchAssignedLeads()
+              setTimeout(() => setCountsUpdating(false), 1000)
+            }
+          }, 500) // Fast refresh for qualified leads changes
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 [Real-time] Qualified leads subscription status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Real-time] Qualified leads subscription active')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ [Real-time] Qualified leads subscription error')
+        }
+      })
+    
+    // Subscribe to ps_followup_master changes (for ICROP ID updates)
+    const followupSubscription = supabase
+      .channel(`ps_followup_changes_${user.username}`)
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'ps_followup_master'
+        }, 
+        (payload) => {
+          console.log('🔄 [Real-time] Follow-up master change detected:', payload.eventType)
+          // Refresh leads data when ICROP IDs are updated
+          setTimeout(() => {
+            if (!isLoading && !isRefreshing) {
+              fetchAssignedLeads()
+            }
+          }, 1000)
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 [Real-time] Follow-up subscription status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Real-time] Follow-up subscription active')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ [Real-time] Follow-up subscription error')
+        }
+      })
+    
+    console.log('✅ [Real-time] All subscriptions established')
+    setRealtimeStatus('connected')
+    
+    // Return cleanup function
+    return () => {
+      console.log('🔌 [Real-time] Cleaning up subscriptions...')
+      setRealtimeStatus('disconnected')
+      supabase.removeChannel(leadSubscription)
+      supabase.removeChannel(qualifiedSubscription)
+      supabase.removeChannel(followupSubscription)
+    }
+    
+    } catch (error) {
+      console.error('❌ [Real-time] Failed to setup subscriptions:', error)
+      setRealtimeStatus('disconnected')
+      
+      // Fallback to polling if real-time fails
+      const fallbackInterval = setInterval(() => {
+        if (!isLoading && !isRefreshing) {
+          console.log('🔄 [Fallback] Polling for updates...')
+          fetchAssignedLeads()
+        }
+      }, 30000) // 30 seconds fallback
+      
+      return () => clearInterval(fallbackInterval)
+    }
+  }
 
   const checkRedisWorkerStatus = async () => {
     try {
@@ -100,9 +291,22 @@ export default function CREDashboard() {
         const stats = await response.json()
         console.log('🔍 [Redis Worker] Queue stats:', stats)
         
-        if (stats.redis_connected && stats.queues?.lead_queue?.status === 'active') {
+        const wasConnected = redisWorkerStatus === 'connected'
+        const isConnected = stats.redis_connected && stats.queues?.lead_queue?.status === 'active'
+        
+        if (isConnected) {
           console.log('✅ [Redis Worker] Redis connected and lead queue active!')
           setRedisWorkerStatus('connected')
+          
+          // If worker just came online, refresh data
+          if (!wasConnected) {
+            console.log('🔄 [Worker] Worker just came online - refreshing data')
+            setTimeout(() => {
+              if (!isLoading && !isRefreshing) {
+                fetchAssignedLeads()
+              }
+            }, 1000)
+          }
         } else {
           console.log('⚠️ [Redis Worker] Redis connected but queues inactive')
           setRedisWorkerStatus('disconnected')
@@ -201,21 +405,31 @@ export default function CREDashboard() {
     } else {
       // For other updates (like follow-ups in pending section), just refresh normally
       fetchAssignedLeads()
+      
+      // Also schedule a refresh after background processing completes
+      setTimeout(() => {
+        console.log('🔄 [Post-Update] Refreshing data after background processing')
+        fetchAssignedLeads()
+      }, 3000) // Wait 3 seconds for background worker to complete
+      
+      // Additional count-specific refresh
+      setTimeout(() => {
+        console.log('📊 [Count-Update] Force refreshing counts after qualification')
+        fetchAssignedLeads()
+      }, 6000) // Wait 6 seconds for counts to update
     }
     
-    // Show a subtle success indicator based on the update type
+    // Show a subtle success indicator - real-time updates will handle the rest
     if (shouldRemoveFromUI) {
-      // For leads being removed from UI (qualifications, fresh updates), just show brief success
+      // For leads being removed from UI (qualifications, fresh updates), show brief success
       setIsRefreshing(true)
       setTimeout(() => setIsRefreshing(false), 1000) // Hide after 1 second
+      console.log('✅ [Optimistic] Lead removed from UI - real-time updates will sync counts')
     } else {
-      // For leads staying in UI (follow-ups), refresh to sync data
+      // For leads staying in UI (follow-ups), show brief success
       setIsRefreshing(true)
-      setTimeout(() => {
-        console.log('🔄 [Real-time] Syncing updated data...')
-        fetchAssignedLeads()
-        setIsRefreshing(false)
-      }, 2000) // Single refresh after 2 seconds
+      setTimeout(() => setIsRefreshing(false), 1000) // Hide after 1 second
+      console.log('✅ [Optimistic] Lead updated - real-time updates will sync data')
     }
 
     // Removed automatic navigation - user stays on current tab
@@ -445,6 +659,46 @@ export default function CREDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+            {/* Count Refresh Indicator */}
+            {isRefreshing && (
+              <div className="flex items-center space-x-2 text-blue-600">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span className="text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                  Syncing counts...
+                </span>
+              </div>
+            )}
+            
+            {/* Count Update Indicator */}
+            {countsUpdating && (
+              <div className="flex items-center space-x-2 text-green-600">
+                <div className="animate-pulse rounded-full h-4 w-4 bg-green-600"></div>
+                <span className="text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                  Updating counts...
+                </span>
+              </div>
+            )}
+            
+            {/* Auto Refresh Indicator */}
+            <div className="flex items-center space-x-2 text-blue-600">
+              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+              <span className="text-xs" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                Auto-refresh every 3s
+              </span>
+            </div>
+            
+            {/* Real-time Status Indicator */}
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                realtimeStatus === 'connected' ? 'bg-blue-500' : 
+                realtimeStatus === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+              }`}></div>
+              <span className="text-xs text-gray-600">
+                {realtimeStatus === 'connected' ? 'Real-time Active' : 
+                 realtimeStatus === 'disconnected' ? 'Real-time Offline' : 'Connecting...'}
+              </span>
+            </div>
+            
             {/* Redis Worker Status Indicator */}
             <div className="flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${
@@ -460,9 +714,40 @@ export default function CREDashboard() {
               <Plus className="h-4 w-4 mr-2" />
               Add Lead
             </Button>
-            <Button variant="outline" onClick={() => fetchAssignedLeads()} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+            <Button variant="outline" onClick={() => {
+              console.log('🔄 [Manual] Manual refresh triggered')
+              fetchAssignedLeads()
+            }} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <Search className="h-4 w-4 mr-2" />
               Refresh
+            </Button>
+            
+            {/* Force Refresh Button */}
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                console.log('🔄 [Force] Force refreshing all data...')
+                fetchAssignedLeads()
+              }}
+              className="text-xs"
+              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+            >
+              Force Refresh
+            </Button>
+            
+            {/* Test Real-time Button */}
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                console.log('🧪 [Test] Testing real-time connection...')
+                const supabase = createClient()
+                console.log('🧪 [Test] Supabase client:', supabase)
+                console.log('🧪 [Test] Current real-time status:', realtimeStatus)
+              }}
+              className="text-xs"
+              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+            >
+              Test RT
             </Button>
             <Button variant="outline" onClick={() => window.location.assign('/analytics')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <BarChart3 className="h-4 w-4 mr-2" />

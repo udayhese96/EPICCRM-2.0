@@ -138,7 +138,7 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     lead_info = current_lead.data[0]
                     
                     # Call progression logic:
-                    # Qualification = first_call_remark (qualifying call - PROTECTED, cannot be overwritten)
+                    # Qualification = first_remark (qualifying call - PROTECTED, cannot be overwritten)
                     # F1 = second_remark (first follow-up)
                     # F2 = third_remark (second follow-up)
                     # F3 = fourth_remark (third follow-up)
@@ -327,7 +327,7 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         form_data = data.get('form_data', {})
         lead_update_data = {
             'final_status': 'Pending',
-            'first_call_remark': form_data.get('first_remark', '') or 'Lead qualified successfully',  # F1 - Qualifying call
+            'first_remark': form_data.get('first_remark', '') or 'Lead qualified successfully',  # F1 - Qualifying call
             'first_call_date': current_time,  # F1 date
             'updated_at': current_time
         }
