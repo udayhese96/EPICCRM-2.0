@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -248,8 +249,9 @@ const SalesManagerDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
-      <div className="max-w-7xl mx-auto">
+    <DashboardLayout>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
+        <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
           <div>
@@ -530,8 +532,9 @@ const SalesManagerDashboard = () => {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
-    </div>
+    </DashboardLayout>
   )
 }
 
