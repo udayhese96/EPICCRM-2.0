@@ -244,6 +244,25 @@ class LeadBatchProcessor:
         # Update qualified_leads if lead is qualified
         if lead.final_status == "Pending" and lead.lead_status in ["Qualified", "Pending"]:
             self.upsert_qualified_lead(cur, lead)
+
+        # Always sync customer_location to qualified_leads if present
+        if lead.customer_location:
+            try:
+                cur.execute(
+                    """
+                    UPDATE qualified_leads
+                    SET customer_location = %s,
+                        updated_at = %s
+                    WHERE lead_uid = %s
+                    """,
+                    (
+                        lead.customer_location,
+                        datetime.now(timezone.utc).isoformat(),
+                        lead.uid,
+                    ),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to sync customer_location to qualified_leads for {lead.uid}: {str(e)}")
         
         # Update ps_followup_master if PS is assigned
         if lead.ps_name:
@@ -257,16 +276,17 @@ class LeadBatchProcessor:
         """Upsert into qualified_leads table"""
         sql = """
         INSERT INTO qualified_leads (
-            lead_uid, customer_name, customer_mobile_number, source, cre_name,
+            lead_uid, customer_name, customer_mobile_number, customer_location, source, cre_name,
             lead_category, model_interested, first_remark, variant, buying_plan,
             finance_option, profession, test_drive_type, trade_in, branch, ps_name,
             created_at, updated_at
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (lead_uid) DO UPDATE SET
             customer_name = EXCLUDED.customer_name,
             customer_mobile_number = EXCLUDED.customer_mobile_number,
+            customer_location = EXCLUDED.customer_location,
             lead_category = EXCLUDED.lead_category,
             model_interested = EXCLUDED.model_interested,
             first_remark = EXCLUDED.first_remark,
@@ -285,6 +305,7 @@ class LeadBatchProcessor:
             lead.uid,
             lead.customer_name or '',
             lead.customer_mobile_number or '',
+            lead.customer_location or '',
             'website',  # Default source
             lead.cre_name or '',
             lead.lead_category or '',

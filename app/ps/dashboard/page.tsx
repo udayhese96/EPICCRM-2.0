@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
-import { Calendar, Phone, MessageSquare, CheckCircle, XCircle } from "lucide-react"
+import { Calendar, Phone, MessageSquare, CheckCircle, XCircle, Star, Info, Users, Trophy } from "lucide-react"
 
 interface PSFollowUp {
   id: string
@@ -56,6 +56,9 @@ interface PSFollowUp {
   variant: string
   buying_plan: string
   finance_option: string
+  profession?: string
+  test_drive_type?: string
+  trade_in?: string
 }
 
 export default function PSDashboard() {
@@ -67,6 +70,19 @@ export default function PSDashboard() {
   const [callRemark, setCallRemark] = useState("")
   const [followUpDate, setFollowUpDate] = useState("")
   const [finalStatus, setFinalStatus] = useState("")
+  const [extraLeadInfo, setExtraLeadInfo] = useState<{ profession?: string; test_drive_type?: string; trade_in?: string } | null>(null)
+  const [callOutcome, setCallOutcome] = useState<string>("")
+  const [tradeInOpen, setTradeInOpen] = useState(false)
+  const [tradeInLoading, setTradeInLoading] = useState(false)
+  const [tradeInData, setTradeInData] = useState<any | null>(null)
+  const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'qualified'|'wonlost'>('fresh')
+
+  // Small helper to render uniform label/value pairs on a single line
+  const InfoLine = ({ label, value }: { label: string; value?: string }) => (
+    <div className="text-[14px] text-gray-800 leading-6">
+      <span className="font-medium">{label}:</span> <span>{value || '—'}</span>
+    </div>
+  )
 
   useEffect(() => {
     loadFollowUps()
@@ -126,8 +142,9 @@ export default function PSDashboard() {
         'seventh_call_remark'
       ]
 
-      if (callRemark && callNumber <= callFields.length) {
-        updateData[callFields[callNumber - 1]] = callRemark
+      const effectiveRemark = callOutcome ? `${callOutcome}${callRemark ? ` - ${callRemark}` : ''}` : callRemark
+      if (effectiveRemark && callNumber <= callFields.length) {
+        updateData[callFields[callNumber - 1]] = effectiveRemark
         updateData[`${callFields[callNumber - 1].replace('_remark', '_date')}`] = new Date().toISOString()
       }
 
@@ -145,6 +162,7 @@ export default function PSDashboard() {
         setUpdateDialog(false)
         setSelectedFollowUp(null)
         setCallRemark("")
+        setCallOutcome("")
         setFollowUpDate("")
         setFinalStatus("")
         loadFollowUps()
@@ -165,6 +183,24 @@ export default function PSDashboard() {
     setCallRemark("")
     setFollowUpDate(followUp.follow_up_date)
     setFinalStatus(followUp.final_status)
+    // Load extra info (profession, test_drive_type, trade-in) from backend
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/trade-in/${encodeURIComponent(followUp.lead_uid)}`)
+        const data = await res.json()
+        if (res.ok) {
+          setExtraLeadInfo({
+            profession: data?.profession || undefined,
+            test_drive_type: data?.test_drive_type || undefined,
+            trade_in: (data?.trade_in || '').toString(),
+          })
+        } else {
+          setExtraLeadInfo(null)
+        }
+      } catch {
+        setExtraLeadInfo(null)
+      }
+    })()
   }
 
   const getStatusBadge = (status: string) => {
@@ -211,6 +247,34 @@ export default function PSDashboard() {
       minute: '2-digit'
     })
   }
+
+  const isToday = (dateString?: string) => {
+    if (!dateString) return false
+    const d = new Date(dateString)
+    const t = new Date()
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()
+  }
+
+  const freshCount = followUps.length
+  const todayList = followUps.filter(f => isToday(f.follow_up_date))
+  const todayCount = todayList.length
+  const pendingList = followUps.filter(f => (f.final_status || '').toLowerCase() === 'pending')
+  const pendingCount = pendingList.length
+  const qualifiedList = followUps.filter(f => (f.lead_status || '').toLowerCase() === 'qualified')
+  const qualifiedCount = qualifiedList.length
+  const wonLostList = followUps.filter(f => ['won','lost'].includes((f.final_status || '').toLowerCase()))
+  const wonLostCount = wonLostList.length
+
+  const filteredFollowUps = (() => {
+    switch(activeTab){
+      case 'today': return todayList
+      case 'pending': return pendingList
+      case 'qualified': return qualifiedList
+      case 'wonlost': return wonLostList
+      case 'fresh':
+      default: return followUps
+    }
+  })()
 
   return (
     <DashboardLayout>
@@ -276,10 +340,156 @@ export default function PSDashboard() {
             </Card>
           </div>
 
+        {/* Tabs row */}
+        <div className="flex flex-wrap gap-3 mt-6">
+          <button onClick={() => setActiveTab('fresh')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='fresh'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
+            <Star className="w-4 h-4" /> Fresh Leads ({freshCount})
+          </button>
+          <button onClick={() => setActiveTab('today')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='today'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
+            <Calendar className="w-4 h-4" /> Today's Follow-ups ({todayCount})
+          </button>
+          <button onClick={() => setActiveTab('pending')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='pending'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
+            <Info className="w-4 h-4" /> Pending Leads ({pendingCount})
+          </button>
+          <button onClick={() => setActiveTab('qualified')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='qualified'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
+            <Users className="w-4 h-4" /> Qualified Leads ({qualifiedCount})
+          </button>
+          <button onClick={() => setActiveTab('wonlost')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='wonlost'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
+            <Trophy className="w-4 h-4" /> Won/Lost Leads ({wonLostCount})
+          </button>
+        </div>
+
+        {/* Lead sections grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mt-4">
+        {/* Today's Follow-up */}
+        {activeTab === 'today' && (
         <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
           <CardHeader className="bg-gray-800 text-white">
-            <CardTitle className="text-xl font-bold">Assigned Leads</CardTitle>
-            <p className="text-gray-300 text-sm">Manage and update your assigned leads</p>
+            <CardTitle className="text-xl font-bold">Today's Follow-up</CardTitle>
+            <p className="text-gray-300 text-sm">Leads with follow-up scheduled for today</p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
+                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
+                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {followUps
+                  .filter(f => {
+                    const d = f.follow_up_date ? new Date(f.follow_up_date) : null
+                    if (!d) return false
+                    const today = new Date()
+                    return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+                  })
+                  .map((followUp, index) => (
+                  <TableRow key={followUp.id} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
+                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={followUp.icrop_id ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}>
+                        {followUp.icrop_id || 'Pending'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-500" />
+                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
+                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
+                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">Call #{getNextCallNumber(followUp)}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" onClick={() => openUpdateDialog(followUp)} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                        <MessageSquare className="w-3 h-3 mr-1" />
+                        Update
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        )}
+
+        {/* Open Leads */}
+        {activeTab === 'pending' && (
+        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
+          <CardHeader className="bg-gray-800 text-white">
+            <CardTitle className="text-xl font-bold">Open Leads</CardTitle>
+            <p className="text-gray-300 text-sm">Leads with final status Pending</p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
+                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
+                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {followUps
+                  .filter(f => (f.final_status || '').toLowerCase() === 'pending')
+                  .map((followUp, index) => (
+                  <TableRow key={followUp.id} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
+                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={followUp.icrop_id ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}>
+                        {followUp.icrop_id || 'Pending'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-500" />
+                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
+                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
+                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">Call #{getNextCallNumber(followUp)}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" onClick={() => openUpdateDialog(followUp)} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                        <MessageSquare className="w-3 h-3 mr-1" />
+                        Update
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        )}
+        {activeTab === 'fresh' && (
+        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
+          <CardHeader className="bg-gray-800 text-white">
+            <CardTitle className="text-xl font-bold">Fresh Leads</CardTitle>
+            <p className="text-gray-300 text-sm">Leads newly assigned to you</p>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -341,31 +551,89 @@ export default function PSDashboard() {
             </Table>
           </CardContent>
         </Card>
+        )}
+        </div>
 
         <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Update Follow-up</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               {selectedFollowUp && (
-                <div className="space-y-2">
-                  <div>
-                    <Label>Lead UID: {selectedFollowUp.lead_uid}</Label>
+                <div className="space-y-1">
+                  <InfoLine label="Lead UID" value={selectedFollowUp.lead_uid} />
+                  <InfoLine label="Customer" value={selectedFollowUp.customer_name} />
+                  <InfoLine label="Mobile" value={selectedFollowUp.customer_mobile_number} />
+                  <div className="pt-2 space-y-1">
+                    <InfoLine label="Model" value={selectedFollowUp.model_interested} />
+                    <InfoLine label="Variant" value={selectedFollowUp.variant} />
+                    <InfoLine label="Buying Plan" value={selectedFollowUp.buying_plan} />
+                    <InfoLine label="Finance Option" value={selectedFollowUp.finance_option} />
+                    <InfoLine label="ICROP ID" value={selectedFollowUp.icrop_id} />
+                    <InfoLine label="Profession" value={extraLeadInfo?.profession} />
+                    <InfoLine label="Test Drive Type" value={extraLeadInfo?.test_drive_type} />
+                    <InfoLine label="Trade-in" value={(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string} />
                   </div>
-                  <div>
-                    <Label>Customer: {selectedFollowUp.customer_name}</Label>
-                  </div>
-                  <div>
-                    <Label>Mobile: {selectedFollowUp.customer_mobile_number}</Label>
-                  </div>
+                  {(extraLeadInfo?.trade_in?.toLowerCase() === 'yes' || selectedFollowUp.trade_in?.toLowerCase() === 'yes') && (
+                    <div>
+                      <Button
+                        variant="outline"
+                        className="mt-1"
+                        onClick={async () => {
+                          try {
+                            setTradeInLoading(true)
+                            setTradeInOpen(true)
+                            const res = await fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
+                            const data = await res.json()
+                            if (!res.ok) {
+                              toast.error(data?.error || 'Failed to fetch trade-in details')
+                              setTradeInData(null)
+                            } else {
+                              setTradeInData(data?.trade_in_details || data || null)
+                            }
+                          } catch (e) {
+                            console.error('Trade-in fetch error', e)
+                            toast.error('Error fetching trade-in details')
+                            setTradeInData(null)
+                          } finally {
+                            setTradeInLoading(false)
+                          }
+                        }}
+                      >
+                        View trade-in details
+                      </Button>
+                      <Dialog open={tradeInOpen} onOpenChange={setTradeInOpen}>
+                        <DialogContent className="sm:max-w-md">
+                          <DialogHeader>
+                            <DialogTitle>Trade-in details</DialogTitle>
+                          </DialogHeader>
+                          <div className="text-sm text-gray-800">
+                            {tradeInLoading ? (
+                              <div>Loading...</div>
+                            ) : tradeInData ? (
+                              <div className="space-y-1">
+                                <div><span className="font-medium">Make:</span> {tradeInData.trade_in_make || '—'}</div>
+                                <div><span className="font-medium">Model:</span> {tradeInData.trade_in_model || '—'}</div>
+                                <div><span className="font-medium">Year:</span> {tradeInData.trade_in_year || '—'}</div>
+                                <div><span className="font-medium">KM:</span> {tradeInData.trade_in_km || '—'}</div>
+                                <div><span className="font-medium">Ownership:</span> {tradeInData.trade_in_ownership || '—'}</div>
+                              </div>
+                            ) : (
+                              <div>No trade-in details available.</div>
+                            )}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                  )}
                 </div>
               )}
               
               <div>
                 <Label htmlFor="callNumber">Call Number</Label>
                 <Select value={callNumber.toString()} onValueChange={(value) => setCallNumber(parseInt(value))}>
-                  <SelectTrigger>
+                  <SelectTrigger disabled>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -377,6 +645,37 @@ export default function PSDashboard() {
                   </SelectContent>
                 </Select>
           </div>
+              <div>
+                <Label htmlFor="callOutcome">Lead Status / Outcome</Label>
+                <Select value={callOutcome} onValueChange={setCallOutcome}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Lead Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      'Call not Connected',
+                      'Retailed',
+                      'Discount Issue',
+                      'Delayed',
+                      'Booked',
+                      'Booked with another number',
+                      'Test Drive',
+                      'Planning in Next Month',
+                      'Interested',
+                      'Lost to Competition',
+                      'Finance Rejected',
+                      'Dropped',
+                      'Lost to codealer',
+                      'Busy on another call',
+                      'RNR',
+                      'Call me Back',
+                      'Not Interested'
+                    ].map((option) => (
+                      <SelectItem key={option} value={option}>{option}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div>
                 <Label htmlFor="callRemark">Call Remark</Label>

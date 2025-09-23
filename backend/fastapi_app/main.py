@@ -2455,6 +2455,48 @@ async def get_ps_assigned_qualified_leads(current_user: dict = Depends(get_curre
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ========================================
+# TRADE-IN DETAILS ENDPOINT
+# ========================================
+
+@app.get("/api/trade-in/{lead_uid}")
+async def get_trade_in_details(lead_uid: str, current_user=Depends(get_current_user)):
+    """Fetch trade-in details for a lead and include key fields from lead_master.
+
+    Response shape:
+    {
+      "lead_uid": str,
+      "trade_in": "yes"|"no"|"",
+      "profession": str|None,
+      "test_drive_type": str|None,
+      "lead_master": {...subset...},
+      "trade_in_details": {...} | None
+    }
+    """
+    try:
+        # Fetch subset from lead_master
+        lm_resp = supabase.table('lead_master').select(
+            'uid, profession, test_drive_type, trade_in'
+        ).eq('uid', lead_uid).limit(1).execute()
+        lead_master_row = lm_resp.data[0] if lm_resp.data else {}
+
+        # Fetch latest trade-in details if any
+        ti_resp = supabase.table('trade_in_master').select('*').eq('lead_uid', lead_uid) \
+            .order('created_at', desc=True).limit(1).execute()
+        trade_in_row = ti_resp.data[0] if ti_resp.data else None
+
+        result = {
+            'lead_uid': lead_uid,
+            'trade_in': (lead_master_row.get('trade_in') if lead_master_row else '') or '',
+            'profession': lead_master_row.get('profession') if lead_master_row else None,
+            'test_drive_type': lead_master_row.get('test_drive_type') if lead_master_row else None,
+            'lead_master': lead_master_row or {},
+            'trade_in_details': trade_in_row
+        }
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.put("/api/qualified-leads/{lead_id}/icrop-id")
 async def update_qualified_lead_icrop_id(
     lead_id: str,
