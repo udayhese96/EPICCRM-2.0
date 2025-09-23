@@ -5,14 +5,34 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
-import { Calendar, Phone, MessageSquare, CheckCircle, XCircle, Star, Info, Users, Trophy } from "lucide-react"
+import { 
+  Calendar, 
+  Phone, 
+  MessageSquare, 
+  CheckCircle, 
+  XCircle, 
+  Star, 
+  Info, 
+  Users, 
+  Trophy,
+  RefreshCw,
+  Clock,
+  AlertCircle,
+  User,
+  X,
+  Car,
+  CreditCard,
+  Briefcase,
+  FileText,
+  ChevronRight,
+  Edit3
+} from "lucide-react"
 
 interface PSFollowUp {
   id: string
@@ -44,6 +64,12 @@ interface PSFollowUp {
   sixth_call_remark: string
   seventh_call_date: string
   seventh_call_remark: string
+  eighth_call_date?: string
+  eighth_call_remark?: string
+  ninth_call_date?: string
+  ninth_call_remark?: string
+  tenth_call_date?: string
+  tenth_call_remark?: string
   final_status: string
   test_drive_done: boolean
   tat: number
@@ -59,6 +85,8 @@ interface PSFollowUp {
   profession?: string
   test_drive_type?: string
   trade_in?: string
+  booking_id?: string
+  retailed_id?: string
 }
 
 export default function PSDashboard() {
@@ -75,7 +103,36 @@ export default function PSDashboard() {
   const [tradeInOpen, setTradeInOpen] = useState(false)
   const [tradeInLoading, setTradeInLoading] = useState(false)
   const [tradeInData, setTradeInData] = useState<any | null>(null)
-  const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'qualified'|'wonlost'>('fresh')
+  const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'booked'|'retailed'|'wonlost'>('fresh')
+  const [bookingId, setBookingId] = useState('')
+  const [retailedId, setRetailedId] = useState('')
+  
+  // Filter states
+  const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('today')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [pendingFilter, setPendingFilter] = useState<'all'|'hot'|'warm'|'cold'>('all')
+
+  // Reset filters when switching tabs
+  const handleTabChange = (tab: 'fresh'|'today'|'pending'|'qualified'|'wonlost') => {
+    setActiveTab(tab)
+    // Reset filters based on tab
+    if (tab === 'today' || tab === 'qualified' || tab === 'wonlost') {
+      setDateFilter('today')
+      setStartDate('')
+      setEndDate('')
+    } else if (tab === 'pending') {
+      setPendingFilter('all')
+    }
+  }
+
+  // Auto-update final status when call outcome changes
+  useEffect(() => {
+    if (callOutcome) {
+      const newFinalStatus = getFinalStatusForLeadStatus(callOutcome)
+      setFinalStatus(newFinalStatus)
+    }
+  }, [callOutcome])
 
   // Small helper to render uniform label/value pairs on a single line
   const InfoLine = ({ label, value }: { label: string; value?: string }) => (
@@ -124,11 +181,55 @@ export default function PSDashboard() {
   const handleUpdateFollowUp = async () => {
     if (!selectedFollowUp) return
 
+    // Validate Order No. format if Booked
+    if (callOutcome === 'Booked' && bookingId) {
+      if (bookingId.length !== 12 || !bookingId.startsWith('ORD') || !/^ORD\d{9}$/.test(bookingId)) {
+        alert('Order No. must be in format ORD followed by exactly 9 digits (e.g., ORD123456789)')
+        return
+      }
+    }
+
+    // Validate DN No. format if Retailed
+    if (callOutcome === 'Retailed' && retailedId) {
+      if (retailedId.length !== 12 || !retailedId.startsWith('DNN') || !/^DNN\d{9}$/.test(retailedId)) {
+        alert('DN No. must be in format DNN followed by exactly 9 digits (e.g., DNN123456789)')
+        return
+      }
+    }
+
     try {
+      // Get authentication token
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
       const updateData: any = {
         id: selectedFollowUp.id,
+        lead_uid: selectedFollowUp.lead_uid,
+        // ps_id and ps_name are not needed in update - backend will use current user from JWT
         follow_up_date: followUpDate || selectedFollowUp.follow_up_date,
-        final_status: finalStatus || selectedFollowUp.final_status
+        final_status: finalStatus || selectedFollowUp.final_status,
+        updated_at: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace(' ', 'T')
+      }
+
+      // Handle booking/retailed ID for won leads
+      if (isLeadWon(callOutcome)) {
+        if (callOutcome === 'Booked' && bookingId) {
+          updateData.booking_id = bookingId
+        } else if (callOutcome === 'Retailed' && retailedId) {
+          updateData.retailed_id = retailedId
+        }
+      }
+
+      // Lock follow-up date and final status for won/lost leads
+      if (isLeadWon(callOutcome)) {
+        updateData.final_status = 'Waiting for Approval'
+        // Don't update follow_up_date for won leads
+        delete updateData.follow_up_date
+      } else if (isLeadLost(callOutcome)) {
+        updateData.final_status = 'Lost'
+        // Don't update follow_up_date for lost leads
+        delete updateData.follow_up_date
       }
 
       // Add call remark based on call number
@@ -139,26 +240,70 @@ export default function PSDashboard() {
         'fourth_call_remark',
         'fifth_call_remark',
         'sixth_call_remark',
-        'seventh_call_remark'
+        'seventh_call_remark',
+        'eighth_call_remark',
+        'ninth_call_remark',
+        'tenth_call_remark'
       ]
 
       const effectiveRemark = callOutcome ? `${callOutcome}${callRemark ? ` - ${callRemark}` : ''}` : callRemark
-      if (effectiveRemark && callNumber <= callFields.length) {
-        updateData[callFields[callNumber - 1]] = effectiveRemark
-        updateData[`${callFields[callNumber - 1].replace('_remark', '_date')}`] = new Date().toISOString()
+      const currentCallNumber = getNextCallNumber(selectedFollowUp)
+      
+      if (effectiveRemark && currentCallNumber <= callFields.length) {
+        updateData[callFields[currentCallNumber - 1]] = effectiveRemark
+        updateData[`${callFields[currentCallNumber - 1].replace('_remark', '_date')}`] = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace(' ', 'T')
       }
+
+      console.log('🔄 [PS Follow-up] Updating follow-up with data:', updateData)
 
       const response = await fetch('/api/ps-followup', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         credentials: 'include', // Include cookies
         body: JSON.stringify(updateData),
       })
 
       if (response.ok) {
+        const responseData = await response.json()
+        console.log('✅ [PS Follow-up] Update successful:', responseData)
+        
+        // Create approval request if lead is booked or retailed
+        if (isLeadWon(callOutcome)) {
+          try {
+            const approvalRequestData = {
+              lead_uid: selectedFollowUp.lead_uid,
+              request_type: callOutcome.toLowerCase(),
+              booking_id: callOutcome === 'Booked' ? bookingId : null,
+              retailed_id: callOutcome === 'Retailed' ? retailedId : null
+            }
+            
+            const approvalResponse = await fetch('/api/approval-requests', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(approvalRequestData)
+            })
+            
+            if (approvalResponse.ok) {
+              console.log('✅ [Approval Request] Created successfully')
+              toast.success('Follow-up updated and approval request sent to Sales Manager')
+            } else {
+              console.error('❌ [Approval Request] Failed to create')
+              toast.success('Follow-up updated, but failed to create approval request')
+            }
+          } catch (error) {
+            console.error('❌ [Approval Request] Error:', error)
+            toast.success('Follow-up updated, but failed to create approval request')
+          }
+        } else {
         toast.success('Follow-up updated successfully')
+        }
+        
         setUpdateDialog(false)
         setSelectedFollowUp(null)
         setCallRemark("")
@@ -168,10 +313,11 @@ export default function PSDashboard() {
         loadFollowUps()
       } else {
         const errorData = await response.json()
+        console.error('❌ [PS Follow-up] Update failed:', errorData)
         toast.error(errorData.error || 'Failed to update follow-up')
       }
     } catch (error) {
-      console.error('Error updating follow-up:', error)
+      console.error('❌ [PS Follow-up] Error updating follow-up:', error)
       toast.error('Failed to update follow-up')
     }
   }
@@ -183,6 +329,9 @@ export default function PSDashboard() {
     setCallRemark("")
     setFollowUpDate(followUp.follow_up_date)
     setFinalStatus(followUp.final_status)
+    setCallOutcome("")
+    setBookingId("")
+    setRetailedId("")
     // Load extra info (profession, test_drive_type, trade-in) from backend
     ;(async () => {
       try {
@@ -203,14 +352,28 @@ export default function PSDashboard() {
     })()
   }
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, followUp?: PSFollowUp) => {
     switch (status?.toLowerCase()) {
       case 'won':
         return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Won</Badge>
       case 'lost':
         return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Lost</Badge>
+      case 'qualified':
+        return <Badge className="bg-blue-100 text-blue-800"><Star className="w-3 h-3 mr-1" />Qualified</Badge>
       case 'pending':
-        return <Badge variant="outline">Pending</Badge>
+        // Show temperature indicator for pending leads in pending tab
+        if (activeTab === 'pending' && followUp) {
+          const temperature = getPendingTemperature(followUp)
+          switch (temperature) {
+            case 'hot':
+              return <Badge className="bg-red-100 text-red-800"><Clock className="w-3 h-3 mr-1" />🔥 Hot</Badge>
+            case 'warm':
+              return <Badge className="bg-orange-100 text-orange-800"><Clock className="w-3 h-3 mr-1" />🔥 Warm</Badge>
+            case 'cold':
+              return <Badge className="bg-blue-100 text-blue-800"><Clock className="w-3 h-3 mr-1" />❄️ Cold</Badge>
+          }
+        }
+        return <Badge className="bg-yellow-100 text-yellow-800"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
       case 'hot':
         return <Badge className="bg-orange-100 text-orange-800">Hot</Badge>
       case 'warm':
@@ -220,7 +383,9 @@ export default function PSDashboard() {
     }
   }
 
-  const getNextCallNumber = (followUp: PSFollowUp) => {
+  const getNextCallNumber = (followUp: PSFollowUp | null) => {
+    if (!followUp) return 1
+    
     const calls = [
       followUp.first_call_remark,
       followUp.second_call_remark,
@@ -228,13 +393,46 @@ export default function PSDashboard() {
       followUp.fourth_call_remark,
       followUp.fifth_call_remark,
       followUp.sixth_call_remark,
-      followUp.seventh_call_remark
+      followUp.seventh_call_remark,
+      followUp.eighth_call_remark,
+      followUp.ninth_call_remark,
+      followUp.tenth_call_remark
     ]
     
     for (let i = 0; i < calls.length; i++) {
       if (!calls[i]) return i + 1
     }
-    return 7
+    return 10
+  }
+
+  // Helper function to check if lead is won (booked/retailed)
+  const isLeadWon = (status: string) => {
+    return status === 'Booked' || status === 'Retailed'
+  }
+
+  // Helper function to check if lead is lost
+  const isLeadLost = (status: string) => {
+    return status === 'Lost to Competition' || status === 'Lost to Codealer' || status === 'Dropped'
+  }
+
+  // Helper function to check if follow-up date should be locked
+  const isFollowUpDateLocked = (status: string) => {
+    return isLeadWon(status) || isLeadLost(status)
+  }
+
+  // Helper function to check if final status should be locked
+  const isFinalStatusLocked = (status: string) => {
+    return isLeadWon(status) || isLeadLost(status)
+  }
+
+  // Helper function to get the appropriate final status based on lead status
+  const getFinalStatusForLeadStatus = (leadStatus: string) => {
+    if (isLeadWon(leadStatus)) {
+      return 'Waiting for Approval'
+    } else if (isLeadLost(leadStatus)) {
+      return 'Lost'
+    }
+    return 'Pending'
   }
 
   const formatDate = (dateString: string) => {
@@ -255,400 +453,628 @@ export default function PSDashboard() {
     return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()
   }
 
-  const freshCount = followUps.length
-  const todayList = followUps.filter(f => isToday(f.follow_up_date))
+  // Calculate stats
+  const stats = {
+    totalAssigned: followUps.length,
+    pending: followUps.filter(f => (f.final_status || '').toLowerCase() === 'pending').length,
+    won: followUps.filter(f => (f.final_status || '').toLowerCase() === 'won').length,
+    lost: followUps.filter(f => (f.final_status || '').toLowerCase() === 'lost').length
+  }
+
+  // Helper function to check if a date is within range
+  const isWithinDateRange = (dateString: string, start: string, end: string) => {
+    if (!dateString || !start || !end) return false
+    const date = new Date(dateString)
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    return date >= startDate && date <= endDate
+  }
+
+  // Helper function to get pending temperature based on lead age
+  const getPendingTemperature = (followUp: PSFollowUp) => {
+    const assignedDate = new Date(followUp.ps_assigned_at)
+    const daysSinceAssigned = Math.ceil((Date.now() - assignedDate.getTime()) / (1000 * 60 * 60 * 24))
+    
+    if (daysSinceAssigned <= 1) return 'hot'
+    if (daysSinceAssigned <= 3) return 'warm'
+    return 'cold'
+  }
+
+  // Apply date filters
+  const applyDateFilter = (list: PSFollowUp[]) => {
+    switch (dateFilter) {
+      case 'today':
+        return list.filter(f => isToday(f.follow_up_date))
+      case 'all':
+        return list
+      case 'range':
+        return list.filter(f => isWithinDateRange(f.follow_up_date, startDate, endDate))
+      default:
+        return list
+    }
+  }
+
+  // Apply pending temperature filter
+  const applyPendingFilter = (list: PSFollowUp[]) => {
+    if (pendingFilter === 'all') return list
+    return list.filter(f => getPendingTemperature(f) === pendingFilter)
+  }
+
+  // Helper function to check if a lead has been updated (has any call remarks)
+  const hasBeenUpdated = (followUp: PSFollowUp) => {
+    const callFields = [
+      'first_call_remark', 'second_call_remark', 'third_call_remark',
+      'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark',
+      'eighth_call_remark', 'ninth_call_remark', 'tenth_call_remark'
+    ]
+    return callFields.some(field => followUp[field as keyof PSFollowUp])
+  }
+
+  // Fresh leads: Leads that have never been updated (no call remarks)
+  const freshList = followUps.filter(f => !hasBeenUpdated(f))
+  const freshCount = freshList.length
+  
+  // Today's follow-ups: Leads with follow-up dates for today or overdue
+  const todayList = applyDateFilter(followUps.filter(f => isToday(f.follow_up_date) || (() => {
+    const followUpDate = f.follow_up_date ? (f.follow_up_date.includes('T') ? f.follow_up_date.slice(0,10) : f.follow_up_date) : ""
+    const today = new Date().toISOString().slice(0,10)
+    return followUpDate && followUpDate < today
+  })()))
   const todayCount = todayList.length
-  const pendingList = followUps.filter(f => (f.final_status || '').toLowerCase() === 'pending')
+  
+  // Pending leads: Leads with final_status = 'pending' (excluding fresh leads)
+  const pendingList = applyPendingFilter(followUps.filter(f => 
+    (f.final_status || '').toLowerCase() === 'pending' && hasBeenUpdated(f)
+  ))
   const pendingCount = pendingList.length
-  const qualifiedList = followUps.filter(f => (f.lead_status || '').toLowerCase() === 'qualified')
-  const qualifiedCount = qualifiedList.length
-  const wonLostList = followUps.filter(f => ['won','lost'].includes((f.final_status || '').toLowerCase()))
+  
+  // Booked leads: Leads with lead_status = 'booked' and final_status = 'waiting for approval'
+  const bookedList = followUps.filter(f => 
+    (f.lead_status || '').toLowerCase() === 'booked' && 
+    (f.final_status || '').toLowerCase() === 'waiting for approval'
+  )
+  const bookedCount = bookedList.length
+  
+  // Retailed leads: Leads with lead_status = 'retailed' and final_status = 'waiting for approval'
+  const retailedList = followUps.filter(f => 
+    (f.lead_status || '').toLowerCase() === 'retailed' && 
+    (f.final_status || '').toLowerCase() === 'waiting for approval'
+  )
+  const retailedCount = retailedList.length
+  
+  // Won/Lost leads: Leads with final_status = 'won' or 'lost'
+  const wonLostList = applyDateFilter(followUps.filter(f => ['won','lost'].includes((f.final_status || '').toLowerCase())))
   const wonLostCount = wonLostList.length
 
   const filteredFollowUps = (() => {
     switch(activeTab){
+      case 'fresh': return freshList
       case 'today': return todayList
       case 'pending': return pendingList
-      case 'qualified': return qualifiedList
+      case 'booked': return bookedList
+      case 'retailed': return retailedList
       case 'wonlost': return wonLostList
-      case 'fresh':
-      default: return followUps
+      default: return freshList
     }
   })()
 
+  const StatCard = ({ title, value, description, icon: Icon, color, bgColor }: any) => (
+    <div className={`${bgColor} rounded-2xl p-6 border-l-4 ${color} transition-all hover:shadow-lg hover:scale-105 duration-300`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className={`text-3xl font-bold ${color.replace('border-l-', 'text-')} mb-2`}>
+            {value}
+          </div>
+          <div className="text-gray-800 font-semibold text-lg mb-1">{title}</div>
+          <div className="text-gray-600 text-sm">{description}</div>
+        </div>
+        <Icon className={`w-12 h-12 ${color.replace('border-l-', 'text-')} opacity-20`} />
+      </div>
+    </div>
+  )
+
+  const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => (
+    <button
+      onClick={() => onClick(id)}
+      className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
+        isActive
+          ? 'bg-white text-blue-600 shadow-md'
+          : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+      }`}
+    >
+      <Icon className="w-4 h-4" />
+      <span>{label}</span>
+      <span className={`px-2 py-1 rounded-full text-xs ${
+        isActive ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'
+      }`}>
+        {count}
+      </span>
+    </button>
+  )
+
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
-          <div className="flex items-center justify-between">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
               <div>
-            <h1 className="text-3xl font-bold text-gray-800">
-              GEM Dashboard
-            </h1>
-            <p className="text-gray-600 mt-1">Manage your assigned leads and follow-ups</p>
+              <h1 className="text-4xl font-bold text-gray-800 mb-2">GEM Dashboard</h1>
+              <p className="text-gray-600 text-lg">Manage your assigned leads and follow-ups</p>
               </div>
           <Button 
             onClick={loadFollowUps} 
             disabled={isLoading}
-            className="bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+              className="mt-4 md:mt-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105 flex items-center gap-2"
           >
-            {isLoading ? 'Loading...' : 'Refresh'}
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? 'Loading...' : 'Refresh Data'}
               </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="bg-white border-l-4 border-blue-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Assigned</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-800">{followUps.length}</div>
-              <p className="text-gray-500 text-sm">All leads assigned to you</p>
-              </CardContent>
-            </Card>
-          <Card className="bg-white border-l-4 border-yellow-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Pending</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-800">
-                {followUps.filter(f => f.final_status?.toLowerCase() === 'pending').length}
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <StatCard
+              title="Total Assigned"
+              value={stats.totalAssigned}
+              description="All leads assigned to you"
+              icon={User}
+              color="border-l-blue-500"
+              bgColor="bg-blue-50"
+            />
+            <StatCard
+              title="Pending"
+              value={stats.pending}
+              description="Awaiting follow-up"
+              icon={Clock}
+              color="border-l-amber-500"
+              bgColor="bg-amber-50"
+            />
+            <StatCard
+              title="Won"
+              value={stats.won}
+              description="Successful conversions"
+              icon={Trophy}
+              color="border-l-green-500"
+              bgColor="bg-green-50"
+            />
+            <StatCard
+              title="Lost"
+              value={stats.lost}
+              description="Unsuccessful leads"
+              icon={AlertCircle}
+              color="border-l-red-500"
+              bgColor="bg-red-50"
+            />
                 </div>
-              <p className="text-gray-500 text-sm">Awaiting follow-up</p>
-              </CardContent>
-            </Card>
-          <Card className="bg-white border-l-4 border-green-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Won</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-800">
-                {followUps.filter(f => f.final_status?.toLowerCase() === 'won').length}
+
+          {/* Tabs */}
+          <div className="bg-gray-100 p-2 rounded-xl mb-6 overflow-x-auto">
+            <div className="flex gap-2">
+              <TabButton
+                id="fresh"
+                label="Fresh Leads"
+                count={freshCount}
+                icon={Star}
+                isActive={activeTab === 'fresh'}
+                onClick={handleTabChange}
+              />
+              <TabButton
+                id="today"
+                label="Today's Follow-ups"
+                count={todayCount}
+                icon={Calendar}
+                isActive={activeTab === 'today'}
+                onClick={handleTabChange}
+              />
+              <TabButton
+                id="pending"
+                label="Pending Leads"
+                count={pendingCount}
+                icon={Clock}
+                isActive={activeTab === 'pending'}
+                onClick={handleTabChange}
+              />
+              <TabButton
+                id="booked"
+                label="Booked Approval"
+                count={bookedCount}
+                icon={CheckCircle}
+                isActive={activeTab === 'booked'}
+                onClick={handleTabChange}
+              />
+              <TabButton
+                id="retailed"
+                label="Retailed Approval"
+                count={retailedCount}
+                icon={CheckCircle}
+                isActive={activeTab === 'retailed'}
+                onClick={handleTabChange}
+              />
+              <TabButton
+                id="wonlost"
+                label="Won/Lost Leads"
+                count={wonLostCount}
+                icon={Trophy}
+                isActive={activeTab === 'wonlost'}
+                onClick={handleTabChange}
+              />
                 </div>
-              <p className="text-gray-500 text-sm">Successful conversions</p>
-              </CardContent>
-            </Card>
-          <Card className="bg-white border-l-4 border-red-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Lost</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-800">
-                {followUps.filter(f => f.final_status?.toLowerCase() === 'lost').length}
                 </div>
-              <p className="text-gray-500 text-sm">Unsuccessful leads</p>
-              </CardContent>
-            </Card>
+
+          {/* Leads Table */}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <Star className="w-5 h-5" />
+                {activeTab === 'fresh' && 'Fresh Leads'}
+                {activeTab === 'today' && 'Today\'s Follow-ups'}
+                {activeTab === 'pending' && 'Pending Leads'}
+                {activeTab === 'booked' && 'Booked - Waiting for Approval'}
+                {activeTab === 'retailed' && 'Retailed - Waiting for Approval'}
+                {activeTab === 'wonlost' && 'Won/Lost Leads'}
+              </h2>
+              <p className="text-gray-300 text-sm mt-1">
+                {activeTab === 'fresh' && 'Leads newly assigned to you'}
+                {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
+                {activeTab === 'pending' && 'Leads with final status Pending'}
+                {activeTab === 'booked' && 'Booked leads awaiting Sales Manager approval'}
+                {activeTab === 'retailed' && 'Retailed leads awaiting Sales Manager approval'}
+                {activeTab === 'wonlost' && 'Leads that are won or lost'}
+              </p>
           </div>
 
-        {/* Tabs row */}
-        <div className="flex flex-wrap gap-3 mt-6">
-          <button onClick={() => setActiveTab('fresh')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='fresh'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
-            <Star className="w-4 h-4" /> Fresh Leads ({freshCount})
-          </button>
-          <button onClick={() => setActiveTab('today')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='today'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
-            <Calendar className="w-4 h-4" /> Today's Follow-ups ({todayCount})
-          </button>
-          <button onClick={() => setActiveTab('pending')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='pending'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
-            <Info className="w-4 h-4" /> Pending Leads ({pendingCount})
-          </button>
-          <button onClick={() => setActiveTab('qualified')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='qualified'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
-            <Users className="w-4 h-4" /> Qualified Leads ({qualifiedCount})
-          </button>
-          <button onClick={() => setActiveTab('wonlost')} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${activeTab==='wonlost'?'bg-gray-900 text-white':'bg-white text-gray-800'} shadow-sm`}>
-            <Trophy className="w-4 h-4" /> Won/Lost Leads ({wonLostCount})
-          </button>
-        </div>
-
-        {/* Lead sections grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mt-4">
-        {/* Today's Follow-up */}
-        {activeTab === 'today' && (
-        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
-          <CardHeader className="bg-gray-800 text-white">
-            <CardTitle className="text-xl font-bold">Today's Follow-up</CardTitle>
-            <p className="text-gray-300 text-sm">Leads with follow-up scheduled for today</p>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
-                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {followUps
-                  .filter(f => {
-                    const d = f.follow_up_date ? new Date(f.follow_up_date) : null
-                    if (!d) return false
-                    const today = new Date()
-                    return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
-                  })
-                  .map((followUp, index) => (
-                  <TableRow key={followUp.id} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
-                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={followUp.icrop_id ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}>
-                        {followUp.icrop_id || 'Pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-gray-500" />
-                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
-                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
-                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">Call #{getNextCallNumber(followUp)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" onClick={() => openUpdateDialog(followUp)} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
-                        <MessageSquare className="w-3 h-3 mr-1" />
-                        Update
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        )}
-
-        {/* Open Leads */}
-        {activeTab === 'pending' && (
-        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
-          <CardHeader className="bg-gray-800 text-white">
-            <CardTitle className="text-xl font-bold">Open Leads</CardTitle>
-            <p className="text-gray-300 text-sm">Leads with final status Pending</p>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
-                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {followUps
-                  .filter(f => (f.final_status || '').toLowerCase() === 'pending')
-                  .map((followUp, index) => (
-                  <TableRow key={followUp.id} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
-                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={followUp.icrop_id ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}>
-                        {followUp.icrop_id || 'Pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-gray-500" />
-                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
-                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
-                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">Call #{getNextCallNumber(followUp)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" onClick={() => openUpdateDialog(followUp)} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
-                        <MessageSquare className="w-3 h-3 mr-1" />
-                        Update
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        )}
-        {activeTab === 'fresh' && (
-        <Card className="bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
-          <CardHeader className="bg-gray-800 text-white">
-            <CardTitle className="text-xl font-bold">Fresh Leads</CardTitle>
-            <p className="text-gray-300 text-sm">Leads newly assigned to you</p>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Customer</TableHead>
-                  <TableHead className="font-semibold text-gray-700">ICROP ID</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Model</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Follow-up Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Next Call</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {followUps.map((followUp, index) => (
-                  <TableRow 
-                    key={followUp.id} 
-                    className={`hover:bg-gray-50 transition-colors ${
-                      index % 2 === 0 ? 'bg-white' : 'bg-gray-50'
-                    }`}
+        {/* Filters Section */}
+        <div className="bg-gray-50 p-4 border-b">
+          <div className="flex flex-wrap gap-4 items-center">
+            {/* Date Range Filters for Today, Won/Lost sections */}
+            {(activeTab === 'today' || activeTab === 'wonlost') && (
+              <>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Filter:</label>
+                  <select 
+                    value={dateFilter} 
+                    onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
-                    <TableCell className="font-medium text-blue-600">{followUp.lead_uid}</TableCell>
-                    <TableCell className="font-medium text-gray-800">{followUp.customer_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={followUp.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
-                        {followUp.icrop_id || 'Pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-gray-500" />
-                        <span className="text-gray-700">{followUp.customer_mobile_number}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-gray-700">{followUp.model_interested || '—'}</TableCell>
-                    <TableCell className="text-gray-600">{formatDate(followUp.follow_up_date)}</TableCell>
-                    <TableCell>{getStatusBadge(followUp.final_status)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">
-                        Call #{getNextCallNumber(followUp)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        onClick={() => openUpdateDialog(followUp)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                      >
-                        <MessageSquare className="w-3 h-3 mr-1" />
-                        Update
-            </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        )}
+                    <option value="today">Today</option>
+                    <option value="all">All Time</option>
+                    <option value="range">Date Range</option>
+                  </select>
         </div>
 
+                {dateFilter === 'range' && (
+                      <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Start Date"
+                    />
+                    <span className="text-gray-500">to</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="End Date"
+                    />
+                    {(startDate || endDate) && (
+                      <button
+                        onClick={() => {
+                          setStartDate('')
+                          setEndDate('')
+                        }}
+                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                      </div>
+                )}
+              </>
+            )}
+
+            {/* Temperature Filter for Pending Leads */}
+        {activeTab === 'pending' && (
+                      <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700">Temperature:</label>
+                <select 
+                  value={pendingFilter} 
+                  onChange={(e) => setPendingFilter(e.target.value as 'all'|'hot'|'warm'|'cold')}
+                  className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="all">All</option>
+                  <option value="hot">🔥 Hot (≤1 day)</option>
+                  <option value="warm">🔥 Warm (2-3 days)</option>
+                  <option value="cold">❄️ Cold (&gt;3 days)</option>
+                </select>
+                      </div>
+            )}
+
+            {/* Show current filter status */}
+            <div className="ml-auto text-sm text-gray-600">
+              {activeTab === 'today' && dateFilter === 'range' && startDate && endDate && (
+                <span>Showing: {startDate} to {endDate}</span>
+              )}
+              {activeTab === 'pending' && pendingFilter !== 'all' && (
+                <span>Showing: {pendingFilter === 'hot' ? '🔥 Hot leads' : pendingFilter === 'warm' ? '🔥 Warm leads' : '❄️ Cold leads'}</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-left p-4 font-semibold text-gray-700">Lead Info</th>
+                    <th className="text-left p-4 font-semibold text-gray-700">Vehicle Details</th>
+                    <th className="text-left p-4 font-semibold text-gray-700">Status</th>
+                    <th className="text-left p-4 font-semibold text-gray-700">Next Call</th>
+                    <th className="text-left p-4 font-semibold text-gray-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFollowUps.map((followUp, index) => (
+                    <tr key={followUp.id} className="border-b hover:bg-gray-50 transition-colors">
+                      <td className="p-4">
+                        <div className="space-y-1">
+                          <div className="font-semibold text-gray-800">{followUp.customer_name}</div>
+                          <div className="text-sm text-gray-600 flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            {followUp.customer_mobile_number}
+                          </div>
+                          <div className="text-xs text-gray-500">{followUp.lead_uid}</div>
+                          <div className="text-xs text-gray-500">{formatDate(followUp.ps_assigned_at)}</div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="space-y-1">
+                          <div className="font-medium text-gray-800">{followUp.model_interested || '—'}</div>
+                          <div className="text-sm text-gray-600">{followUp.variant || '—'}</div>
+                          <div className="text-xs text-gray-500">{followUp.buying_plan || '—'}</div>
+                          <div className="text-xs text-gray-500">{followUp.finance_option || '—'}</div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="space-y-2">
+                          {getStatusBadge(followUp.final_status, followUp)}
+                          {followUp.icrop_id && (
+                            <Badge variant="outline" className="bg-purple-100 text-purple-800">
+                              {followUp.icrop_id}
+                      </Badge>
+                          )}
+                      </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="space-y-1">
+                          <span className="text-sm font-medium text-gray-700">Call #{getNextCallNumber(followUp)}</span>
+                          <div className="text-xs text-gray-500">{formatDate(followUp.follow_up_date)}</div>
+                          {/* Overdue badge only shows in today's follow-up section */}
+                          {activeTab === 'today' && (() => {
+                            const followUpDate = followUp.follow_up_date ? (followUp.follow_up_date.includes('T') ? followUp.follow_up_date.slice(0,10) : followUp.follow_up_date) : ""
+                            const today = new Date().toISOString().slice(0,10)
+                            const overdueDays = followUpDate && followUpDate < today ? Math.ceil((Date.now() - new Date(followUpDate + 'T00:00:00').getTime())/86400000) : 0
+                            return overdueDays > 0 && (
+                              <Badge variant="secondary" className="bg-red-600 text-white text-xs">
+                                Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}
+                      </Badge>
+                            )
+                          })()}
+                      </div>
+                      </td>
+                      <td className="p-4">
+                        <button
+                        onClick={() => openUpdateDialog(followUp)}
+                          className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+                      >
+                        Update
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+        </div>
+
+          {/* Update Modal */}
         <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Update Follow-up</DialogTitle>
+            <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+              <DialogHeader className="pb-2">
+                <DialogTitle className="text-lg font-semibold text-gray-900">
+                  Update Follow-up - {selectedFollowUp?.lead_uid}
+                </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
+
+              <div className="space-y-3">
+                {/* Lead and Customer Information - Ultra Compact */}
               {selectedFollowUp && (
-                <div className="space-y-1">
-                  <InfoLine label="Lead UID" value={selectedFollowUp.lead_uid} />
-                  <InfoLine label="Customer" value={selectedFollowUp.customer_name} />
-                  <InfoLine label="Mobile" value={selectedFollowUp.customer_mobile_number} />
-                  <div className="pt-2 space-y-1">
-                    <InfoLine label="Model" value={selectedFollowUp.model_interested} />
-                    <InfoLine label="Variant" value={selectedFollowUp.variant} />
-                    <InfoLine label="Buying Plan" value={selectedFollowUp.buying_plan} />
-                    <InfoLine label="Finance Option" value={selectedFollowUp.finance_option} />
-                    <InfoLine label="ICROP ID" value={selectedFollowUp.icrop_id} />
-                    <InfoLine label="Profession" value={extraLeadInfo?.profession} />
-                    <InfoLine label="Test Drive Type" value={extraLeadInfo?.test_drive_type} />
-                    <InfoLine label="Trade-in" value={(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string} />
+                  <div className="space-y-0.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">UID:</span>
+                      <span className="text-gray-900 ml-2">{selectedFollowUp.lead_uid}</span>
                   </div>
-                  {(extraLeadInfo?.trade_in?.toLowerCase() === 'yes' || selectedFollowUp.trade_in?.toLowerCase() === 'yes') && (
-                    <div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Customer:</span>
+                      <span className="text-gray-900 ml-2">{selectedFollowUp.customer_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Mobile:</span>
+                      <span className="text-gray-900 ml-2">{selectedFollowUp.customer_mobile_number}</span>
+                    </div>
+                    {selectedFollowUp.model_interested && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Model:</span>
+                        <span className="text-gray-900 text-xs ml-2">{selectedFollowUp.model_interested}</span>
+                      </div>
+                    )}
+                    {selectedFollowUp.variant && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Variant:</span>
+                        <span className="text-gray-900 ml-2">{selectedFollowUp.variant}</span>
+                      </div>
+                    )}
+                    {selectedFollowUp.buying_plan && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Plan:</span>
+                        <span className="text-gray-900 ml-2">{selectedFollowUp.buying_plan}</span>
+                      </div>
+                    )}
+                    {selectedFollowUp.finance_option && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Finance:</span>
+                        <span className="text-gray-900 ml-2">{selectedFollowUp.finance_option}</span>
+                      </div>
+                    )}
+                    {selectedFollowUp.icrop_id && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">ICROP:</span>
+                        <span className="text-gray-900 ml-2">{selectedFollowUp.icrop_id}</span>
+                      </div>
+                    )}
+                    {extraLeadInfo?.profession && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Profession:</span>
+                        <span className="text-gray-900 ml-2">{extraLeadInfo.profession}</span>
+                      </div>
+                    )}
+                    {extraLeadInfo?.test_drive_type && (
+                      <div className="flex justify-between">
+                        <span className="font-medium text-gray-600">Test Drive:</span>
+                        <span className="text-gray-900 ml-2">{extraLeadInfo.test_drive_type}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-gray-600">Trade-in:</span>
+                      <div className="flex items-center space-x-1">
+                        <span className="text-gray-900 ml-2">{(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string || 'No'}</span>
+                        {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes' && (
                       <Button
                         variant="outline"
-                        className="mt-1"
-                        onClick={async () => {
-                          try {
+                            size="sm"
+                            onClick={() => {
                             setTradeInLoading(true)
                             setTradeInOpen(true)
-                            const res = await fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
-                            const data = await res.json()
-                            if (!res.ok) {
-                              toast.error(data?.error || 'Failed to fetch trade-in details')
-                              setTradeInData(null)
-                            } else {
-                              setTradeInData(data?.trade_in_details || data || null)
-                            }
-                          } catch (e) {
-                            console.error('Trade-in fetch error', e)
-                            toast.error('Error fetching trade-in details')
-                            setTradeInData(null)
-                          } finally {
+                              fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
+                                .then(res => res.json())
+                                .then(data => {
+                                  const tradeInInfo = data.trade_in_details || {}
+                                  const combinedData = {
+                                    ...tradeInInfo,
+                                    customer_name: data.lead_master?.customer_name,
+                                    customer_mobile_number: data.lead_master?.customer_mobile_number,
+                                    trade_in: data.trade_in,
+                                    profession: data.profession,
+                                    test_drive_type: data.test_drive_type
+                                  }
+                                  setTradeInData(combinedData)
                             setTradeInLoading(false)
-                          }
-                        }}
-                      >
-                        View trade-in details
+                                })
+                                .catch(err => {
+                                  console.error('Error fetching trade-in details:', err)
+                                  setTradeInLoading(false)
+                                })
+                            }}
+                            className="text-xs h-4 px-1 bg-gray-100 hover:bg-gray-200"
+                          >
+                            View
                       </Button>
-                      <Dialog open={tradeInOpen} onOpenChange={setTradeInOpen}>
-                        <DialogContent className="sm:max-w-md">
-                          <DialogHeader>
-                            <DialogTitle>Trade-in details</DialogTitle>
-                          </DialogHeader>
-                          <div className="text-sm text-gray-800">
-                            {tradeInLoading ? (
-                              <div>Loading...</div>
-                            ) : tradeInData ? (
-                              <div className="space-y-1">
-                                <div><span className="font-medium">Make:</span> {tradeInData.trade_in_make || '—'}</div>
-                                <div><span className="font-medium">Model:</span> {tradeInData.trade_in_model || '—'}</div>
-                                <div><span className="font-medium">Year:</span> {tradeInData.trade_in_year || '—'}</div>
-                                <div><span className="font-medium">KM:</span> {tradeInData.trade_in_km || '—'}</div>
-                                <div><span className="font-medium">Ownership:</span> {tradeInData.trade_in_ownership || '—'}</div>
+                        )}
                               </div>
-                            ) : (
-                              <div>No trade-in details available.</div>
-                            )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Previous Calls - Ultra Compact */}
+                {selectedFollowUp && (
+                  <div className="space-y-1 text-xs">
+                    <div className="font-medium text-gray-700 mb-1">Previous Calls:</div>
+                    <div className="space-y-0.5 text-gray-600">
+                      {selectedFollowUp.first_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 1:</span>
+                          <span>{(selectedFollowUp.first_call_date || '').slice(0,10)} · {selectedFollowUp.first_call_remark}</span>
                           </div>
-                        </DialogContent>
-                      </Dialog>
+                      )}
+                      {selectedFollowUp.second_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 2:</span>
+                          <span>{(selectedFollowUp.second_call_date || '').slice(0,10)} · {selectedFollowUp.second_call_remark}</span>
                     </div>
                   )}
+                      {selectedFollowUp.third_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 3:</span>
+                          <span>{(selectedFollowUp.third_call_date || '').slice(0,10)} · {selectedFollowUp.third_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.fourth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 4:</span>
+                          <span>{(selectedFollowUp.fourth_call_date || '').slice(0,10)} · {selectedFollowUp.fourth_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.fifth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 5:</span>
+                          <span>{(selectedFollowUp.fifth_call_date || '').slice(0,10)} · {selectedFollowUp.fifth_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.sixth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 6:</span>
+                          <span>{(selectedFollowUp.sixth_call_date || '').slice(0,10)} · {selectedFollowUp.sixth_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.seventh_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 7:</span>
+                          <span>{(selectedFollowUp.seventh_call_date || '').slice(0,10)} · {selectedFollowUp.seventh_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.eighth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 8:</span>
+                          <span>{(selectedFollowUp.eighth_call_date || '').slice(0,10)} · {selectedFollowUp.eighth_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.ninth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 9:</span>
+                          <span>{(selectedFollowUp.ninth_call_date || '').slice(0,10)} · {selectedFollowUp.ninth_call_remark}</span>
+                        </div>
+                      )}
+                      {selectedFollowUp.tenth_call_remark && (
+                        <div className="flex justify-between">
+                          <span>Call 10:</span>
+                          <span>{(selectedFollowUp.tenth_call_date || '').slice(0,10)} · {selectedFollowUp.tenth_call_remark}</span>
+                        </div>
+                      )}
+                    </div>
                 </div>
               )}
               
-              <div>
-                <Label htmlFor="callNumber">Call Number</Label>
-                <Select value={callNumber.toString()} onValueChange={(value) => setCallNumber(parseInt(value))}>
-                  <SelectTrigger disabled>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 7].map((num) => (
-                      <SelectItem key={num} value={num.toString()}>
-                        Call #{num}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Follow-up Entry Section - Ultra Compact */}
+                <div className="space-y-2">
+                  {/* Call Number */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-gray-700">Call Number</Label>
+                    <Input 
+                      value={`Call #${getNextCallNumber(selectedFollowUp)}`}
+                      disabled
+                      className="bg-gray-50 h-7 text-xs"
+                    />
           </div>
-              <div>
-                <Label htmlFor="callOutcome">Lead Status / Outcome</Label>
+
+                  {/* Lead Status / Outcome */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-gray-700">Lead Status / Outcome</Label>
+                    <div className="flex gap-2">
                 <Select value={callOutcome} onValueChange={setCallOutcome}>
-                  <SelectTrigger>
+                        <SelectTrigger className="h-7 text-xs">
                     <SelectValue placeholder="Select Lead Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -675,55 +1101,243 @@ export default function PSDashboard() {
                     ))}
                   </SelectContent>
                 </Select>
+                      
+                      {/* Order No. (Booking ID) - Show only for Booked status */}
+                      {callOutcome === 'Booked' && (
+                        <Input 
+                          value={bookingId}
+                          onChange={(e) => {
+                            let value = e.target.value.toUpperCase()
+                            
+                            // Remove any non-alphanumeric characters except ORD
+                            value = value.replace(/[^A-Z0-9]/g, '')
+                            
+                            // Ensure it starts with ORD
+                            if (value && !value.startsWith('ORD')) {
+                              value = 'ORD' + value.replace(/^ORD/, '')
+                            }
+                            
+                            // Limit to ORD + exactly 9 digits
+                            if (value.startsWith('ORD')) {
+                              const digits = value.substring(3).replace(/\D/g, '')
+                              if (digits.length <= 9) {
+                                value = 'ORD' + digits
+                              } else {
+                                value = 'ORD' + digits.substring(0, 9)
+                              }
+                            }
+                            
+                            setBookingId(value)
+                          }}
+                          placeholder="ORD123456789"
+                          className={`h-7 text-xs w-32 ${bookingId && bookingId.length !== 12 ? 'border-red-500' : ''}`}
+                          required
+                        />
+                      )}
+                      
+                      {/* DN No. (Retailed ID) - Show only for Retailed status */}
+                      {callOutcome === 'Retailed' && (
+                        <Input 
+                          value={retailedId}
+                          onChange={(e) => {
+                            let value = e.target.value.toUpperCase()
+                            
+                            // Remove any non-alphanumeric characters except DNN
+                            value = value.replace(/[^A-Z0-9]/g, '')
+                            
+                            // Ensure it starts with DNN
+                            if (value && !value.startsWith('DNN')) {
+                              value = 'DNN' + value.replace(/^DNN/, '')
+                            }
+                            
+                            // Limit to DNN + exactly 9 digits
+                            if (value.startsWith('DNN')) {
+                              const digits = value.substring(3).replace(/\D/g, '')
+                              if (digits.length <= 9) {
+                                value = 'DNN' + digits
+                              } else {
+                                value = 'DNN' + digits.substring(0, 9)
+                              }
+                            }
+                            
+                            setRetailedId(value)
+                          }}
+                          placeholder="DNN123456789"
+                          className={`h-7 text-xs w-32 ${retailedId && retailedId.length !== 12 ? 'border-red-500' : ''}`}
+                          required
+                        />
+                      )}
+                    </div>
               </div>
 
-              <div>
-                <Label htmlFor="callRemark">Call Remark</Label>
+                  {/* Call Remark */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-gray-700">Call Remark</Label>
                 <Textarea
-                  id="callRemark"
+                      placeholder="Enter call details..."
                   value={callRemark}
                   onChange={(e) => setCallRemark(e.target.value)}
-                  placeholder="Enter call details..."
+                      rows={2}
+                      className="text-xs resize-none"
                 />
           </div>
 
-              <div>
-                <Label htmlFor="followUpDate">Next Follow-up Date</Label>
+                  {/* Next Follow-up Date */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-gray-700">
+                      Next Follow-up Date
+                      {isFollowUpDateLocked(callOutcome) && (
+                        <span className="text-red-500 ml-1">🔒</span>
+                      )}
+                    </Label>
                   <Input 
-                  id="followUpDate"
                   type="datetime-local"
                   value={followUpDate}
                   onChange={(e) => setFollowUpDate(e.target.value)}
+                      className="h-7 text-xs"
+                      disabled={isFollowUpDateLocked(callOutcome)}
                 />
               </div>
 
-              <div>
-                <Label htmlFor="finalStatus">Final Status</Label>
-                <Select value={finalStatus} onValueChange={setFinalStatus}>
-                  <SelectTrigger>
+
+                  {/* Final Status */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium text-gray-700">
+                      Final Status
+                      {isFinalStatusLocked(callOutcome) && (
+                        <span className="text-red-500 ml-1">🔒</span>
+                      )}
+                    </Label>
+                    <Select 
+                      value={finalStatus} 
+                      onValueChange={setFinalStatus}
+                      disabled={isFinalStatusLocked(callOutcome)}
+                    >
+                      <SelectTrigger className="h-7 text-xs">
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Hot">Hot</SelectItem>
-                    <SelectItem value="Warm">Warm</SelectItem>
+                        <SelectItem value="Waiting for Approval">Waiting for Approval</SelectItem>
                     <SelectItem value="Won">Won</SelectItem>
                     <SelectItem value="Lost">Lost</SelectItem>
                   </SelectContent>
                 </Select>
+                  </div>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setUpdateDialog(false)}>
+                {/* Action Buttons - Ultra Compact */}
+                <div className="flex justify-end space-x-2 pt-2 border-t">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setUpdateDialog(false)}
+                    className="h-7 px-3 text-xs"
+                  >
                   Cancel
                 </Button>
-                <Button onClick={handleUpdateFollowUp}>
-                  Update Follow-up
+                  <Button 
+                    onClick={handleUpdateFollowUp}
+                    className="bg-gray-900 hover:bg-black text-white h-7 px-3 text-xs"
+                  >
+                    Update
                   </Button>
                 </div>
               </div>
           </DialogContent>
         </Dialog>
+
+          {/* Trade-in Details Modal */}
+          <Dialog open={tradeInOpen} onOpenChange={setTradeInOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <Car className="w-5 h-5 text-blue-600" />
+                  Trade-in Details
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                {tradeInLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <span className="ml-2 text-gray-600 text-sm">Loading trade-in details...</span>
+                  </div>
+                ) : tradeInData ? (
+                  <Card className="border-l-4 border-l-blue-500">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center space-x-2 text-sm">
+                        <Car className="h-4 w-4 text-blue-600" />
+                        <span>Vehicle Information</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-700 w-20">Make:</span>
+                          <span className="text-gray-800">{tradeInData.trade_in_make || '—'}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-700 w-20">Model:</span>
+                          <span className="text-gray-800">{tradeInData.trade_in_model || '—'}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-700 w-20">Year:</span>
+                          <span className="text-gray-800">{tradeInData.trade_in_year || '—'}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-700 w-20">KM:</span>
+                          <span className="text-gray-800">{tradeInData.trade_in_km || '—'}</span>
+                        </div>
+                        {tradeInData.trade_in_ownership && (
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium text-gray-700 w-20">Owner:</span>
+                            <span className="text-gray-800">{tradeInData.trade_in_ownership}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Customer Information */}
+                      {(tradeInData.customer_name || tradeInData.customer_mobile_number) && (
+                        <div className="pt-3 border-t">
+                          <div className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-1">
+                            <User className="w-4 h-4" />
+                            Customer Info
+                          </div>
+                          <div className="space-y-2">
+                            {tradeInData.customer_name && (
+                              <div className="flex items-center space-x-2">
+                                <span className="font-medium text-gray-700 w-20">Name:</span>
+                                <span className="text-gray-800">{tradeInData.customer_name}</span>
+                              </div>
+                            )}
+                            {tradeInData.customer_mobile_number && (
+                              <div className="flex items-center space-x-2">
+                                <span className="font-medium text-gray-700 w-20">Mobile:</span>
+                                <span className="text-gray-800">{tradeInData.customer_mobile_number}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="text-center py-8">
+                    <Car className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">No Trade-in Details</h3>
+                    <p className="text-xs text-gray-500">Trade-in information not available for this lead.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => setTradeInOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
     </DashboardLayout>
   )

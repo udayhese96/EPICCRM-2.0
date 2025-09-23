@@ -29,6 +29,9 @@ export const getUser = (): User | null => {
 export const logout = () => {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('user')
+    localStorage.removeItem('supabase_user')
+    // Clear the access_token cookie by setting it to expire
+    document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
     window.location.href = '/auth/login'
   }
 }

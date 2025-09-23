@@ -14,13 +14,17 @@ import { useState, useEffect } from "react"
 
 interface CREUser {
   id: string
-  name: string
   username: string
   email: string
-  phone: string
+  full_name: string
+  phone?: string
+  branch: string
   is_active: boolean
   created_at: string
+  updated_at: string
 }
+
+const branches = ["Mount Road", "Vyasarpadi", "Cuddalore"]
 
 
 export default function ManageCREPage() {
@@ -30,11 +34,13 @@ export default function ManageCREPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<CREUser | null>(null)
   const [formData, setFormData] = useState({
-    name: "",
     username: "",
     email: "",
+    full_name: "",
     phone: "",
-    password: ""
+    branch: "",
+    password: "",
+    is_active: true
   })
 
   // Fetch CRE users from API
@@ -44,10 +50,14 @@ export default function ManageCREPage() {
 
   const fetchCREUsers = async () => {
     try {
-      // Try Next.js API first
-      let response = await fetch('/api/cre-users', {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+      // Use unified users API with role filter
+      let response = await fetch('/api/users?role=cre', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       })
@@ -204,11 +214,11 @@ export default function ManageCREPage() {
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="name">Full Name</Label>
+                  <Label htmlFor="full_name">Full Name</Label>
                   <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    id="full_name"
+                    value={formData.full_name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
                     required
                   />
                 </div>
@@ -237,8 +247,23 @@ export default function ManageCREPage() {
                     id="phone"
                     value={formData.phone}
                     onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                    required
                   />
+                </div>
+                <div>
+                  <Label htmlFor="branch">Branch (Optional)</Label>
+                  <Select value={formData.branch} onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No Branch</SelectItem>
+                      {branches.map((branch) => (
+                        <SelectItem key={branch} value={branch}>
+                          {branch}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="password">Password</Label>
@@ -250,6 +275,15 @@ export default function ManageCREPage() {
                     required={!editingUser}
                     placeholder={editingUser ? "Leave blank to keep current password" : ""}
                   />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="is_active"
+                    checked={formData.is_active}
+                    onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
+                  />
+                  <Label htmlFor="is_active">Active</Label>
                 </div>
                 <div className="flex justify-end space-x-3">
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -332,6 +366,7 @@ export default function ManageCREPage() {
                   <TableHead>Username</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Actions</TableHead>
@@ -345,17 +380,22 @@ export default function ManageCREPage() {
                         #{(index + 1).toString().padStart(2, '0')}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-medium">{user.name}</TableCell>
+                    <TableCell className="font-medium">{user.full_name}</TableCell>
                     <TableCell className="text-purple-600">{user.username}</TableCell>
                     <TableCell>
                       <div className="flex items-center text-sm">
-                        📞 {user.phone}
+                        📞 {user.phone || 'N/A'}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center text-sm text-pink-600">
                         📧 {user.email}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {user.branch || 'No Branch'}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge 

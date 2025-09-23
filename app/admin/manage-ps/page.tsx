@@ -14,13 +14,14 @@ import { useState, useEffect } from "react"
 
 interface PSUser {
   id: string
-  name: string
   username: string
   email: string
-  phone: string
+  full_name: string
+  phone?: string
   branch: string
   is_active: boolean
   created_at: string
+  updated_at: string
 }
 
 const branches = ["Mount Road", "Vyasarpadi", "Cuddalore"]
@@ -32,12 +33,13 @@ export default function ManagePSPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<PSUser | null>(null)
   const [formData, setFormData] = useState({
-    name: "",
     username: "",
     email: "",
+    full_name: "",
     phone: "",
-    branch: "",
-    password: ""
+    branch: "Main Branch",
+    password: "",
+    is_active: true
   })
 
   // Fetch PS users from API
@@ -47,9 +49,13 @@ export default function ManagePSPage() {
 
   const fetchPSUsers = async () => {
     try {
-      const response = await fetch('/api/ps-users', {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+      const response = await fetch('/api/users?role=ps', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       })

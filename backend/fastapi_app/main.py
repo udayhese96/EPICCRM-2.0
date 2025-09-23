@@ -1840,14 +1840,50 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
         clean_user = (username or '').strip()
         clean_name = (name or '').strip()
 
-        if clean_name:
-            query = query.eq('cre_name', clean_name)
-        elif clean_user:
-            query = query.eq('cre_name', clean_user)
-
-        response = query.order('created_at', desc=True).execute()
-        print(f"Found {len(response.data or [])} leads")
-        return response.data or []
+        # Try exact matches first, then case-insensitive
+        found_leads = []
+        search_terms = [clean_name, clean_user] if clean_name and clean_user and clean_name != clean_user else [clean_name or clean_user]
+        search_terms = [term for term in search_terms if term]  # Remove empty terms
+        
+        for term in search_terms:
+            try:
+                exact_query = supabase.table('lead_master').select('*').eq('assigned', 'Yes').eq('cre_name', term)
+                exact_response = exact_query.order('created_at', desc=True).execute()
+                if exact_response.data:
+                    found_leads.extend(exact_response.data)
+                    print(f"Found {len(exact_response.data)} exact matches for '{term}'")
+                    break  # If we found exact matches, use them
+            except Exception as e:
+                print(f"Error with exact match for '{term}': {e}")
+        
+        # If no exact matches, try case-insensitive
+        if not found_leads:
+            try:
+                all_leads_response = supabase.table('lead_master').select('*').eq('assigned', 'Yes').execute()
+                if all_leads_response.data:
+                    for term in search_terms:
+                        filtered_leads = [
+                            lead for lead in all_leads_response.data 
+                            if lead.get('cre_name', '').lower() == term.lower()
+                        ]
+                        if filtered_leads:
+                            found_leads.extend(filtered_leads)
+                            print(f"Found {len(filtered_leads)} case-insensitive matches for '{term}'")
+                            break
+            except Exception as e:
+                print(f"Error with case-insensitive match: {e}")
+        
+        # Remove duplicates
+        unique_leads = []
+        seen_ids = set()
+        for lead in found_leads:
+            lead_id = lead.get('id') or lead.get('uid')
+            if lead_id not in seen_ids:
+                unique_leads.append(lead)
+                seen_ids.add(lead_id)
+        
+        print(f"Found {len(unique_leads)} leads for CRE")
+        return unique_leads
     except Exception as e:
         # Minimal logging to server stdout for debugging 500s
         print(f"Error in get_public_cre_assigned: {e}")

@@ -29,33 +29,46 @@ class LeadSource(str, Enum):
     cold_call = "cold_call"
     walk_in = "walk_in"
 
-# User models
+# Unified User models for the new users table
 class UserBase(BaseModel):
     username: str
     email: EmailStr
-    first_name: Optional[str] = ""
-    last_name: Optional[str] = ""
-    role: UserRole
+    full_name: str
     phone: Optional[str] = None
-    branch_id: Optional[str] = None
+    role: str  # Changed from UserRole enum to string for flexibility
+    branch: Optional[str] = None  # Changed from branch_id to branch
+    is_active: bool = True
 
-class UserCreate(UserBase):
+class UserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str
+    phone: Optional[str] = None
+    role: str
+    branch: Optional[str] = None
     password: str
+    is_active: bool = True
 
 class UserUpdate(BaseModel):
-    username: Optional[str] = None  # Added username field
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    role: Optional[UserRole] = None
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
     phone: Optional[str] = None
-    branch_id: Optional[str] = None
+    branch: Optional[str] = None
+    password: Optional[str] = None
     is_active: Optional[bool] = None
 
-class UserResponse(UserBase):
+class UserResponse(BaseModel):
     id: str
-    is_active: Optional[bool] = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    username: str
+    email: str
+    full_name: str
+    phone: Optional[str] = None
+    role: str
+    branch: Optional[str] = None
+    is_active: bool
+    created_at: str
+    updated_at: str
 
 # Authentication models
 class LoginRequest(BaseModel):

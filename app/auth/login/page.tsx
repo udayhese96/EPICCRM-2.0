@@ -1,26 +1,23 @@
 "use client"
 
-import type React from "react"
-
+import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
-import { Building2, Users, TrendingUp } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { Building2, Users, TrendingUp, Shield, BarChart3, Zap, Eye, EyeOff, Lock, User } from "lucide-react"
 
 export default function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
@@ -28,18 +25,18 @@ export default function LoginPage() {
     console.log("🔐 Login attempt with:", { username, password })
 
     try {
-      // Use backend login (no hashes in DB)
       const resp = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       })
+      
       if (!resp.ok) {
         throw new Error('Invalid username or password')
       }
+      
       const data = await resp.json()
 
-      // Save minimal session with access token
       localStorage.setItem('supabase_user', JSON.stringify({
         id: data.user.id,
         username: data.user.username,
@@ -49,40 +46,38 @@ export default function LoginPage() {
         access_token: data.access_token
       }))
 
-      // Redirect based on role
       const userRole = data.user.role
       console.log("🔄 Redirecting based on role:", userRole)
 
+      let redirectUrl = "/dashboard"
       switch (userRole) {
         case "admin":
-          console.log("👑 Redirecting to admin dashboard")
-          router.push("/admin/dashboard")
+          redirectUrl = "/admin/dashboard"
           break
         case "branch_head":
-          console.log("🏢 Redirecting to branch head dashboard")
-          router.push("/branch-head/dashboard")
+          redirectUrl = "/branch-head/dashboard"
           break
         case "cre_team_leader":
-          console.log("🧭 Redirecting to CRE Team Leader dashboard")
-          router.push("/cre-team-leader/dashboard")
+          redirectUrl = "/cre-team-leader/dashboard"
           break
         case "cre_icrop":
-          console.log("🎯 Redirecting to CRE ICROP dashboard")
-          router.push("/cre-icrop/dashboard")
+          redirectUrl = "/cre-icrop/dashboard"
           break
         case "cre":
-          console.log("📊 Redirecting to CRE dashboard")
-          router.push("/cre/dashboard")
+          redirectUrl = "/cre/dashboard"
           break
         case "ps":
-          console.log("📈 Redirecting to PS dashboard")
-          router.push("/ps/dashboard")
+          redirectUrl = "/ps/dashboard"
+          break
+        case "sales_manager":
+          redirectUrl = "/sales-manager/dashboard"
           break
         default:
-          console.log("🏠 Redirecting to default dashboard")
-          router.push("/dashboard")
+          redirectUrl = "/dashboard"
       }
-    } catch (error: unknown) {
+      
+      window.location.href = redirectUrl
+    } catch (error) {
       console.error("🚨 Login error:", error)
       setError(error instanceof Error ? error.message : "Invalid username or password")
     } finally {
@@ -90,159 +85,253 @@ export default function LoginPage() {
     }
   }
 
+  const features = [
+    {
+      icon: Users,
+      title: "Smart Lead Management",
+      description: "AI-powered lead scoring and automated nurturing workflows",
+      gradient: "from-blue-500 to-cyan-500"
+    },
+    {
+      icon: Building2,
+      title: "Multi-Branch Operations", 
+      description: "Seamless management across all your business locations",
+      gradient: "from-emerald-500 to-teal-500"
+    },
+    {
+      icon: BarChart3,
+      title: "Advanced Analytics",
+      description: "Real-time insights and predictive business intelligence", 
+      gradient: "from-purple-500 to-violet-500"
+    },
+    {
+      icon: Shield,
+      title: "Enterprise Security",
+      description: "Bank-grade security with role-based access controls",
+      gradient: "from-orange-500 to-red-500"
+    }
+  ]
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
-        {/* Left side - Branding */}
-        <div className="hidden lg:block space-y-8">
-          <div className="space-y-4">
-            <h1 className="text-4xl font-bold text-gray-900">EPIC CRM 2.0</h1>
-            <p className="text-xl text-gray-600">
-              Streamline your customer relationships with our powerful CRM platform
-            </p>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+      {/* Animated background elements */}
+      <div className="absolute inset-0">
+        <div className="absolute top-0 -left-4 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+        <div className="absolute top-0 -right-4 w-72 h-72 bg-cyan-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse" style={{animationDelay: '2s'}}></div>
+        <div className="absolute -bottom-8 left-20 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse" style={{animationDelay: '4s'}}></div>
+      </div>
 
-          <div className="space-y-6">
-            <div className="flex items-center space-x-4">
-              <div className="bg-blue-100 p-3 rounded-lg">
-                <Users className="h-6 w-6 text-blue-600" />
+      <div className="relative z-10 min-h-screen flex flex-col lg:flex-row">
+        {/* Left side - Branding & Features */}
+        <div className="hidden lg:flex lg:w-1/2 flex-col justify-center p-12 xl:p-16">
+          <div className="max-w-lg">
+            {/* Logo & Title */}
+            <div className="mb-12">
+              <div className="flex items-center mb-6">
+                <div className="w-12 h-12 bg-gradient-to-r from-cyan-400 to-blue-600 rounded-xl flex items-center justify-center mr-4 shadow-lg">
+                  <Zap className="w-7 h-7 text-white" />
+                </div>
+                <h1 className="text-4xl xl:text-5xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                  EPIC CRM 2.0
+                </h1>
               </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Lead Management</h3>
-                <p className="text-gray-600">Track and nurture leads through your sales pipeline</p>
-              </div>
+              <p className="text-xl text-gray-300 leading-relaxed">
+                Transform your business relationships with intelligent automation and powerful insights.
+              </p>
             </div>
 
-            <div className="flex items-center space-x-4">
-              <div className="bg-green-100 p-3 rounded-lg">
-                <Building2 className="h-6 w-6 text-green-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Branch Management</h3>
-                <p className="text-gray-600">Manage multiple branches and teams efficiently</p>
-              </div>
+            {/* Features Grid */}
+            <div className="space-y-6">
+              {features.map((feature, index) => (
+                <div 
+                  key={index}
+                  className="group p-6 rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 transition-all duration-300 hover:scale-105 cursor-pointer"
+                >
+                  <div className="flex items-start space-x-4">
+                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-r ${feature.gradient} flex items-center justify-center flex-shrink-0 shadow-lg`}>
+                      <feature.icon className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white text-lg mb-2 group-hover:text-cyan-300 transition-colors">
+                        {feature.title}
+                      </h3>
+                      <p className="text-gray-400 text-sm leading-relaxed">
+                        {feature.description}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="flex items-center space-x-4">
-              <div className="bg-purple-100 p-3 rounded-lg">
-                <TrendingUp className="h-6 w-6 text-purple-600" />
+            {/* Stats */}
+            <div className="mt-12 grid grid-cols-3 gap-8">
+              <div className="text-center">
+                <div className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent mb-1">99.9%</div>
+                <div className="text-sm text-gray-400">Uptime</div>
               </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Analytics & Reports</h3>
-                <p className="text-gray-600">Get insights with comprehensive reporting tools</p>
+              <div className="text-center">
+                <div className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-teal-600 bg-clip-text text-transparent mb-1">10k+</div>
+                <div className="text-sm text-gray-400">Active Users</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-violet-600 bg-clip-text text-transparent mb-1">24/7</div>
+                <div className="text-sm text-gray-400">Support</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* Right side - Login Form */}
-        <div className="w-full max-w-md mx-auto">
-          <Card className="shadow-xl">
-            <CardHeader className="space-y-1">
-              <CardTitle className="text-2xl font-bold text-center">Welcome Back</CardTitle>
-              <CardDescription className="text-center">Sign in to your EPIC CRM account</CardDescription>
-              <div className="bg-blue-50 p-3 rounded-lg mt-4">
-                <p className="text-sm font-medium text-blue-800 mb-2">Test Credentials:</p>
-                <div className="text-xs text-blue-700 space-y-1">
-                  <div>👑 Admin: admin / admin123</div>
-                  <div>🏢 Branch Head: branchhead / branchhead123</div>
-                  <div>📊 CRE: cre / cre123</div>
-                  <div>💼 Pre-Sales: ps / ps123</div>
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-4 lg:p-8">
+          <div className="w-full max-w-md">
+            {/* Mobile header */}
+            <div className="lg:hidden text-center mb-8">
+              <div className="flex items-center justify-center mb-4">
+                <div className="w-10 h-10 bg-gradient-to-r from-cyan-400 to-blue-600 rounded-xl flex items-center justify-center mr-3 shadow-lg">
+                  <Zap className="w-6 h-6 text-white" />
                 </div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+                  EPIC CRM 2.0
+                </h1>
               </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="Enter your username"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="h-11"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-11"
-                  />
-                </div>
-                {error && (
-                  <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md text-sm">
-                    {error}
-                  </div>
-                )}
-                <Button type="submit" className="w-full h-11 bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
-                  {isLoading ? "Signing in..." : "Sign In"}
-                </Button>
-                
-                {/* Quick Test Buttons */}
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      setUsername("admin")
-                      setPassword("admin123")
-                    }}
-                  >
-                    👑 Admin
-                  </Button>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      setUsername("cre")
-                      setPassword("cre123")
-                    }}
-                  >
-                    📊 CRE
-                  </Button>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      setUsername("branchhead")
-                      setPassword("branchhead123")
-                    }}
-                  >
-                    🏢 Branch
-                  </Button>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      setUsername("ps")
-                      setPassword("ps123")
-                    }}
-                  >
-                    💼 PS
-                  </Button>
-                </div>
-              </form>
+              <p className="text-gray-300">
+                Welcome back to your business command center
+              </p>
+            </div>
 
-              <div className="mt-6 text-center text-sm">
-                <span className="text-gray-600">Don't have an account? </span>
-                <Link href="/auth/register" className="text-blue-600 hover:text-blue-700 font-medium">
-                  Contact your administrator
-                </Link>
+            <Card className="shadow-2xl bg-white/10 backdrop-blur-xl border-white/20 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent"></div>
+              
+              <CardHeader className="relative space-y-1 pb-8">
+                <CardTitle className="text-2xl font-bold text-white text-center mb-2">
+                  Welcome Back
+                </CardTitle>
+                <CardDescription className="text-gray-300 text-center">
+                  Sign in to access your dashboard
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="relative">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="username" className="text-white font-medium flex items-center">
+                      <User className="w-4 h-4 mr-2" />
+                      Username
+                    </Label>
+                    <Input
+                      id="username"
+                      type="text"
+                      placeholder="Enter your username"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="h-12 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-cyan-400 focus:ring-cyan-400/20 transition-all"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="password" className="text-white font-medium flex items-center">
+                      <Lock className="w-4 h-4 mr-2" />
+                      Password
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Enter your password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="h-12 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-cyan-400 focus:ring-cyan-400/20 pr-12 transition-all"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-12 px-3 text-gray-400 hover:text-white hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <div className="bg-red-500/20 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm backdrop-blur-sm">
+                      {error}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center">
+                      <input 
+                        type="checkbox" 
+                        id="remember" 
+                        className="mr-2 rounded border-white/20 bg-white/10 text-cyan-400 focus:ring-cyan-400/20"
+                      />
+                      <label htmlFor="remember" className="text-gray-300">Remember me</label>
+                    </div>
+                    <Link 
+                      href="/auth/forgot-password" 
+                      className="text-cyan-400 hover:text-cyan-300 transition-colors hover:underline"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+
+                  <Button 
+                    onClick={handleLogin}
+                    className="w-full h-12 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none" 
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>Signing in...</span>
+                      </div>
+                    ) : (
+                      <span className="flex items-center justify-center">
+                        <Lock className="w-4 h-4 mr-2" />
+                        Sign In
+                      </span>
+                    )}
+                  </Button>
+                </div>
+
+                <div className="mt-8 text-center">
+                  <p className="text-gray-400 text-sm">
+                    Need access? {" "}
+                    <Link 
+                      href="/contact" 
+                      className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors hover:underline"
+                    >
+                      Contact your administrator
+                    </Link>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Mobile features preview */}
+            <div className="lg:hidden mt-8 grid grid-cols-2 gap-4">
+              <div className="text-center p-4 rounded-xl bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 transition-all">
+                <TrendingUp className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
+                <p className="text-white text-sm font-medium">Analytics</p>
+                <p className="text-gray-400 text-xs">Real-time insights</p>
               </div>
-            </CardContent>
-          </Card>
+              <div className="text-center p-4 rounded-xl bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 transition-all">
+                <Shield className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                <p className="text-white text-sm font-medium">Secure</p>
+                <p className="text-gray-400 text-xs">Bank-grade security</p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-8 text-center text-xs text-gray-500">
+              <p>© 2024 EPIC CRM 2.0. All rights reserved.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

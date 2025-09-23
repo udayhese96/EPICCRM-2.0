@@ -202,34 +202,84 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre-team-leader')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">
                   <div className="p-2 bg-purple-100 rounded-lg">
-                    <Building2 className="h-5 w-5 text-purple-600" />
+                    <Shield className="h-5 w-5 text-purple-600" />
                   </div>
-                  <CardTitle className="text-sm font-medium">Manage Branch Heads</CardTitle>
+                  <CardTitle className="text-sm font-medium">Manage CRE TL</CardTitle>
                 </div>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-xs">
-                  Configure branch leadership
+                  Configure CRE Team Leaders
                 </CardDescription>
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre-icrop')}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-indigo-100 rounded-lg">
+                    <Building2 className="h-5 w-5 text-indigo-600" />
+                  </div>
+                  <CardTitle className="text-sm font-medium">Manage CRE ICROP</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-xs">
+                  Configure CRE ICROP Users
+                </CardDescription>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-sales-manager')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">
                   <div className="p-2 bg-orange-100 rounded-lg">
                     <Users className="h-5 w-5 text-orange-600" />
                   </div>
-                  <CardTitle className="text-sm font-medium">Manage Reception Users</CardTitle>
+                  <CardTitle className="text-sm font-medium">Manage Sales Manager</CardTitle>
                 </div>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-xs">
-                  Configure reception staff
+                  Configure Sales Managers
+                </CardDescription>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/users')}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-gray-100 rounded-lg">
+                    <Users className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <CardTitle className="text-sm font-medium">All Users</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-xs">
+                  View and manage all users
+                </CardDescription>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/branches')}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-teal-100 rounded-lg">
+                    <Building2 className="h-5 w-5 text-teal-600" />
+                  </div>
+                  <CardTitle className="text-sm font-medium">Manage Branches</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-xs">
+                  Configure branch locations
                 </CardDescription>
               </CardContent>
             </Card>

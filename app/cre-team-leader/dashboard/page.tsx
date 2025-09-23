@@ -536,9 +536,9 @@ export default function CRETeamLeaderDashboard() {
           </div>
 
           {/* Search and Filters */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            {/* Search */}
-            <Card className="shadow-lg">
+          <div className="mb-6">
+            {/* Search Bar */}
+            <Card className="shadow-lg mb-4">
               <CardContent className="p-6">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -560,46 +560,39 @@ export default function CRETeamLeaderDashboard() {
                     <Filter className="h-4 w-4 text-gray-400" />
                     <Label className="text-sm font-medium">Date Range</Label>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label htmlFor="start-date" className="text-xs text-gray-500">From</Label>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
                       <Input
-                        id="start-date"
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
                         className="text-sm"
+                        placeholder="From"
                       />
-                    </div>
-                    <div>
-                      <Label htmlFor="end-date" className="text-xs text-gray-500">To</Label>
+                      <span className="text-gray-400">to</span>
                       <Input
-                        id="end-date"
                         type="date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
                         className="text-sm"
+                        placeholder="To"
                       />
                     </div>
+                    {(startDate || endDate || searchTerm) && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setSearchTerm('')
+                          setStartDate('')
+                          setEndDate('')
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        Clear Filters
+                      </Button>
+                    )}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Clear Filters */}
-            <Card className="shadow-lg">
-              <CardContent className="p-6 flex items-center justify-center">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSearchTerm('')
-                    setStartDate('')
-                    setEndDate('')
-                  }}
-                  className="w-full"
-                >
-                  Clear Filters
-                </Button>
               </CardContent>
             </Card>
           </div>

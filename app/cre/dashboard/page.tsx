@@ -76,6 +76,8 @@ export default function CREDashboard() {
   const [dateTo, setDateTo] = useState<string>("")
   const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
   const [showRangePicker, setShowRangePicker] = useState(false)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting')
   const [countsUpdating, setCountsUpdating] = useState(false)
@@ -128,7 +130,7 @@ export default function CREDashboard() {
     // Only setup if we have a user
     if (!user?.username) {
       console.log('⚠️ [Real-time] No user found, skipping real-time setup')
-      return
+      return () => {}
     }
     
     console.log('🔌 [Real-time] Setting up Supabase real-time subscriptions for user:', user.username)
@@ -284,6 +286,7 @@ export default function CREDashboard() {
     }
   }
 
+
   const checkRedisWorkerStatus = async () => {
     try {
       const response = await fetch('/api/jobs/queue-stats')
@@ -332,6 +335,8 @@ export default function CREDashboard() {
       if (fullName) qs.append('name', fullName)
       
       console.log('📊 [CRE Dashboard] Fetching leads for:', { username, fullName })
+      console.log('📊 [CRE Dashboard] Query string:', qs.toString())
+      console.log('📊 [CRE Dashboard] Full URL:', `/api/cre-assigned?${qs.toString()}`)
       console.log('⚡ [Redis Worker] All lead operations will use background processing for ultra-fast UI!')
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
       
@@ -503,6 +508,15 @@ export default function CREDashboard() {
 
     const withinDateFilter = (lead: any) => {
       const created = (lead.date || '').slice(0,10)
+      
+      // Use new date range filter if dates are set
+      if (startDate || endDate) {
+        if (startDate && !endDate) return created >= startDate
+        if (!startDate && endDate) return created <= endDate
+        if (startDate && endDate) return created >= startDate && created <= endDate
+      }
+      
+      // Fallback to old date mode system
       if (dateMode === 'All Time') return true
       if (dateMode === 'Today') return created === todayIso
       if (dateMode === 'This Week') return created >= startOfWeek && created <= todayIso
@@ -667,7 +681,7 @@ export default function CREDashboard() {
   
   const filteredLeads = useMemo(() => {
     return getFilteredLeads()
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory])
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, endDate])
   
   const tabCounts = useMemo(() => getTabCounts(), [leads])
   const statusCounts = useMemo(() => getStatusCounts(), [leads])
@@ -698,47 +712,6 @@ export default function CREDashboard() {
               </div>
             )}
             
-            {/* Count Update Indicator */}
-            {countsUpdating && (
-              <div className="flex items-center space-x-2 text-green-600">
-                <div className="animate-pulse rounded-full h-4 w-4 bg-green-600"></div>
-                <span className="text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                  Updating counts...
-                </span>
-              </div>
-            )}
-            
-            {/* Auto Refresh Indicator */}
-            <div className="flex items-center space-x-2 text-blue-600">
-              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
-              <span className="text-xs" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                Auto-refresh every 3s
-              </span>
-            </div>
-            
-            {/* Real-time Status Indicator */}
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${
-                realtimeStatus === 'connected' ? 'bg-blue-500' : 
-                realtimeStatus === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
-              }`}></div>
-              <span className="text-xs text-gray-600">
-                {realtimeStatus === 'connected' ? 'Real-time Active' : 
-                 realtimeStatus === 'disconnected' ? 'Real-time Offline' : 'Connecting...'}
-              </span>
-            </div>
-            
-            {/* Redis Worker Status Indicator */}
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${
-                redisWorkerStatus === 'connected' ? 'bg-green-500' : 
-                redisWorkerStatus === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
-              }`}></div>
-              <span className="text-xs text-gray-600">
-                {redisWorkerStatus === 'connected' ? 'Redis Active' : 
-                 redisWorkerStatus === 'disconnected' ? 'Redis Offline' : 'Checking...'}
-              </span>
-            </div>
             <Button className="bg-green-600 hover:bg-green-700" onClick={() => setIsAddModalOpen(true)} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <Plus className="h-4 w-4 mr-2" />
               Add Lead
@@ -751,33 +724,6 @@ export default function CREDashboard() {
               Refresh
             </Button>
             
-            {/* Force Refresh Button */}
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                console.log('🔄 [Force] Force refreshing all data...')
-                fetchAssignedLeads()
-              }}
-              className="text-xs"
-              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
-            >
-              Force Refresh
-            </Button>
-            
-            {/* Test Real-time Button */}
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                console.log('🧪 [Test] Testing real-time connection...')
-                const supabase = createClient()
-                console.log('🧪 [Test] Supabase client:', supabase)
-                console.log('🧪 [Test] Current real-time status:', realtimeStatus)
-              }}
-              className="text-xs"
-              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
-            >
-              Test RT
-            </Button>
             <Button variant="outline" onClick={() => window.location.assign('/analytics')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <BarChart3 className="h-4 w-4 mr-2" />
               Analytics
@@ -981,6 +927,40 @@ export default function CREDashboard() {
                   >
                     <X className="h-4 w-4" />
                   </Button>
+                  
+                  {/* Date Range Filter */}
+                  <div className="flex items-center space-x-2">
+                    <Calendar className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm text-gray-600">Date Range:</span>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="text-sm w-36"
+                      placeholder="From"
+                    />
+                    <span className="text-gray-400">to</span>
+                    <Input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="text-sm w-36"
+                      placeholder="To"
+                    />
+                    {(startDate || endDate) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setStartDate('')
+                          setEndDate('')
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardHeader>

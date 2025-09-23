@@ -143,13 +143,14 @@ export default function CREICROPDashboard() {
       })
     }
 
-    // Sort: pending ICROP leads first, then assigned ones
+    // Sort: pending ICROP leads first (no icrop_id), then assigned ones (with icrop_id)
     filtered.sort((a, b) => {
       const aHasIcrop = !!a.icrop_id
       const bHasIcrop = !!b.icrop_id
       
-      if (aHasIcrop && !bHasIcrop) return 1
+      // Pending leads (no ICROP ID) should come first
       if (!aHasIcrop && bHasIcrop) return -1
+      if (aHasIcrop && !bHasIcrop) return 1
       return 0
     })
 
