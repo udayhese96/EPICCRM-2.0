@@ -804,34 +804,50 @@ async def login(login_data: LoginRequest):
         user_role = None
         found_table_key = None
         
-        for key, (table_name, role) in user_tables.items():
-            try:
-                print(f"[login] Checking table={table_name}")
-                response = supabase.table(table_name).select('*').eq('username', login_data.username).execute()
-                if response.data and len(response.data) > 0:
-                    user = response.data[0]
-                    
-                    # Special handling for cre_tl_users table - determine role based on username
-                    if table_name == 'cre_tl_users':
-                        if user.get('username') == 'creicrop':
-                            user_role = 'cre_icrop'
+        # Check unified users table first
+        try:
+            print(f"[login] Checking unified users table")
+            response = supabase.table('users').select('*').eq('username', login_data.username).eq('is_active', True).execute()
+            if response.data and len(response.data) > 0:
+                user = response.data[0]
+                user_role = user.get('role')
+                found_table_key = user_role
+                print(f"[login] Found user in unified users table: {user.get('username')} with role {user_role}")
+        except Exception as ex:
+            print(f"[login] Error checking users table: {ex}")
+        
+        # If no user found in unified table, fallback to old tables for backward compatibility
+        if not user:
+            for key, (table_name, role) in user_tables.items():
+                try:
+                    print(f"[login] Checking table={table_name}")
+                    response = supabase.table(table_name).select('*').eq('username', login_data.username).execute()
+                    if response.data and len(response.data) > 0:
+                        user = response.data[0]
+                        
+                        # Special handling for cre_tl_users table - determine role based on username
+                        if table_name == 'cre_tl_users':
+                            if user.get('username') == 'creicrop':
+                                user_role = 'cre_icrop'
+                            else:
+                                user_role = 'cre_team_leader'
                         else:
-                            user_role = 'cre_team_leader'
-                    else:
-                        user_role = role
-                    
-                    found_table_key = key
-                    print(f"[login] Found user in {table_name}: {user.get('username')} with role {user_role}")
-                    break
-            except Exception as ex:
-                print(f"[login] Error checking {table_name}: {ex}")
-                continue
+                            user_role = role
+                        
+                        found_table_key = key
+                        print(f"[login] Found user in {table_name}: {user.get('username')} with role {user_role}")
+                        break
+                except Exception as ex:
+                    print(f"[login] Error checking {table_name}: {ex}")
+                    continue
         
         if not user:
             print("[login] No user found")
             return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
         
-        if login_data.password != user.get("password_hash", ""):
+        # Check password - unified users table stores password_hash, old tables store password
+        stored_password = user.get("password_hash") or user.get("password", "")
+        if login_data.password != stored_password:
             print("[login] Password mismatch")
             return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
         
@@ -854,11 +870,13 @@ async def login(login_data: LoginRequest):
             "id": str(user.get("id", "unknown")),
             "username": user.get("username"),
             "email": user.get("email"),
-            "first_name": user.get("name") or user.get("username"),
-            "last_name": None,
-            "role": user_role,
+            "full_name": user.get("full_name") or user.get("name") or user.get("username"),
             "phone": user.get("phone"),
-            "branch_id": user.get("branch_id")
+            "role": user_role,
+            "branch": user.get("branch"),
+            "is_active": user.get("is_active", True),
+            "created_at": user.get("created_at", ""),
+            "updated_at": user.get("updated_at", "")
         }
         
         return LoginResponse(access_token=token, token_type="bearer", user=UserResponse(**resp_user))
