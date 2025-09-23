@@ -201,7 +201,7 @@ const professions = [
 ]
 
 const buyingPlan = [
-  "0-1 Months", "1-2 Months", "2-3 Months", "3-4 Months"
+  "Immediate", "1-2 Months", "2-3 Months", "Greater than 3 months"
 ]
 
 const financeOptions = ["Inhouse", "Outright"]
@@ -254,6 +254,60 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   const [availableVariants, setAvailableVariants] = useState<string[]>([])
   const [availablePS, setAvailablePS] = useState<string[]>([])
   const [isTradeInDialogOpen, setIsTradeInDialogOpen] = useState(false)
+  const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({})
+
+  // Validation functions
+  const validateTradeInYear = (year: string): string => {
+    if (!year) return ""
+    const yearNum = parseInt(year)
+    const currentYear = new Date().getFullYear()
+    if (isNaN(yearNum)) return "Year must be a number"
+    if (yearNum < 1990) return "Year cannot be before 1990"
+    if (yearNum > currentYear + 1) return `Year cannot be after ${currentYear + 1}`
+    return ""
+  }
+
+  const validateTradeInKm = (km: string): string => {
+    if (!km) return ""
+    const kmNum = parseInt(km.replace(/,/g, ''))
+    if (isNaN(kmNum)) return "Kilometers must be a number"
+    if (kmNum < 0) return "Kilometers cannot be negative"
+    if (kmNum > 1000000) return "Kilometers cannot exceed 1,000,000"
+    return ""
+  }
+
+  const validateMobileNumber = (mobile: string): string => {
+    if (!mobile) return ""
+    const mobileRegex = /^[6-9]\d{9}$/
+    if (!mobileRegex.test(mobile)) return "Please enter a valid 10-digit mobile number"
+    return ""
+  }
+
+  const validateEmail = (email: string): string => {
+    if (!email) return ""
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) return "Please enter a valid email address"
+    return ""
+  }
+
+  const validateForm = (): boolean => {
+    const errors: {[key: string]: string} = {}
+    
+    // Validate trade-in year
+    if (formData.trade_in === "Yes" && formData.trade_in_year) {
+      const yearError = validateTradeInYear(formData.trade_in_year)
+      if (yearError) errors.trade_in_year = yearError
+    }
+    
+    // Validate trade-in kilometers
+    if (formData.trade_in === "Yes" && formData.trade_in_km) {
+      const kmError = validateTradeInKm(formData.trade_in_km)
+      if (kmError) errors.trade_in_km = kmError
+    }
+    
+    setValidationErrors(errors)
+    return Object.keys(errors).length === 0
+  }
 
   // Reset state whenever a new lead is opened
   useEffect(() => {
@@ -310,6 +364,12 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   }
 
   const handleSubmit = async () => {
+    // Validate form before submission
+    if (!validateForm()) {
+      console.log('❌ [Validation] Form validation failed:', validationErrors)
+      return
+    }
+
     const leadStatus = (lead?.lead_status || "").trim()
     const isClosed = leadStatus === "Won" || leadStatus === "Lost"
     // For qualified leads, always treat as follow-up workflow
@@ -1224,19 +1284,47 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>
               <Input 
                 type="number"
-                placeholder="Manufacturing Year"
+                placeholder="Manufacturing Year (1990-2026)"
                 value={formData.trade_in_year}
-                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))
+                  // Clear validation error when user types
+                  if (validationErrors.trade_in_year) {
+                    setValidationErrors(prev => {
+                      const newErrors = { ...prev }
+                      delete newErrors.trade_in_year
+                      return newErrors
+                    })
+                  }
+                }}
+                className={validationErrors.trade_in_year ? "border-red-500" : ""}
               />
+              {validationErrors.trade_in_year && (
+                <p className="text-red-500 text-xs mt-1">{validationErrors.trade_in_year}</p>
+              )}
             </div>
             <div className="space-y-3">
               <Label htmlFor="trade_in_km" className="text-sm font-medium mb-2 block">KM Driven</Label>
               <Input 
                 type="number"
-                placeholder="KM Driven"
+                placeholder="KM Driven (0-1,000,000)"
                 value={formData.trade_in_km}
-                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))
+                  // Clear validation error when user types
+                  if (validationErrors.trade_in_km) {
+                    setValidationErrors(prev => {
+                      const newErrors = { ...prev }
+                      delete newErrors.trade_in_km
+                      return newErrors
+                    })
+                  }
+                }}
+                className={validationErrors.trade_in_km ? "border-red-500" : ""}
               />
+              {validationErrors.trade_in_km && (
+                <p className="text-red-500 text-xs mt-1">{validationErrors.trade_in_km}</p>
+              )}
             </div>
             <div className="space-y-3">
               <Label htmlFor="trade_in_ownership" className="text-sm font-medium mb-2 block">Ownership Type</Label>

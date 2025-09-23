@@ -5,12 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCw, Search, User, Phone, Calendar, MapPin, Car, Edit3, CheckCircle, AlertCircle, LogOut } from 'lucide-react'
+import { RefreshCw, Search, User, Phone, Calendar, MapPin, Car, Edit3, CheckCircle, AlertCircle, LogOut, Filter, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
 
 interface QualifiedLead {
   id: string
@@ -42,10 +40,12 @@ export default function CREICROPDashboard() {
   const [searchTerm, setSearchTerm] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [selectedLead, setSelectedLead] = useState<QualifiedLead | null>(null)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [icropId, setIcropId] = useState('')
-  const [isUpdating, setIsUpdating] = useState(false)
+  const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null)
+  const [icropInputs, setIcropInputs] = useState<{[key: string]: string}>({})
+  
+  // Date range filter states
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   const [user, setUser] = useState({
     username: 'creicrop',
@@ -115,31 +115,57 @@ export default function CREICROPDashboard() {
     fetchQualifiedLeads()
   }, [])
 
-  // Filter leads based on search term
+  // Filter leads based on search term and date range
   useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredLeads(leads)
-    } else {
-      const filtered = leads.filter(lead => 
+    let filtered = leads
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(lead => 
         lead.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.customer_mobile_number.includes(searchTerm) ||
         lead.lead_uid.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
       )
-      setFilteredLeads(filtered)
     }
-  }, [searchTerm, leads])
 
-  const handleUpdateIcropId = async () => {
-    if (!selectedLead || !icropId.trim()) {
+    // Apply date range filter
+    if (startDate || endDate) {
+      filtered = filtered.filter(lead => {
+        const leadDate = new Date(lead.created_at)
+        const start = startDate ? new Date(startDate) : null
+        const end = endDate ? new Date(endDate) : null
+        
+        if (start && leadDate < start) return false
+        if (end && leadDate > end) return false
+        return true
+      })
+    }
+
+    // Sort: pending ICROP leads first, then assigned ones
+    filtered.sort((a, b) => {
+      const aHasIcrop = !!a.icrop_id
+      const bHasIcrop = !!b.icrop_id
+      
+      if (aHasIcrop && !bHasIcrop) return 1
+      if (!aHasIcrop && bHasIcrop) return -1
+      return 0
+    })
+
+    setFilteredLeads(filtered)
+  }, [searchTerm, leads, startDate, endDate])
+
+  const handleUpdateIcropId = async (leadId: string) => {
+    const icropId = icropInputs[leadId]
+    if (!icropId?.trim()) {
       toast.error('Please enter a valid ICROP ID')
       return
     }
 
     try {
-      setIsUpdating(true)
-      console.log(`🔄 [ICROP Dashboard] Updating ICROP ID for lead ${selectedLead.lead_uid}: ${icropId}`)
+      setUpdatingLeadId(leadId)
+      console.log(`🔄 [ICROP Dashboard] Updating ICROP ID for lead ${leadId}: ${icropId}`)
 
       // Get token from localStorage
       const supabaseUser = localStorage.getItem('supabase_user')
@@ -150,7 +176,7 @@ export default function CREICROPDashboard() {
       const userData = JSON.parse(supabaseUser)
       const token = userData.access_token
 
-      const response = await fetch(`/api/qualified-leads/${selectedLead.id}/icrop-id`, {
+      const response = await fetch(`/api/qualified-leads/${leadId}/icrop-id`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -165,20 +191,25 @@ export default function CREICROPDashboard() {
 
       // Update local state
       setLeads(prev => prev.map(lead => 
-        lead.id === selectedLead.id 
+        lead.id === leadId 
           ? { ...lead, icrop_id: icropId.trim() }
           : lead
       ))
 
-      toast.success(`ICROP ID ${icropId} assigned to ${selectedLead.customer_name}`)
-      setIsDialogOpen(false)
-      setSelectedLead(null)
-      setIcropId('')
+      // Clear the input
+      setIcropInputs(prev => {
+        const newInputs = { ...prev }
+        delete newInputs[leadId]
+        return newInputs
+      })
+
+      const lead = leads.find(l => l.id === leadId)
+      toast.success(`ICROP ID ${icropId} assigned to ${lead?.customer_name}`)
     } catch (error) {
       console.error('Error updating ICROP ID:', error)
       toast.error('Failed to update ICROP ID')
     } finally {
-      setIsUpdating(false)
+      setUpdatingLeadId(null)
     }
   }
 
@@ -191,12 +222,6 @@ export default function CREICROPDashboard() {
   const handleSignOut = () => {
     localStorage.removeItem('supabase_user')
     window.location.href = '/auth/login'
-  }
-
-  const openUpdateDialog = (lead: QualifiedLead) => {
-    setSelectedLead(lead)
-    setIcropId(lead.icrop_id || '')
-    setIsDialogOpen(true)
   }
 
   const stats = useMemo(() => {
@@ -215,303 +240,301 @@ export default function CREICROPDashboard() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading qualified leads...</p>
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-gray-600">Loading qualified leads...</p>
+          </div>
         </div>
-      </div>
+      </DashboardLayout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif' }}>
-                CRE ICROP Dashboard
-              </h1>
-              <p className="text-gray-600 mt-2" style={{ fontFamily: 'Roboto, sans-serif' }}>
-                Manage ICROP ID assignments for PS-assigned qualified leads
-              </p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-sm text-gray-600">System Online</span>
+    <DashboardLayout>
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif' }}>
+                  CRE ICROP Dashboard
+                </h1>
+                <p className="text-gray-600 mt-2" style={{ fontFamily: 'Roboto, sans-serif' }}>
+                  Manage ICROP ID assignments for PS-assigned qualified leads
+                </p>
               </div>
-              <Button 
-                onClick={handleRefresh} 
-                disabled={isRefreshing}
-                variant="outline"
-                size="sm"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              <Button 
-                onClick={handleSignOut}
-                variant="outline"
-                size="sm"
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </Button>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span className="text-sm text-gray-600">System Online</span>
+                </div>
+                <Button 
+                  onClick={handleRefresh} 
+                  disabled={isRefreshing}
+                  variant="outline"
+                  size="sm"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button 
+                  onClick={handleSignOut}
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                    Total Qualified Leads
-                  </p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
-                    {stats.total}
-                  </p>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-blue-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                      Total Qualified Leads
+                    </p>
+                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+                      {stats.total}
+                    </p>
+                  </div>
+                  <User className="h-8 w-8 text-blue-200" />
                 </div>
-                <User className="h-8 w-8 text-blue-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                    PS Assigned
-                  </p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
-                    {stats.withPs}
-                  </p>
+            <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-green-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                      PS Assigned
+                    </p>
+                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+                      {stats.withPs}
+                    </p>
+                  </div>
+                  <CheckCircle className="h-8 w-8 text-green-200" />
                 </div>
-                <CheckCircle className="h-8 w-8 text-green-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                    ICROP Assigned
-                  </p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
-                    {stats.withIcrop}
-                  </p>
+            <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-purple-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                      ICROP Assigned
+                    </p>
+                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+                      {stats.withIcrop}
+                    </p>
+                  </div>
+                  <CheckCircle className="h-8 w-8 text-purple-200" />
                 </div>
-                <CheckCircle className="h-8 w-8 text-purple-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-r from-amber-500 to-amber-600 text-white">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-amber-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
-                    Pending ICROP
-                  </p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
-                    {stats.pending}
-                  </p>
+            <Card className="bg-gradient-to-r from-amber-500 to-amber-600 text-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-amber-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                      Pending ICROP
+                    </p>
+                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+                      {stats.pending}
+                    </p>
+                  </div>
+                  <AlertCircle className="h-8 w-8 text-amber-200" />
                 </div>
-                <AlertCircle className="h-8 w-8 text-amber-200" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        {/* Search */}
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <div className="relative">
+          {/* Search and Filters */}
+          <div className="mb-6">
+            <div className="relative max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <Input
                 placeholder="Search by customer name, phone, lead UID, PS name, or ICROP ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 pr-12"
               />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Leads Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>PS-Assigned Qualified Leads ({filteredLeads.length})</span>
-              {isRefreshing && (
-                <RefreshCw className="h-4 w-4 animate-spin text-gray-500" />
+              {(searchTerm || startDate || endDate) && (
+                <button
+                  onClick={() => {
+                    setSearchTerm('')
+                    setStartDate('')
+                    setEndDate('')
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Customer
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Lead Details
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      PS Assignment
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      ICROP Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredLeads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10">
-                            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                              <User className="h-5 w-5 text-blue-600" />
-                            </div>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {lead.customer_name}
-                            </div>
-                            <div className="text-sm text-gray-500 flex items-center">
-                              <Phone className="h-3 w-3 mr-1" />
-                              {lead.customer_mobile_number}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="font-medium">{lead.lead_uid}</div>
-                          <div className="text-gray-500">{lead.model_interested}</div>
-                          {lead.variant && (
-                            <div className="text-gray-500">{lead.variant}</div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm">
-                          {lead.ps_name ? (
-                            <Badge variant="secondary" className="bg-green-100 text-green-800">
-                              {lead.ps_name}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-gray-500">
-                              Not Assigned
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm">
-                          {lead.icrop_id ? (
-                            <Badge variant="secondary" className="bg-purple-100 text-purple-800">
-                              {lead.icrop_id}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-amber-600 border-amber-300">
-                              Pending
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {lead.ps_name && (
-                          <Button
-                            onClick={() => openUpdateDialog(lead)}
-                            size="sm"
-                            variant="outline"
-                            className="flex items-center"
-                          >
-                            <Edit3 className="h-4 w-4 mr-1" />
-                            {lead.icrop_id ? 'Update' : 'Assign'} ICROP
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Update ICROP ID Dialog */}
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Update ICROP ID</DialogTitle>
-            </DialogHeader>
-            {selectedLead && (
-              <div className="space-y-4">
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="font-medium text-gray-900">{selectedLead.customer_name}</h4>
-                  <p className="text-sm text-gray-600">{selectedLead.lead_uid}</p>
-                  <p className="text-sm text-gray-600">{selectedLead.customer_mobile_number}</p>
-                  {selectedLead.ps_name && (
-                    <p className="text-sm text-gray-600">PS: {selectedLead.ps_name}</p>
-                  )}
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="icrop-id">ICROP ID</Label>
-                  <Input
-                    id="icrop-id"
-                    value={icropId}
-                    onChange={(e) => setIcropId(e.target.value)}
-                    placeholder="Enter ICROP ID"
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="flex justify-end space-x-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsDialogOpen(false)}
-                    disabled={isUpdating}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleUpdateIcropId}
-                    disabled={isUpdating || !icropId.trim()}
-                    className="bg-purple-600 hover:bg-purple-700"
-                  >
-                    {isUpdating ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Updating...
-                      </>
-                    ) : (
-                      'Update ICROP ID'
-                    )}
-                  </Button>
-                </div>
+            
+            {/* Compact Date Range Filter */}
+            <div className="mt-3 flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <Calendar className="h-4 w-4 text-gray-400" />
+                <span className="text-sm text-gray-600">Date Range:</span>
               </div>
-            )}
-          </DialogContent>
-        </Dialog>
+              <div className="flex items-center space-x-2">
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="text-sm w-36"
+                  placeholder="From"
+                />
+                <span className="text-gray-400">to</span>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="text-sm w-36"
+                  placeholder="To"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Leads Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>PS-Assigned Qualified Leads ({filteredLeads.length})</span>
+                {isRefreshing && (
+                  <RefreshCw className="h-4 w-4 animate-spin text-gray-500" />
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Customer
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Lead Details
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        PS Assignment
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        ICROP Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredLeads.map((lead) => (
+                      <tr key={lead.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                <User className="h-5 w-5 text-blue-600" />
+                              </div>
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.customer_name}
+                              </div>
+                              <div className="text-sm text-gray-500 flex items-center">
+                                <Phone className="h-3 w-3 mr-1" />
+                                {lead.customer_mobile_number}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            <div className="font-medium">{lead.lead_uid}</div>
+                            <div className="text-gray-500">{lead.model_interested}</div>
+                            {lead.variant && (
+                              <div className="text-gray-500">{lead.variant}</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm">
+                            {lead.ps_name ? (
+                              <Badge variant="secondary" className="bg-green-100 text-green-800">
+                                {lead.ps_name}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-gray-500">
+                                Not Assigned
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm">
+                            {lead.icrop_id ? (
+                              <Badge variant="secondary" className="bg-purple-100 text-purple-800">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-amber-600 border-amber-300">
+                                Pending
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {lead.ps_name && (
+                            <div className="flex items-center space-x-2">
+                              <Input
+                                placeholder="Enter ICROP ID"
+                                value={icropInputs[lead.id] || lead.icrop_id || ''}
+                                onChange={(e) => setIcropInputs(prev => ({
+                                  ...prev,
+                                  [lead.id]: e.target.value
+                                }))}
+                                className="w-32 h-8 text-sm"
+                                disabled={updatingLeadId === lead.id}
+                              />
+                              <Button
+                                onClick={() => handleUpdateIcropId(lead.id)}
+                                size="sm"
+                                disabled={updatingLeadId === lead.id || !icropInputs[lead.id]?.trim()}
+                                className="bg-purple-600 hover:bg-purple-700 h-8 px-3"
+                              >
+                                {updatingLeadId === lead.id ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Edit3 className="h-3 w-3" />
+                                )}
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+    </DashboardLayout>
   )
 }

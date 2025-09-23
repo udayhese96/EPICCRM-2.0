@@ -846,7 +846,9 @@ async def login(login_data: LoginRequest):
             "role": user_role,
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }
+        print(f"[Login] Creating JWT with secret: {JWT_SECRET[:20]}...")
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        print(f"[Login] Created JWT token: {token[:50]}...")
         
         resp_user = {
             "id": str(user.get("id", "unknown")),
@@ -1869,6 +1871,62 @@ async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] =
 
         response = query.order('created_at', desc=True).execute()
         print(f"Found {len(response.data or [])} leads")
+        print(f"Sample lead UIDs: {[lead.get('uid') for lead in (response.data or [])[:3]]}")
+        
+        # DEBUG: Comprehensive ICROP ID debugging
+        print(f"🔍 [DEBUG] Processing {len(response.data or [])} leads for ICROP ID...")
+        
+        if response.data:
+            for i, lead in enumerate(response.data):
+                uid = lead.get('uid', 'UNKNOWN')
+                customer_name = lead.get('customer_name', 'UNKNOWN')
+                
+                print(f"\n🔍 [DEBUG LEAD {i+1}] Processing lead:")
+                print(f"   - UID: {uid}")
+                print(f"   - Customer: {customer_name}")
+                print(f"   - Raw icrop_id value: {repr(lead.get('icrop_id'))}")
+                print(f"   - icrop_id type: {type(lead.get('icrop_id'))}")
+                print(f"   - All lead keys: {list(lead.keys())}")
+                
+                # Check if this is the specific lead we're debugging
+                if uid == 'LD000529':
+                    print(f"🎯 [DEBUG] FOUND TARGET LEAD LD000529!")
+                    print(f"   - Current icrop_id: {repr(lead.get('icrop_id'))}")
+                    
+                    # Force fetch from database
+                    try:
+                        print(f"🔍 [DEBUG] Fetching fresh data from database for LD000529...")
+                        fresh_response = supabase.table('lead_master').select('*').eq('uid', 'LD000529').execute()
+                        if fresh_response.data:
+                            fresh_lead = fresh_response.data[0]
+                            print(f"   - Fresh icrop_id from DB: {repr(fresh_lead.get('icrop_id'))}")
+                            lead['icrop_id'] = fresh_lead.get('icrop_id')
+                            print(f"   - Updated lead icrop_id: {repr(lead.get('icrop_id'))}")
+                        else:
+                            print(f"   - No fresh data found for LD000529")
+                    except Exception as e:
+                        print(f"   - Error fetching fresh data: {e}")
+                
+                # Standard ICROP ID processing
+                current_icrop_id = lead.get('icrop_id')
+                if current_icrop_id is None or current_icrop_id == '' or current_icrop_id == 'null':
+                    lead['icrop_id'] = None
+                    print(f"⚠️ [ICROP] No ICROP ID for {uid} - setting to None (will show as Pending)")
+                else:
+                    print(f"✅ [ICROP] ICROP ID found for {uid}: {repr(current_icrop_id)}")
+                
+                # Final check
+                final_icrop_id = lead.get('icrop_id')
+                print(f"🔚 [FINAL] Lead {uid} final icrop_id: {repr(final_icrop_id)}")
+        
+        print(f"\n🔍 [DEBUG] Final response data sample:")
+        if response.data:
+            sample_lead = response.data[0]
+            print(f"   - Sample lead UID: {sample_lead.get('uid')}")
+            print(f"   - Sample lead icrop_id: {repr(sample_lead.get('icrop_id'))}")
+        
+        print(f"🔍 [DEBUG] Returning {len(response.data or [])} leads with ICROP IDs processed")
+        
         return response.data or []
     except Exception as e:
         print(f"Error in get_cre_assigned: {e}")
@@ -2106,6 +2164,12 @@ async def get_cre_team_leader_qualified_leads(current_user=Depends(get_current_u
     """Get qualified leads from qualified_leads table for CRE Team Leader dashboard"""
     try:
         response = supabase.table('qualified_leads').select('*').order('created_at', desc=True).execute()
+        print(f"[GET Qualified Leads] Returning {len(response.data or [])} leads")
+        if response.data:
+            print(f"[GET Qualified Leads] Sample lead: {response.data[0]}")
+            assigned_lead = next((lead for lead in response.data if lead.get('lead_uid') == 'LD000546'), None)
+            if assigned_lead:
+                print(f"[GET Qualified Leads] LD000546 data: {assigned_lead}")
         return response.data or []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2136,6 +2200,58 @@ async def assign_branch_to_lead(assignment: dict, current_user=Depends(get_curre
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/qualified-leads/deassign")
+async def deassign_qualified_lead(deassignment: dict, current_user=Depends(get_current_user)):
+    """Deassign a qualified lead from PS user"""
+    try:
+        # Check if user has permission (CRE Team Leader or Admin)
+        if current_user.role not in ['admin', 'cre_team_leader']:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        
+        lead_id = deassignment.get('lead_id')
+        if not lead_id:
+            raise HTTPException(status_code=400, detail="Lead ID is required")
+        
+        # Update qualified_leads table to remove PS assignment
+        # Only update ps_name since ps_id column doesn't exist in qualified_leads table
+        response = supabase.table('qualified_leads').update({
+            'ps_name': None
+        }).eq('id', lead_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        # Update lead_master table to remove PS assignment
+        lead_uid = response.data[0]['lead_uid']
+        supabase.table('lead_master').update({
+            'ps_name': None,
+            'ps_id': None,
+            'updated_at': now_ist_iso()
+        }).eq('uid', lead_uid).execute()
+        
+        # Delete the row from ps_followup_master since it's no longer assigned to a PS
+        try:
+            supabase.table('ps_followup_master').delete().eq('lead_uid', lead_uid).execute()
+            print(f"[Deassign] Deleted row from ps_followup_master for lead_uid: {lead_uid}")
+        except Exception as e:
+            print(f"[Deassign] Error deleting from ps_followup_master: {e}")
+            # If deletion fails, try to update with a default value instead
+            try:
+                supabase.table('ps_followup_master').update({
+                    'ps_name': 'Unassigned',
+                    'ps_id': None
+                }).eq('lead_uid', lead_uid).execute()
+                print(f"[Deassign] Updated ps_followup_master with 'Unassigned' for lead_uid: {lead_uid}")
+            except Exception as e2:
+                print(f"[Deassign] Failed to update ps_followup_master: {e2}")
+        
+        return {"success": True, "message": "Lead deassigned successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/qualified-leads/assign")
 async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_user=Depends(get_current_user)):
     """Assign qualified leads to PS users"""
@@ -2153,7 +2269,9 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                 "updated_at": now_ist_iso()
             }
             
+            print(f"[Assign] Updating qualified_leads for lead_id: {lead_id} with ps_name: {assignment.ps_name}")
             supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
+            print(f"[Assign] Updated qualified_leads successfully for lead_id: {lead_id}")
             
             # Get the qualified lead data
             lead_response = supabase.table('qualified_leads').select('*').eq('id', lead_id).execute()
