@@ -17,6 +17,7 @@ import { RefreshCw, Users, CheckCircle, XCircle, AlertCircle, UserCheck, UserX, 
 interface QualifiedLead {
   id: string
   lead_uid: string
+  customer_location?: string
   customer_name: string
   customer_mobile_number: string
   source: string
@@ -617,7 +618,7 @@ export default function CRETeamLeaderDashboard() {
                   <TableHeader>
                     <TableRow className="bg-gradient-to-r from-blue-50 to-indigo-50">
                       <TableHead className="w-12 text-center">Select</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Lead UID</TableHead>
+                      <TableHead className="font-semibold text-gray-700">Location</TableHead>
                       <TableHead className="font-semibold text-gray-700">Customer Name</TableHead>
                       <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
                       <TableHead className="font-semibold text-gray-700">Source</TableHead>
@@ -652,7 +653,7 @@ export default function CRETeamLeaderDashboard() {
                             className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
                           />
                         </TableCell>
-                        <TableCell className="font-medium text-blue-600">{lead.lead_uid}</TableCell>
+                        <TableCell className="font-medium text-blue-600">{lead.customer_location || '—'}</TableCell>
                         <TableCell className="font-medium text-gray-800">{lead.customer_name}</TableCell>
                         <TableCell className="text-gray-600">{lead.customer_mobile_number}</TableCell>
                         <TableCell>

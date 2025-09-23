@@ -210,6 +210,57 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         if response.data:
             # Invalidate cache
             invalidate_on_lead_change(lead_id, 'update')
+
+            # If this update effectively qualifies the lead, upsert into qualified_leads
+            try:
+                current_lead_resp = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
+                if current_lead_resp.data:
+                    ld = current_lead_resp.data[0]
+                    lead_status_val = (ld.get('lead_status') or ld.get('status') or '').strip()
+                    final_status_val = (ld.get('final_status') or '').strip()
+                    first_remark_val = (ld.get('first_remark') or '').strip()
+                    should_sync_qualified = (
+                        (final_status_val.lower() == 'pending' and (lead_status_val in ['Qualified', 'Pending']))
+                        or ('status' in update_data and str(update_data.get('status', '')).strip() == 'Qualified')
+                        or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() in ['Qualified', 'Pending'])
+                        or ('first_remark' in update_data and bool(update_data.get('first_remark')))
+                    )
+                    if should_sync_qualified:
+                        logger.info(f"Lead {lead_id}: Syncing qualified_leads from update path")
+                        # Build payload similar to qualification flow
+                        now_ts = datetime.now().isoformat()
+                        q_data = {
+                            'lead_uid': ld.get('uid'),
+                            'customer_name': ld.get('customer_name', ''),
+                            'customer_mobile_number': ld.get('customer_mobile_number', ''),
+                            'customer_location': ld.get('customer_location', ''),
+                            'source': ld.get('source', ''),
+                            'sub_source': ld.get('sub_source', ''),
+                            'cre_name': ld.get('cre_name', ''),
+                            'lead_category': ld.get('lead_category', ''),
+                            'model_interested': ld.get('model_interested', ''),
+                            'first_remark': first_remark_val,
+                            'variant': ld.get('variant', ''),
+                            'buying_plan': ld.get('buying_plan', ''),
+                            'finance_option': ld.get('finance_option', ''),
+                            'profession': ld.get('profession', ''),
+                            'test_drive_type': ld.get('test_drive_type', ''),
+                            'trade_in': ld.get('trade_in', ''),
+                            'branch': ld.get('branch', ''),
+                            'ps_name': ld.get('ps_name', ''),
+                            'updated_at': now_ts
+                        }
+                        # Insert or update depending on existence
+                        existing_q = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
+                        if existing_q.data:
+                            logger.info(f"Lead {lead_id}: Updating existing qualified_leads row with customer_location='{q_data.get('customer_location')}'")
+                            supabase.table('qualified_leads').update(q_data).eq('lead_uid', lead_id).execute()
+                        else:
+                            logger.info(f"Lead {lead_id}: Inserting new qualified_leads row with customer_location='{q_data.get('customer_location')}'")
+                            q_data['created_at'] = now_ts
+                            supabase.table('qualified_leads').insert(q_data).execute()
+            except Exception as sync_err:
+                logger.warning(f"Lead {lead_id}: Failed to sync qualified_leads on update: {sync_err}")
             
             logger.info(f"Lead updated successfully: {lead_id}")
             return {
@@ -338,6 +389,7 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
             'lead_uid': lead_data['uid'],
             'customer_name': lead_data.get('customer_name', ''),
             'customer_mobile_number': lead_data.get('customer_mobile_number', ''),
+            'customer_location': lead_data.get('customer_location', ''),
             'source': lead_data.get('source', ''),
             'sub_source': lead_data.get('sub_source', ''),
             'cre_name': lead_data.get('cre_name', ''),
