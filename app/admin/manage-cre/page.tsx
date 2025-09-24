@@ -54,24 +54,13 @@ export default function ManageCREPage() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      // Use unified users API with role filter
-      let response = await fetch('/api/users?role=cre', {
+      // Call FastAPI backend directly with unified users API
+      const response = await fetch('http://localhost:8000/api/users?role=cre', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       })
-      
-      // If Next.js API fails, try FastAPI directly
-      if (!response.ok) {
-        console.log('Next.js API failed, trying FastAPI directly...')
-        response = await fetch('http://localhost:8000/api/cre-users', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json'
-          }
-        })
-      }
       
       if (response.ok) {
         const users = await response.json()
@@ -256,7 +245,7 @@ export default function ManageCREPage() {
                       <SelectValue placeholder="Select branch (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No Branch</SelectItem>
+                      <SelectItem value="none">No Branch</SelectItem>
                       {branches.map((branch) => (
                         <SelectItem key={branch} value={branch}>
                           {branch}

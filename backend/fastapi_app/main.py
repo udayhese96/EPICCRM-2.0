@@ -111,6 +111,8 @@ from .redis_cache import (cache, cache_leads, get_cached_leads, cache_users, get
                          cache_lead_stats, get_cached_lead_stats, invalidate_on_lead_change)
 from .background_tasks import (create_lead_async, update_lead_async, bulk_update_leads_async, 
                               qualify_lead_async, background_processor)
+import logging
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="EPIC CRM 2.0 API", version="2.0.0")
 
@@ -150,9 +152,10 @@ security = HTTPBearer()
 
 # Time utilities
 def now_ist_iso() -> str:
-    """Return current timestamp in Asia/Kolkata (IST) as ISO string with offset."""
+    """Return current timestamp in Asia/Kolkata (IST) as ISO string without timezone."""
     try:
-        return datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        # Return IST timestamp without timezone info (naive datetime)
+        return datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None).isoformat()
     except Exception:
         # Fallback to naive ISO if zoneinfo not available
         return datetime.now().isoformat()
@@ -927,14 +930,18 @@ async def change_password(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/users", response_model=List[UserResponse])
-async def get_users(current_user=Depends(admin_or_branch_head)):
+async def get_users(role: Optional[str] = None, current_user=Depends(admin_or_branch_head)):
     """Get list of users based on role permissions"""
     try:
         query = supabase.table('users').select('*')
         
+        # Filter by role if specified
+        if role:
+            query = query.eq('role', role)
+        
         # Branch heads can only see users in their branch
         if current_user.role == 'branch_head':
-            query = query.eq('branch_id', current_user.branch_id)
+            query = query.eq('branch', current_user.branch)
         
         response = query.execute()
         return [UserResponse(**user) for user in response.data]
@@ -1285,6 +1292,7 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["profession"] = lead_data.profession
         if lead_data.trade_in is not None:
             update_data["trade_in"] = lead_data.trade_in
+        # Do NOT write trade-in detail fields into lead_master (schema doesn't have them)
         if lead_data.assigned_to:
             update_data["cre_name"] = lead_data.assigned_to
             update_data["assigned"] = "Yes"
@@ -1329,7 +1337,17 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             'user_id': 'system'
         }
 
-        # Process update in background for ultra-fast response
+        # Update lead_master directly for fast UI sync
+        print(f"🔄 [Direct API] Updating lead_master directly for lead: {lead_id}")
+        update_result = supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to update lead_master")
+        
+        print(f"✅ [Direct API] Lead master updated successfully: {lead_id}")
+        
+        # Trigger background worker for qualified_leads and tradein_master
+        print(f"🔄 [Background Worker] Triggering background processing for qualified_leads and tradein_master")
         result = update_lead_async(lead_id, update_data, user_info)
         
         # Handle trade-in data separately if needed
@@ -1997,11 +2015,6 @@ class PSFollowUpCreate(BaseModel):
     follow_up_date: str
     notes: Optional[str] = None
 
-class PSFollowUpUpdate(BaseModel):
-    follow_up_date: Optional[str] = None
-    notes: Optional[str] = None
-    status: Optional[str] = None
-
 class PSFollowUpResponse(BaseModel):
     id: str
     lead_uid: str
@@ -2085,31 +2098,6 @@ async def get_ps_followups(ps_id: Optional[str] = None, status: Optional[str] = 
         
         response = query.order('follow_up_date', desc=False).execute()
         return [PSFollowUpResponse(**item) for item in response.data or []]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/api/ps-followups/{followup_id}")
-async def update_ps_followup(followup_id: str, update_data: PSFollowUpUpdate, current_user=Depends(get_current_user)):
-    """Update PS follow-up"""
-    try:
-        # Check permissions
-        existing = supabase.table('ps_follow_up_master').select('*').eq('id', followup_id).execute()
-        if not existing.data:
-            raise HTTPException(status_code=404, detail="Follow-up not found")
-        
-        if current_user.role == 'ps' and existing.data[0]['ps_id'] != current_user.id:
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        update_fields = {"updated_at": now_ist_iso()}
-        if update_data.follow_up_date:
-            update_fields["follow_up_date"] = update_data.follow_up_date
-        if update_data.notes:
-            update_fields["notes"] = update_data.notes
-        if update_data.status:
-            update_fields["status"] = update_data.status
-        
-        response = supabase.table('ps_follow_up_master').update(update_fields).eq('id', followup_id).execute()
-        return {"message": "Follow-up updated successfully", "followup": response.data[0] if response.data else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2206,9 +2194,9 @@ class QualifiedLeadAssignment(BaseModel):
 
 @app.get("/api/qualified-leads")
 async def get_qualified_leads(current_user=Depends(get_current_user)):
-    """Get qualified leads with final_status = Pending"""
+    """Get all qualified leads"""
     try:
-        response = supabase.table('qualified_leads').select('*').eq('final_status', 'Pending').order('created_at', desc=True).execute()
+        response = supabase.table('qualified_leads').select('*').order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2420,10 +2408,94 @@ class PSFollowUpMasterResponse(BaseModel):
 
 class PSFollowUpUpdate(BaseModel):
     id: int
+    lead_uid: Optional[str] = None
+    ps_id: Optional[str] = None
+    ps_name: Optional[str] = None
+    ps_branch: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_mobile_number: Optional[str] = None
+    alternate_mobile_number: Optional[str] = None
+    source: Optional[str] = None
+    cre_name: Optional[str] = None
+    cre_id: Optional[str] = None
+    lead_category: Optional[str] = None
+    model_interested: Optional[str] = None
     follow_up_date: Optional[str] = None
     lead_status: Optional[str] = None
+    first_call_date: Optional[str] = None
     first_call_remark: Optional[str] = None
+    first_call_lead_status: Optional[str] = None
+    second_call_date: Optional[str] = None
     second_call_remark: Optional[str] = None
+    second_call_lead_status: Optional[str] = None
+    third_call_date: Optional[str] = None
+    third_call_remark: Optional[str] = None
+    third_call_lead_status: Optional[str] = None
+    fourth_call_date: Optional[str] = None
+    fourth_call_remark: Optional[str] = None
+    fourth_call_lead_status: Optional[str] = None
+    fifth_call_date: Optional[str] = None
+    fifth_call_remark: Optional[str] = None
+    fifth_call_lead_status: Optional[str] = None
+    sixth_call_date: Optional[str] = None
+    sixth_call_remark: Optional[str] = None
+    sixth_call_lead_status: Optional[str] = None
+    seventh_call_date: Optional[str] = None
+    seventh_call_remark: Optional[str] = None
+    seventh_call_lead_status: Optional[str] = None
+    eighth_call_date: Optional[str] = None
+    eighth_call_remark: Optional[str] = None
+    eighth_call_lead_status: Optional[str] = None
+    ninth_call_date: Optional[str] = None
+    ninth_call_remark: Optional[str] = None
+    ninth_call_lead_status: Optional[str] = None
+    tenth_call_date: Optional[str] = None
+    tenth_call_remark: Optional[str] = None
+    tenth_call_lead_status: Optional[str] = None
+    final_status: Optional[str] = None
+    test_drive_done: Optional[bool] = None
+    tat: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    ps_assigned_at: Optional[str] = None
+    won_timestamp: Optional[str] = None
+    lost_timestamp: Optional[str] = None
+    variant: Optional[str] = None
+    buying_plan: Optional[str] = None
+    finance_option: Optional[str] = None
+    icrop_id: Optional[str] = None
+    booking_id: Optional[str] = None
+    retailed_id: Optional[str] = None
+
+class BookingRetailMaster(BaseModel):
+    id: Optional[str] = None
+    lead_uid: str
+    customer_name: Optional[str] = None
+    customer_mobile_number: Optional[str] = None
+    source: Optional[str] = None
+    sub_source: Optional[str] = None
+    cre_name: Optional[str] = None
+    lead_category: Optional[str] = None
+    model_interested: Optional[str] = None
+    first_remark: Optional[str] = None
+    variant: Optional[str] = None
+    buying_plan: Optional[str] = None
+    finance_option: Optional[str] = None
+    profession: Optional[str] = None
+    test_drive_type: Optional[str] = None
+    trade_in: Optional[str] = None
+    branch: Optional[str] = None
+    ps_name: Optional[str] = None
+    icrop_id: Optional[str] = None
+    customer_location: Optional[str] = None
+    booking_id: Optional[str] = None
+    retailed_id: Optional[str] = None
+    booking_status: Optional[str] = None
+    retailed_status: Optional[str] = None
+    approved_by_sales_manager: Optional[str] = None
+    approved_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 class LeadQualifyRequest(BaseModel):
     trade_in_make: Optional[str] = None
@@ -2445,12 +2517,18 @@ class LeadQualifyRequest(BaseModel):
     trade_in: Optional[str] = None
 
 @app.get("/api/ps-followup", response_model=List[PSFollowUpMasterResponse])
-async def get_ps_followups(): # Temporarily removed authentication for testing
+async def get_ps_followups(current_user=Depends(get_current_user)):
     """Get PS follow-ups based on user role"""
     try:
         query = supabase.table('ps_followup_master').select('*')
         
-        # Temporarily removed role-based filtering for testing
+        # Apply role-based filtering
+        if current_user.role == 'ps':
+            query = query.eq('ps_id', current_user.id)
+        elif current_user.role in ['admin', 'branch_head']:
+            # Admin and branch heads can see all follow-ups
+            pass
+        
         response = query.order('follow_up_date', desc=False).execute()
         return [PSFollowUpMasterResponse(**item) for item in response.data or []]
     except Exception as e:
@@ -2482,13 +2560,25 @@ async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends
             update_fields["final_status"] = update_data.final_status
         if update_data.test_drive_done is not None:
             update_fields["test_drive_done"] = update_data.test_drive_done
+        if update_data.booking_id:
+            update_fields["booking_id"] = update_data.booking_id
+        if update_data.retailed_id:
+            update_fields["retailed_id"] = update_data.retailed_id
         
-        # Handle call remarks
+        # Handle call remarks and lead statuses
         call_fields = [
             'first_call_remark', 'second_call_remark', 'third_call_remark',
-            'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark'
+            'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark',
+            'eighth_call_remark', 'ninth_call_remark', 'tenth_call_remark'
         ]
         
+        call_lead_status_fields = [
+            'first_call_lead_status', 'second_call_lead_status', 'third_call_lead_status',
+            'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status', 'seventh_call_lead_status',
+            'eighth_call_lead_status', 'ninth_call_lead_status', 'tenth_call_lead_status'
+        ]
+        
+        # Handle call remarks
         for field in call_fields:
             if getattr(update_data, field) is not None:
                 update_fields[field] = getattr(update_data, field)
@@ -2496,6 +2586,11 @@ async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends
                 date_field = field.replace('_remark', '_date')
                 if getattr(update_data, field) and not followup.get(date_field):
                     update_fields[date_field] = now_ist_iso()
+        
+        # Handle call lead statuses
+        for field in call_lead_status_fields:
+            if getattr(update_data, field) is not None:
+                update_fields[field] = getattr(update_data, field)
         
         # Handle final status timestamps
         if update_data.final_status:
@@ -2506,10 +2601,246 @@ async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends
         
         response = supabase.table('ps_followup_master').update(update_fields).eq('id', update_data.id).execute()
         
+        # Handle booking/retail requests in qualified_leads table
+        if update_data.booking_id or update_data.retailed_id:
+            qualified_lead_update = {}
+            
+            if update_data.booking_id:
+                qualified_lead_update["booking_id"] = update_data.booking_id
+                qualified_lead_update["booking_status"] = "Waiting for Approval"
+                qualified_lead_update["booking_requested_at"] = now_ist_iso()
+            
+            if update_data.retailed_id:
+                qualified_lead_update["retailed_id"] = update_data.retailed_id
+                qualified_lead_update["retailed_status"] = "Waiting for Approval"
+                qualified_lead_update["retailed_requested_at"] = now_ist_iso()
+            
+            # Update qualified_leads table
+            supabase.table('qualified_leads').update(qualified_lead_update).eq('lead_uid', followup['lead_uid']).execute()
+        
         if response.data:
             return {"message": "Follow-up updated successfully", "followup": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to update follow-up")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# SALES MANAGER APPROVAL WORKFLOW
+# ========================================
+
+@app.put("/api/qualified-leads/approve")
+async def approve_qualified_lead(
+    lead_uid: str, 
+    approval_type: str,  # 'booking' or 'retailed'
+    current_user=Depends(get_current_user)
+):
+    """Approve a booking or retail request"""
+    try:
+        # Check if user is sales manager
+        if current_user.role != 'sales_manager':
+            raise HTTPException(status_code=403, detail="Access denied - Sales Manager role required")
+        
+        # Get the qualified lead
+        qualified_lead_response = supabase.table('qualified_leads').select('*').eq('lead_uid', lead_uid).execute()
+        if not qualified_lead_response.data:
+            raise HTTPException(status_code=404, detail="Qualified lead not found")
+        
+        qualified_lead = qualified_lead_response.data[0]
+        
+        # Update qualified_leads table
+        update_fields = {
+            "updated_at": now_ist_iso()
+        }
+        
+        if approval_type == 'booking':
+            update_fields["booking_status"] = "Approved"
+            update_fields["booking_approved_by"] = current_user.id
+            update_fields["booking_approved_timestamp"] = now_ist_iso()
+        elif approval_type == 'retailed':
+            update_fields["retailed_status"] = "Approved"
+            update_fields["retailed_approved_by"] = current_user.id
+            update_fields["retailed_approved_timestamp"] = now_ist_iso()
+        else:
+            raise HTTPException(status_code=400, detail="Invalid approval type. Must be 'booking' or 'retailed'")
+        
+        # Update qualified_leads
+        supabase.table('qualified_leads').update(update_fields).eq('lead_uid', lead_uid).execute()
+        
+        # Get updated qualified lead to check if both booking and retail are approved
+        updated_lead_response = supabase.table('qualified_leads').select('*').eq('lead_uid', lead_uid).execute()
+        updated_lead = updated_lead_response.data[0]
+        
+        # Handle booking and retail approvals separately
+        if approval_type == 'booking':
+            # Booking approved - copy to master table and set final_status to "Booked"
+            master_record = {
+                "lead_uid": updated_lead["lead_uid"],
+                "customer_name": updated_lead.get("customer_name"),
+                "customer_mobile_number": updated_lead.get("customer_mobile_number"),
+                "source": updated_lead.get("source"),
+                "sub_source": updated_lead.get("sub_source"),
+                "cre_name": updated_lead.get("cre_name"),
+                "lead_category": updated_lead.get("lead_category"),
+                "model_interested": updated_lead.get("model_interested"),
+                "first_remark": updated_lead.get("first_remark"),
+                "variant": updated_lead.get("variant"),
+                "buying_plan": updated_lead.get("buying_plan"),
+                "finance_option": updated_lead.get("finance_option"),
+                "profession": updated_lead.get("profession"),
+                "test_drive_type": updated_lead.get("test_drive_type"),
+                "trade_in": updated_lead.get("trade_in"),
+                "branch": updated_lead.get("branch"),
+                "ps_name": updated_lead.get("ps_name"),
+                "icrop_id": updated_lead.get("icrop_id"),
+                "customer_location": updated_lead.get("customer_location"),
+                "booking_id": updated_lead.get("booking_id"),
+                "booking_status": updated_lead.get("booking_status"),
+                "booking_requested_at": updated_lead.get("booking_requested_at"),
+                "booking_approved_by": updated_lead.get("booking_approved_by"),
+                "booking_approved_timestamp": updated_lead.get("booking_approved_timestamp"),
+                "approved_by_sales_manager": current_user.id,
+                "approved_at": now_ist_iso(),
+                "created_at": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }
+            
+            supabase.table('booking_and_retail_master').insert(master_record).execute()
+            
+            # Set final_status to "Booked"
+            supabase.table('ps_followup_master').update({
+                "final_status": "Booked",
+                "updated_at": now_ist_iso()
+            }).eq('lead_uid', lead_uid).execute()
+            
+        elif approval_type == 'retailed':
+            # Retail approved - update existing row in master table and set final_status to "Won"
+            master_update = {
+                "retailed_id": updated_lead.get("retailed_id"),
+                "retailed_status": updated_lead.get("retailed_status"),
+                "retailed_requested_at": updated_lead.get("retailed_requested_at"),
+                "retailed_approved_by": updated_lead.get("retailed_approved_by"),
+                "retailed_approved_timestamp": updated_lead.get("retailed_approved_timestamp"),
+                "approved_by_sales_manager": current_user.id,
+                "approved_at": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }
+            
+            supabase.table('booking_and_retail_master').update(master_update).eq('lead_uid', lead_uid).execute()
+            
+            # Set final_status to "Won"
+            supabase.table('ps_followup_master').update({
+                "final_status": "Won",
+                "won_timestamp": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }).eq('lead_uid', lead_uid).execute()
+        
+        return {"message": f"{approval_type.title()} approved successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/qualified-leads/reject")
+async def reject_qualified_lead(
+    lead_uid: str, 
+    approval_type: str,  # 'booking' or 'retailed'
+    rejection_reason: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Reject a booking or retail request"""
+    try:
+        # Check if user is sales manager
+        if current_user.role != 'sales_manager':
+            raise HTTPException(status_code=403, detail="Access denied - Sales Manager role required")
+        
+        # Get the qualified lead
+        qualified_lead_response = supabase.table('qualified_leads').select('*').eq('lead_uid', lead_uid).execute()
+        if not qualified_lead_response.data:
+            raise HTTPException(status_code=404, detail="Qualified lead not found")
+        
+        # Update qualified_leads table
+        update_fields = {
+            "updated_at": now_ist_iso()
+        }
+        
+        if approval_type == 'booking':
+            update_fields["booking_status"] = "Rejected"
+            update_fields["booking_approved_by"] = current_user.id
+            update_fields["booking_approved_timestamp"] = now_ist_iso()
+        elif approval_type == 'retailed':
+            update_fields["retailed_status"] = "Rejected"
+            update_fields["retailed_approved_by"] = current_user.id
+            update_fields["retailed_approved_timestamp"] = now_ist_iso()
+        else:
+            raise HTTPException(status_code=400, detail="Invalid approval type. Must be 'booking' or 'retailed'")
+        
+        # Update qualified_leads
+        supabase.table('qualified_leads').update(update_fields).eq('lead_uid', lead_uid).execute()
+        
+        # Update ps_followup_master final_status to "Pending"
+        supabase.table('ps_followup_master').update({
+            "final_status": "Pending",
+            "updated_at": now_ist_iso()
+        }).eq('lead_uid', lead_uid).execute()
+        
+        return {"message": f"{approval_type.title()} rejected successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/qualified-leads/pending-approvals")
+async def get_pending_approvals(current_user=Depends(get_current_user)):
+    """Get all pending booking and retail approvals for Sales Manager"""
+    try:
+        if current_user.role != 'sales_manager':
+            raise HTTPException(status_code=403, detail="Access denied - Sales Manager role required")
+        
+        # Get qualified leads with pending approvals
+        response = supabase.table('qualified_leads').select('*').or_(
+            'booking_status.eq.Waiting for Approval,retailed_status.eq.Waiting for Approval'
+        ).execute()
+        
+        # Transform data to match frontend expectations
+        approval_requests = []
+        for lead in response.data or []:
+            # Handle booking requests
+            if lead.get('booking_status') == 'Waiting for Approval':
+                approval_requests.append({
+                    'id': f"booking_{lead['lead_uid']}",
+                    'lead_uid': lead['lead_uid'],
+                    'request_type': 'booking',
+                    'booking_id': lead.get('booking_id'),
+                    'retailed_id': None,
+                    'ps_name': lead.get('ps_name', 'Unknown'),
+                    'cre_name': lead.get('cre_name', 'Unknown'),
+                    'customer_name': lead.get('customer_name', 'Unknown'),
+                    'customer_mobile_number': lead.get('customer_mobile_number', 'Unknown'),
+                    'model_interested': lead.get('model_interested', 'Unknown'),
+                    'request_status': 'pending',
+                    'requested_at': lead.get('booking_requested_at', lead.get('created_at', now_ist_iso())),
+                    'created_at': lead.get('created_at', now_ist_iso())
+                })
+            
+            # Handle retail requests
+            if lead.get('retailed_status') == 'Waiting for Approval':
+                approval_requests.append({
+                    'id': f"retailed_{lead['lead_uid']}",
+                    'lead_uid': lead['lead_uid'],
+                    'request_type': 'retailed',
+                    'booking_id': None,
+                    'retailed_id': lead.get('retailed_id'),
+                    'ps_name': lead.get('ps_name', 'Unknown'),
+                    'cre_name': lead.get('cre_name', 'Unknown'),
+                    'customer_name': lead.get('customer_name', 'Unknown'),
+                    'customer_mobile_number': lead.get('customer_mobile_number', 'Unknown'),
+                    'model_interested': lead.get('model_interested', 'Unknown'),
+                    'request_status': 'pending',
+                    'requested_at': lead.get('retailed_requested_at', lead.get('created_at', now_ist_iso())),
+                    'created_at': lead.get('created_at', now_ist_iso())
+                })
+        
+        return approval_requests
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2547,6 +2878,7 @@ async def qualify_lead(lead_uid: str, trade_in_data: LeadQualifyRequest, current
             'trade_in_km': trade_in_data.trade_in_km,
             'trade_in_ownership': trade_in_data.trade_in_ownership
         }
+        logger.info(f"[Qualify API] Trade-in info received for {lead_uid}: {trade_in_info}")
         
         # Prepare form data for qualified_leads
         form_data = {
@@ -2560,6 +2892,7 @@ async def qualify_lead(lead_uid: str, trade_in_data: LeadQualifyRequest, current
             'lead_category': trade_in_data.lead_category,
             'trade_in': trade_in_data.trade_in
         }
+        logger.info(f"[Qualify API] Form data received for {lead_uid}: {form_data}")
         
         # Process qualification in background for ultra-fast response
         result = qualify_lead_async(lead_uid, user_info, trade_in_info, form_data)

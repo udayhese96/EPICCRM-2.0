@@ -53,7 +53,8 @@ export default function ManagePSPage() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/users?role=ps', {
+      // Call FastAPI backend directly
+      const response = await fetch('http://localhost:8000/api/users?role=ps', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

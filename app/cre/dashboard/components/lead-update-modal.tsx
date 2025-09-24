@@ -259,11 +259,20 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   // Validation functions
   const validateTradeInYear = (year: string): string => {
     if (!year) return ""
+    
+    // Check if year is exactly 4 digits
+    if (!/^\d{4}$/.test(year)) {
+      return "Year must be exactly 4 digits"
+    }
+    
     const yearNum = parseInt(year)
     const currentYear = new Date().getFullYear()
-    if (isNaN(yearNum)) return "Year must be a number"
-    if (yearNum < 1990) return "Year cannot be before 1990"
+    
+    if (isNaN(yearNum)) return "Year must be a valid number"
+    // Allow older vehicles; accept years from 1950 onwards
+    if (yearNum < 1950) return "Year cannot be before 1950"
     if (yearNum > currentYear + 1) return `Year cannot be after ${currentYear + 1}`
+    
     return ""
   }
 
@@ -370,6 +379,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       return
     }
 
+    // Take a snapshot of the current form values BEFORE closing/unmounting
+    const formSnapshot = { ...formData }
+
     const leadStatus = (lead?.lead_status || "").trim()
     const isClosed = leadStatus === "Won" || leadStatus === "Lost"
     // For qualified leads, always treat as follow-up workflow
@@ -413,54 +425,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
 
-    // If qualifying a lead, also create qualified lead entry
-    if (selectedStatus === "qualified") {
-      // Optimistic UI update - show success immediately
-      console.log('🚀 [Redis Worker] Lead qualification started - UI responding instantly!')
-      console.log('⚡ [Ultra-Fast] Form closing immediately, processing in background...')
-      
-      // Get authentication token
-      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
-      const parsed = session ? JSON.parse(session) : null
-      const token = parsed?.access_token || ''
-      
-      // Fire and forget - don't wait for response
-      fetch(`/api/leads/${lead?.uid}/qualify`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          trade_in_make: formData.trade_in_make || '',
-          trade_in_model: formData.trade_in_model || '',
-          trade_in_year: formData.trade_in_year || '',
-          trade_in_km: formData.trade_in_km || '',
-          trade_in_ownership: formData.trade_in_ownership || '',
-          // Additional form fields for qualified_leads
-          model_interested: formData.model_interested || '',
-          variant: formData.variant || '',
-          first_remark: formData.general_remarks || '',
-          profession: formData.profession || '',
-          buying_plan: formData.buying_plan || '',
-          finance_option: formData.finance_option || '',
-          test_drive_type: formData.test_drive_type || '',
-          lead_category: formData.lead_category || '',
-          trade_in: formData.trade_in || ''
-        })
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('✅ [Redis Worker] Qualification completed in background:', data)
-        if (data.has_trade_in) {
-          console.log('🚗 [Trade-in] Lead has trade-in vehicle - details logged!')
-        }
-      })
-      .catch(e => {
-        console.error('❌ [Redis Worker] Background qualification failed:', e)
-        // Could show a subtle error notification here if needed
-      })
-    }
+    // NOTE: Do NOT use worker for lead_master updates. Worker is used only
+    // for inserting into qualified_leads (and trade-in) after direct update succeeds.
 
     // Qualified follow-up: do NOT change lead_status away from "Qualified".
     // Only handle special case for next follow-up date when Call Me Back is selected.
@@ -499,9 +465,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     const parsed = session ? JSON.parse(session) : null
     const token = parsed?.access_token || ''
     
-    // Fire and forget - don't wait for response
-    console.log('🚀 [Redis Worker] Lead update started - using background processing for ultra-fast UI!')
-    console.log('⚡ [Ultra-Fast] Form closed immediately, data saving in background...')
+    // Direct API call to lead_master - this will trigger background worker for other tables
+    console.log('🚀 [Direct API] Lead update started - updating lead_master directly (no worker)!')
+    console.log('⚡ [Fast Response] Form closed after direct update; background queue only for qualified/trade-in...')
     
     fetch(`/api/leads/${lead?.uid}`, {
       method: 'PUT',
@@ -514,28 +480,28 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         status: (updateData as any).lead_status,
         final_status: (updateData as any).final_status,
         // first_remark should only be sent during Qualify (first call). For follow-ups, we send followup_note instead
-        first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
-        profession: formData.profession,
-        variant: formData.variant,
-        model_interested: formData.model_interested,
-        lead_category: formData.lead_category,
-        buying_plan: formData.buying_plan,
-        finance_option: formData.finance_option,
-        trade_in: formData.trade_in,
-        trade_in_make: formData.trade_in_make,
-        trade_in_model: formData.trade_in_model,
-        trade_in_year: formData.trade_in_year,
-        trade_in_km: formData.trade_in_km,
-        trade_in_ownership: formData.trade_in_ownership,
-        test_drive_type: formData.test_drive_type,
-        follow_up_date: (updateData as any).follow_up_date ?? (formData.follow_up_date || undefined),
-        customer_location: formData.customer_location,
-        followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined
+        first_remark: isFollowUpWorkflow ? undefined : formSnapshot.general_remarks,
+        profession: formSnapshot.profession,
+        variant: formSnapshot.variant,
+        model_interested: formSnapshot.model_interested,
+        lead_category: formSnapshot.lead_category,
+        buying_plan: formSnapshot.buying_plan,
+        finance_option: formSnapshot.finance_option,
+        trade_in: formSnapshot.trade_in,
+        trade_in_make: formSnapshot.trade_in_make,
+        trade_in_model: formSnapshot.trade_in_model,
+        trade_in_year: formSnapshot.trade_in_year,
+        trade_in_km: formSnapshot.trade_in_km,
+        trade_in_ownership: formSnapshot.trade_in_ownership,
+        test_drive_type: formSnapshot.test_drive_type,
+        follow_up_date: (updateData as any).follow_up_date ?? (formSnapshot.follow_up_date || undefined),
+        customer_location: formSnapshot.customer_location,
+        followup_note: isFollowUpWorkflow ? formSnapshot.general_remarks : undefined
       })
     })
     .then(resp => {
       if (!resp.ok) {
-        console.error('❌ [Redis Worker] Failed to persist lead update')
+        console.error('❌ [Direct API] Failed to update lead_master')
         throw new Error(`HTTP error! status: ${resp.status}`)
       }
       return resp.json()
@@ -543,8 +509,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     .then(data => {
       // 🔍 Enhanced Debug Logging
       const payloadSent = {
-        first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
-        followup_note: isFollowUpWorkflow ? formData.general_remarks : undefined,
+        first_remark: isFollowUpWorkflow ? undefined : formSnapshot.general_remarks,
+        followup_note: isFollowUpWorkflow ? formSnapshot.general_remarks : undefined,
         isFollowUpWorkflow: isFollowUpWorkflow
       }
       
@@ -562,11 +528,56 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         first_remark_value: payloadSent.first_remark
       })
       
-      console.log('✅ [Redis Worker] Lead update queued for background processing!')
-      console.log('⚡ [Ultra-Fast] Data saved successfully in background!')
+      console.log('✅ [Direct API] Lead master updated successfully!')
+
+      // Queue background processing for qualified_leads and trade-in only after successful direct update
+      if (selectedStatus === 'qualified') {
+        try {
+          const session2 = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+          const parsed2 = session2 ? JSON.parse(session2) : null
+          const token2 = parsed2?.access_token || ''
+
+          const payload: any = {
+            model_interested: formSnapshot.model_interested || '',
+            variant: formSnapshot.variant || '',
+            first_remark: formSnapshot.general_remarks || '',
+            profession: formSnapshot.profession || '',
+            buying_plan: formSnapshot.buying_plan || '',
+            finance_option: formSnapshot.finance_option || '',
+            test_drive_type: formSnapshot.test_drive_type || '',
+            lead_category: formSnapshot.lead_category || '',
+            trade_in: formSnapshot.trade_in || ''
+          }
+          // Always include trade-in fields explicitly; backend will decide whether to insert
+          payload.trade_in_make = formSnapshot.trade_in_make || ''
+          payload.trade_in_model = formSnapshot.trade_in_model || ''
+          payload.trade_in_year = formSnapshot.trade_in_year || ''
+          payload.trade_in_km = formSnapshot.trade_in_km || ''
+          payload.trade_in_ownership = formSnapshot.trade_in_ownership || ''
+
+          // Fire-and-forget; no impact on direct update UX
+          fetch(`/api/leads/${lead?.uid}/qualify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token2}`
+            },
+            body: JSON.stringify(payload)
+          })
+          .then(r => r.json())
+          .then(res => {
+            console.log('🔄 [Worker] Queued qualified_leads insertion (and trade-in if applicable):', res)
+          })
+          .catch(err => {
+            console.error('❌ [Worker] Failed to enqueue qualification:', err)
+          })
+        } catch (err) {
+          console.error('❌ [Worker] Error preparing queue payload:', err)
+        }
+      }
     })
     .catch(e => {
-      console.error('❌ [Redis Worker] Failed to update lead:', e)
+      console.error('❌ [Direct API] Failed to update lead:', e)
     })
   }
 
@@ -1283,11 +1294,22 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
             <div className="space-y-3">
               <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>
               <Input 
-                type="number"
-                placeholder="Manufacturing Year (1990-2026)"
+                type="text"
+                placeholder="Manufacturing Year (e.g., 2020)"
                 value={formData.trade_in_year}
                 onChange={(e) => {
-                  setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))
+                  let value = e.target.value
+                  
+                  // Only allow digits
+                  value = value.replace(/\D/g, '')
+                  
+                  // Limit to 4 digits maximum
+                  if (value.length > 4) {
+                    value = value.slice(0, 4)
+                  }
+                  
+                  setFormData(prev => ({ ...prev, trade_in_year: value }))
+                  
                   // Clear validation error when user types
                   if (validationErrors.trade_in_year) {
                     setValidationErrors(prev => {
@@ -1298,6 +1320,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   }
                 }}
                 className={validationErrors.trade_in_year ? "border-red-500" : ""}
+                maxLength={4}
               />
               {validationErrors.trade_in_year && (
                 <p className="text-red-500 text-xs mt-1">{validationErrors.trade_in_year}</p>

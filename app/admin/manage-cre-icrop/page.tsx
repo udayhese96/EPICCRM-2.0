@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Plus, Edit, Trash2, Eye, Users, Building2, Phone, Mail, Shield, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
 
 interface CREICROPUser {
   id: string
@@ -50,9 +51,11 @@ const ManageCREICROPPage = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/users?role=cre_icrop', {
+      // Call FastAPI backend directly
+      const response = await fetch('http://localhost:8000/api/users?role=cre_icrop', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       })
 
@@ -201,7 +204,8 @@ const ManageCREICROPPage = () => {
   const branches = Array.from(new Set(users.map(user => user.branch)))
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 p-6">
+    <DashboardLayout>
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
@@ -425,13 +429,23 @@ const ManageCREICROPPage = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="branch">Branch</Label>
-                  <Input
-                    id="branch"
-                    value={formData.branch}
-                    onChange={(e) => setFormData({...formData, branch: e.target.value})}
-                    placeholder="Enter branch"
-                  />
+                  <Label htmlFor="branch">Branch (Optional)</Label>
+                  <Select value={formData.branch} onValueChange={(value) => setFormData({...formData, branch: value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Branch</SelectItem>
+                      <SelectItem value="Mount Road">Mount Road</SelectItem>
+                      <SelectItem value="Vyasarpadi">Vyasarpadi</SelectItem>
+                      <SelectItem value="Cuddalore">Cuddalore</SelectItem>
+                      {branches.map((branch) => (
+                        <SelectItem key={branch} value={branch}>
+                          {branch}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div>
@@ -545,6 +559,7 @@ const ManageCREICROPPage = () => {
         </Dialog>
       </div>
     </div>
+    </DashboardLayout>
   )
 }
 

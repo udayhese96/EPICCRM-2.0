@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
+
+export async function GET(request: NextRequest) {
+  const token = request.headers.get('Authorization')
+  const { searchParams } = new URL(request.url)
+  const role = searchParams.get('role')
+
+  try {
+    let url = `${API_BASE_URL}/api/users`
+    if (role) {
+      url += `?role=${role}`
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': token || ''
+      },
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      return NextResponse.json({ error: errorData.detail || 'Failed to fetch users' }, { status: response.status })
+    }
+
+    const data = await response.json()
+    return NextResponse.json(data, { status: 200 })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const token = request.headers.get('Authorization')
+  const body = await request.json()
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token || ''
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      return NextResponse.json({ error: errorData.detail || 'Failed to create user' }, { status: response.status })
+    }
+
+    const data = await response.json()
+    return NextResponse.json(data, { status: 200 })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
+  }
+}

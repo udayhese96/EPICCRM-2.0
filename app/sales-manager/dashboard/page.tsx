@@ -24,22 +24,19 @@ import {
 } from 'lucide-react'
 
 interface ApprovalRequest {
-  id: number
+  id: string
   lead_uid: string
-  ps_id: string
-  ps_name: string
-  sales_manager_id?: string
-  request_type: 'booked' | 'retailed'
+  request_type: 'booking' | 'retailed'
   booking_id?: string
   retailed_id?: string
+  ps_name: string
+  cre_name: string
+  customer_name: string
+  customer_mobile_number: string
+  model_interested: string
   request_status: 'pending' | 'approved' | 'rejected'
-  approval_notes?: string
-  rejection_reason?: string
   requested_at: string
-  approved_at?: string
-  rejected_at?: string
   created_at: string
-  updated_at: string
 }
 
 interface LeadDetails {
@@ -67,8 +64,8 @@ const SalesManagerDashboard = () => {
   const [rejectionDialog, setRejectionDialog] = useState(false)
   const [approvalNotes, setApprovalNotes] = useState('')
   const [rejectionReason, setRejectionReason] = useState('')
-  const [leadDetails, setLeadDetails] = useState<LeadDetails | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [activeTab, setActiveTab] = useState<'booking' | 'retail'>('booking')
 
   // Load approval requests
   const loadApprovalRequests = async () => {
@@ -78,7 +75,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/approval-requests', {
+      const response = await fetch('http://localhost:8000/api/qualified-leads/pending-approvals', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -99,30 +96,6 @@ const SalesManagerDashboard = () => {
     }
   }
 
-  // Load lead details
-  const loadLeadDetails = async (leadUid: string) => {
-    try {
-      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
-      const parsed = session ? JSON.parse(session) : null
-      const token = parsed?.access_token || ''
-
-      const response = await fetch(`/api/leads/${leadUid}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setLeadDetails(data)
-      } else {
-        console.error('❌ Failed to load lead details')
-      }
-    } catch (error) {
-      console.error('❌ Error loading lead details:', error)
-    }
-  }
 
   // Approve request
   const approveRequest = async () => {
@@ -134,17 +107,12 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/approval-requests', {
+      const response = await fetch(`http://localhost:8000/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          request_id: selectedRequest.id,
-          approval_status: 'approved',
-          approval_notes: approvalNotes
-        })
+        }
       })
 
       if (response.ok) {
@@ -173,17 +141,12 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/approval-requests', {
+      const response = await fetch(`http://localhost:8000/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          request_id: selectedRequest.id,
-          approval_status: 'rejected',
-          rejection_reason: rejectionReason
-        })
+        }
       })
 
       if (response.ok) {
@@ -208,6 +171,25 @@ const SalesManagerDashboard = () => {
     approved: approvalRequests.filter(r => r.request_status === 'approved').length,
     rejected: approvalRequests.filter(r => r.request_status === 'rejected').length,
     total: approvalRequests.length
+  }
+
+  // Separate booking and retail requests
+  const bookingRequests = approvalRequests.filter(r => r.request_type === 'booking')
+  const retailRequests = approvalRequests.filter(r => r.request_type === 'retailed')
+
+  // Calculate stats for each section
+  const bookingStats = {
+    pending: bookingRequests.filter(r => r.request_status === 'pending').length,
+    approved: bookingRequests.filter(r => r.request_status === 'approved').length,
+    rejected: bookingRequests.filter(r => r.request_status === 'rejected').length,
+    total: bookingRequests.length
+  }
+
+  const retailStats = {
+    pending: retailRequests.filter(r => r.request_status === 'pending').length,
+    approved: retailRequests.filter(r => r.request_status === 'approved').length,
+    rejected: retailRequests.filter(r => r.request_status === 'rejected').length,
+    total: retailRequests.length
   }
 
   useEffect(() => {
@@ -322,28 +304,81 @@ const SalesManagerDashboard = () => {
           </Card>
         </div>
 
-        {/* Approval Requests Table */}
+        {/* Tab Navigation */}
+        <div className="flex gap-2 mb-6">
+          <Button
+            onClick={() => setActiveTab('booking')}
+            className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+              activeTab === 'booking'
+                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
+                : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            📋 Booking Requests ({bookingStats.total})
+          </Button>
+          <Button
+            onClick={() => setActiveTab('retail')}
+            className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+              activeTab === 'retail'
+                ? 'bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg'
+                : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            🚗 Retail Requests ({retailStats.total})
+          </Button>
+        </div>
+
+        {/* Requests Section */}
         <Card className="bg-white rounded-2xl shadow-lg overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-gray-800 to-gray-900 text-white">
+          <CardHeader className={`text-white ${
+            activeTab === 'booking' 
+              ? 'bg-gradient-to-r from-blue-600 to-blue-700' 
+              : 'bg-gradient-to-r from-purple-600 to-purple-700'
+          }`}>
             <CardTitle className="text-xl font-semibold flex items-center gap-2">
-              <AlertCircle className="w-5 h-5" />
-              Approval Requests
+              {activeTab === 'booking' ? '📋 Booking Requests' : '🚗 Retail Requests'}
             </CardTitle>
-            <CardDescription className="text-gray-300">
-              Review and approve booking/retail requests from PS/GEM team
+            <CardDescription className={`${
+              activeTab === 'booking' ? 'text-blue-100' : 'text-purple-100'
+            }`}>
+              {activeTab === 'booking' 
+                ? 'Review and approve booking requests from PS/GEM team'
+                : 'Review and approve retail requests from PS/GEM team'
+              }
             </CardDescription>
+            <div className="flex gap-4 mt-4">
+              <div className={`px-3 py-1 rounded-full text-sm ${
+                activeTab === 'booking' ? 'bg-blue-500/20' : 'bg-purple-500/20'
+              }`}>
+                Pending: {activeTab === 'booking' ? bookingStats.pending : retailStats.pending}
+              </div>
+              <div className="bg-green-500/20 px-3 py-1 rounded-full text-sm">
+                Approved: {activeTab === 'booking' ? bookingStats.approved : retailStats.approved}
+              </div>
+              <div className="bg-red-500/20 px-3 py-1 rounded-full text-sm">
+                Rejected: {activeTab === 'booking' ? bookingStats.rejected : retailStats.rejected}
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
               <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-2 text-gray-600">Loading approval requests...</p>
+                <div className={`animate-spin rounded-full h-8 w-8 border-b-2 mx-auto ${
+                  activeTab === 'booking' ? 'border-blue-600' : 'border-purple-600'
+                }`}></div>
+                <p className="mt-2 text-gray-600">
+                  Loading {activeTab === 'booking' ? 'booking' : 'retail'} requests...
+                </p>
               </div>
-            ) : approvalRequests.length === 0 ? (
+            ) : (activeTab === 'booking' ? bookingRequests : retailRequests).length === 0 ? (
               <div className="p-8 text-center">
                 <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">No pending requests</h3>
-                <p className="text-gray-600">All requests have been processed!</p>
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  No {activeTab === 'booking' ? 'booking' : 'retail'} requests
+                </h3>
+                <p className="text-gray-600">
+                  No {activeTab === 'booking' ? 'booking' : 'retail'} requests found!
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -359,36 +394,43 @@ const SalesManagerDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {approvalRequests.map((request) => (
+                    {(activeTab === 'booking' ? bookingRequests : retailRequests).map((request) => (
                       <tr key={request.id} className="border-b hover:bg-gray-50 transition-colors">
                         <td className="p-4">
                           <div className="space-y-1">
                             <div className="font-semibold text-gray-800">{request.lead_uid}</div>
-                            {getRequestTypeBadge(request.request_type)}
-                            {request.booking_id && (
-                              <div className="text-xs text-gray-600">
-                                <span className="font-medium">Order No:</span> {request.booking_id}
-                              </div>
-                            )}
-                            {request.retailed_id && (
-                              <div className="text-xs text-gray-600">
-                                <span className="font-medium">DN No:</span> {request.retailed_id}
-                              </div>
+                            {activeTab === 'booking' ? (
+                              <>
+                                <Badge className="bg-blue-100 text-blue-800">📋 Booking</Badge>
+                                {request.booking_id && (
+                                  <div className="text-xs text-gray-600">
+                                    <span className="font-medium">Order No:</span> {request.booking_id}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <Badge className="bg-purple-100 text-purple-800">🚗 Retail</Badge>
+                                {request.retailed_id && (
+                                  <div className="text-xs text-gray-600">
+                                    <span className="font-medium">DN No:</span> {request.retailed_id}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
                         <td className="p-4">
                           <div className="space-y-1">
-                            <div className="font-medium text-gray-800">{leadDetails?.customer_name || 'Loading...'}</div>
-                            <div className="text-sm text-gray-600">{leadDetails?.customer_mobile_number || 'Loading...'}</div>
-                            <div className="text-xs text-gray-500">{leadDetails?.model_interested || 'Loading...'}</div>
+                            <div className="font-medium text-gray-800">{request.customer_name}</div>
+                            <div className="text-sm text-gray-600">{request.customer_mobile_number}</div>
+                            <div className="text-xs text-gray-500">{request.model_interested}</div>
                           </div>
                         </td>
                         <td className="p-4">
                           <div className="space-y-1">
-                            <div className="font-medium text-gray-800">{request.ps_name}</div>
-                            <div className="text-sm text-gray-600">{leadDetails?.ps_branch || 'Loading...'}</div>
-                            <div className="text-xs text-gray-500">CRE: {leadDetails?.cre_name || 'Loading...'}</div>
+                            <div className="text-sm text-gray-600">CRE: {request.cre_name}</div>
+                            <div className="text-sm text-gray-600">PS: {request.ps_name}</div>
                           </div>
                         </td>
                         <td className="p-4">
@@ -407,7 +449,6 @@ const SalesManagerDashboard = () => {
                                       size="sm"
                                       onClick={() => {
                                         setSelectedRequest(request)
-                                        loadLeadDetails(request.lead_uid)
                                       }}
                                       className="bg-green-600 hover:bg-green-700 text-white"
                                     >
@@ -417,9 +458,11 @@ const SalesManagerDashboard = () => {
                                   </DialogTrigger>
                                   <DialogContent>
                                     <DialogHeader>
-                                      <DialogTitle>Approve Request</DialogTitle>
+                                      <DialogTitle>
+                                        Approve {activeTab === 'booking' ? 'Booking' : 'Retail'} Request
+                                      </DialogTitle>
                                       <DialogDescription>
-                                        Approve the {request.request_type} request for lead {request.lead_uid}
+                                        Approve the {activeTab === 'booking' ? 'booking' : 'retail'} request for lead {request.lead_uid}
                                       </DialogDescription>
                                     </DialogHeader>
                                     <div className="space-y-4">
@@ -462,7 +505,6 @@ const SalesManagerDashboard = () => {
                                       variant="destructive"
                                       onClick={() => {
                                         setSelectedRequest(request)
-                                        loadLeadDetails(request.lead_uid)
                                       }}
                                     >
                                       <X className="w-3 h-3 mr-1" />
@@ -471,9 +513,11 @@ const SalesManagerDashboard = () => {
                                   </DialogTrigger>
                                   <DialogContent>
                                     <DialogHeader>
-                                      <DialogTitle>Reject Request</DialogTitle>
+                                      <DialogTitle>
+                                        Reject {activeTab === 'booking' ? 'Booking' : 'Retail'} Request
+                                      </DialogTitle>
                                       <DialogDescription>
-                                        Reject the {request.request_type} request for lead {request.lead_uid}
+                                        Reject the {activeTab === 'booking' ? 'booking' : 'retail'} request for lead {request.lead_uid}
                                       </DialogDescription>
                                     </DialogHeader>
                                     <div className="space-y-4">
@@ -516,7 +560,7 @@ const SalesManagerDashboard = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => loadLeadDetails(request.lead_uid)}
+                                onClick={() => console.log('View lead:', request.lead_uid)}
                               >
                                 <Eye className="w-3 h-3 mr-1" />
                                 View
@@ -532,6 +576,7 @@ const SalesManagerDashboard = () => {
             )}
           </CardContent>
         </Card>
+
         </div>
       </div>
     </DashboardLayout>

@@ -2,6 +2,38 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
+export async function GET(request: NextRequest, { params }: { params: { lead_uid: string } }) {
+  try {
+    const authHeader = request.headers.get('authorization')
+    
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Authorization header required' }, { status: 401 })
+    }
+
+    const response = await fetch(`${FASTAPI_URL}/api/public/lead-master/${encodeURIComponent(params.lead_uid)}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      return NextResponse.json(data, { status: response.status })
+    }
+
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('Lead details fetch error:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch lead details' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function PUT(request: NextRequest, { params }: { params: { lead_uid: string } }) {
   try {
     const body = await request.json()

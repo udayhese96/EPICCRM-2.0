@@ -75,12 +75,15 @@ def _create_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': str(e)}
 
 def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Update lead in background with follow-up logic"""
+    """Process lead_master changes and sync to qualified_leads and tradein_master"""
     try:
         supabase = get_supabase_client()
         lead_id = data.get('lead_id')
         update_data = data.get('update_data', {})
         user_info = data.get('user_info', {})
+        
+        print(f"🔄 [Background Worker] Processing lead_master changes for lead: {lead_id}")
+        print(f"🔄 [Background Worker] Update data: {update_data}")
         
         if not lead_id:
             return {'success': False, 'message': 'Lead ID is required'}
@@ -213,19 +216,27 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
 
             # If this update effectively qualifies the lead, upsert into qualified_leads
             try:
+                print(f"🔄 [Background Worker] Checking if lead should be synced to qualified_leads: {lead_id}")
                 current_lead_resp = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
                 if current_lead_resp.data:
                     ld = current_lead_resp.data[0]
                     lead_status_val = (ld.get('lead_status') or ld.get('status') or '').strip()
                     final_status_val = (ld.get('final_status') or '').strip()
                     first_remark_val = (ld.get('first_remark') or '').strip()
+                    
+                    print(f"🔄 [Background Worker] Lead status: {lead_status_val}, Final status: {final_status_val}, First remark: {first_remark_val[:50]}...")
+                    
                     should_sync_qualified = (
                         (final_status_val.lower() == 'pending' and (lead_status_val in ['Qualified', 'Pending']))
                         or ('status' in update_data and str(update_data.get('status', '')).strip() == 'Qualified')
                         or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() in ['Qualified', 'Pending'])
                         or ('first_remark' in update_data and bool(update_data.get('first_remark')))
                     )
+                    
+                    print(f"🔄 [Background Worker] Should sync to qualified_leads: {should_sync_qualified}")
+                    
                     if should_sync_qualified:
+                        print(f"✅ [Background Worker] Syncing lead to qualified_leads: {lead_id}")
                         logger.info(f"Lead {lead_id}: Syncing qualified_leads from update path")
                         # Build payload similar to qualification flow
                         now_ts = datetime.now().isoformat()
@@ -253,15 +264,24 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                         # Insert or update depending on existence
                         existing_q = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
                         if existing_q.data:
+                            print(f"✅ [Background Worker] Updating existing qualified_leads row for lead: {lead_id}")
                             logger.info(f"Lead {lead_id}: Updating existing qualified_leads row with customer_location='{q_data.get('customer_location')}'")
                             supabase.table('qualified_leads').update(q_data).eq('lead_uid', lead_id).execute()
                         else:
+                            print(f"✅ [Background Worker] Inserting new qualified_leads row for lead: {lead_id}")
                             logger.info(f"Lead {lead_id}: Inserting new qualified_leads row with customer_location='{q_data.get('customer_location')}'")
                             q_data['created_at'] = now_ts
                             supabase.table('qualified_leads').insert(q_data).execute()
+                        
+                        # IMPORTANT: Skip trade-in processing on generic update path.
+                        # Trade-in insert/update is handled exclusively in the 'qualify' operation
+                        print(f"ℹ️ [Background Worker] Skipping trade-in processing on update path for lead: {lead_id}")
+                            
             except Exception as sync_err:
                 logger.warning(f"Lead {lead_id}: Failed to sync qualified_leads on update: {sync_err}")
+                print(f"❌ [Background Worker] Failed to sync qualified_leads: {sync_err}")
             
+            print(f"✅ [Background Worker] Lead processing completed: {lead_id}")
             logger.info(f"Lead updated successfully: {lead_id}")
             return {
                 'success': True,
@@ -367,10 +387,9 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         
         lead_data = lead_response.data[0]
         
-        # Check if already qualified
+        # Check if already qualified - do not return early; we still want to process trade-in
         existing_qualified = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
-        if existing_qualified.data:
-            return {'success': False, 'message': 'Lead already qualified'}
+        already_qualified = bool(existing_qualified.data)
         
         current_time = datetime.now().isoformat()
         
@@ -409,7 +428,11 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         
         logger.info(f"Lead {lead_id} qualification: Using form data with model_interested='{form_data.get('model_interested')}', variant='{form_data.get('variant')}', first_remark='{form_data.get('first_remark')}'")
         
-        qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+        qualified_response = None
+        if not already_qualified:
+            qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+        else:
+            logger.info(f"Lead {lead_id} already qualified - skipping qualified_leads insert, proceeding with trade-in processing")
         
         # Check if trade-in is "yes" and insert into tradein_master table
         # Check trade_in_info from the request first, then fallback to lead_data
@@ -426,12 +449,12 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Lead {lead_id} trade-in check: status='{trade_in_status}', trade_in_info={trade_in_info}")
         
         if trade_in_status == 'yes':
-            # Use trade-in details from the request
-            trade_in_make = trade_in_info.get('trade_in_make', '')
-            trade_in_model = trade_in_info.get('trade_in_model', '')
-            trade_in_year = trade_in_info.get('trade_in_year', '')
-            trade_in_km = trade_in_info.get('trade_in_km', '')
-            trade_in_ownership = trade_in_info.get('trade_in_ownership', '')
+            # Use trade-in details from the request, fallback to lead_master values if empty
+            trade_in_make = (trade_in_info.get('trade_in_make') or lead_data.get('trade_in_make', '') or '')
+            trade_in_model = (trade_in_info.get('trade_in_model') or lead_data.get('trade_in_model', '') or '')
+            trade_in_year = (trade_in_info.get('trade_in_year') or lead_data.get('trade_in_year', '') or '')
+            trade_in_km = (trade_in_info.get('trade_in_km') or lead_data.get('trade_in_km', '') or '')
+            trade_in_ownership = (trade_in_info.get('trade_in_ownership') or lead_data.get('trade_in_ownership', '') or '')
             
             logger.info(f"Lead {lead_id} has trade-in: {trade_in_make} {trade_in_model} ({trade_in_year})")
             
@@ -450,10 +473,16 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
             }
             
             try:
-                tradein_response = supabase.table('trade_in_master').insert(trade_in_data).execute()
-                logger.info(f"Trade-in data inserted successfully for lead {lead_id}: {tradein_response.data}")
+                # Upsert: insert if not exists, else update details
+                existing_tradein = supabase.table('trade_in_master').select('id').eq('lead_uid', lead_id).execute()
+                if existing_tradein.data:
+                    supabase.table('trade_in_master').update(trade_in_data).eq('lead_uid', lead_id).execute()
+                    logger.info(f"Trade-in data updated successfully for lead {lead_id}")
+                else:
+                    tradein_response = supabase.table('trade_in_master').insert(trade_in_data).execute()
+                    logger.info(f"Trade-in data inserted successfully for lead {lead_id}: {tradein_response.data}")
             except Exception as e:
-                logger.error(f"Failed to insert trade-in data for lead {lead_id}: {e}")
+                logger.error(f"Failed to upsert trade-in data for lead {lead_id}: {e}")
         else:
             logger.info(f"Lead {lead_id} has no trade-in (status: {trade_in_status})")
         
@@ -464,7 +493,7 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         return {
             'success': True,
             'lead_id': lead_id,
-            'qualified_lead_id': qualified_response.data[0].get('id') if qualified_response.data else None,
+            'qualified_lead_id': (qualified_response.data[0].get('id') if qualified_response and qualified_response.data else None),
             'has_trade_in': str(lead_data.get('trade_in', '')).lower() == 'yes',
             'message': 'Lead qualified successfully'
         }

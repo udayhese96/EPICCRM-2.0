@@ -72,12 +72,8 @@ export default function CREDashboard() {
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
-  const [dateFrom, setDateFrom] = useState<string>("")
-  const [dateTo, setDateTo] = useState<string>("")
   const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
-  const [showRangePicker, setShowRangePicker] = useState(false)
   const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
   const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting')
   const [countsUpdating, setCountsUpdating] = useState(false)
@@ -292,18 +288,15 @@ export default function CREDashboard() {
       const response = await fetch('/api/jobs/queue-stats')
       if (response.ok) {
         const stats = await response.json()
-        console.log('🔍 [Redis Worker] Queue stats:', stats)
         
         const wasConnected = redisWorkerStatus === 'connected'
         const isConnected = stats.redis_connected && stats.queues?.lead_queue?.status === 'active'
         
         if (isConnected) {
-          console.log('✅ [Redis Worker] Redis connected and lead queue active!')
           setRedisWorkerStatus('connected')
           
           // If worker just came online, refresh data
           if (!wasConnected) {
-            console.log('🔄 [Worker] Worker just came online - refreshing data')
             setTimeout(() => {
               if (!isLoading && !isRefreshing) {
                 fetchAssignedLeads()
@@ -311,15 +304,12 @@ export default function CREDashboard() {
             }, 1000)
           }
         } else {
-          console.log('⚠️ [Redis Worker] Redis connected but queues inactive')
           setRedisWorkerStatus('disconnected')
         }
       } else {
-        console.log('❌ [Redis Worker] Failed to get queue stats')
         setRedisWorkerStatus('disconnected')
       }
     } catch (error) {
-      console.log('⚠️ [Redis Worker] Status check failed:', error)
       setRedisWorkerStatus('disconnected')
     }
   }
@@ -337,7 +327,6 @@ export default function CREDashboard() {
       console.log('📊 [CRE Dashboard] Fetching leads for:', { username, fullName })
       console.log('📊 [CRE Dashboard] Query string:', qs.toString())
       console.log('📊 [CRE Dashboard] Full URL:', `/api/cre-assigned?${qs.toString()}`)
-      console.log('⚡ [Redis Worker] All lead operations will use background processing for ultra-fast UI!')
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
       
       if (response.ok) {
@@ -417,56 +406,20 @@ export default function CREDashboard() {
   }
 
   const handleUpdateLead = (leadData: any) => {
-    console.log("Updating lead:", leadData)
+    console.log("🔄 [UI Sync] Lead update initiated; syncing from lead_master", leadData)
     
-    // ⚡ OPTIMISTIC UI UPDATE - Remove lead immediately for better UX
-    const shouldRemoveFromUI = leadData.status === 'qualified' || 
-                              (activeTab === "fresh" && activeStatus === "Fresh") // Remove any updated fresh lead
+    // Strict server-sync: refetch from lead_master (single source of truth)
+    setIsRefreshing(true)
     
-    if (shouldRemoveFromUI) {
-      console.log('🚀 [Optimistic] Lead updated - removing from current list instantly!')
-      
-      // Remove the lead from current leads list immediately
-      setLeads(prevLeads => {
-        const leadUid = leadData.uid || leadData.leadId // Use uid if available, fallback to leadId
-        const updatedLeads = prevLeads.filter(lead => lead.uid !== leadUid)
-        console.log(`✅ [Optimistic] Removed lead ${leadUid} from list. Count: ${prevLeads.length} → ${updatedLeads.length}`)
-        return updatedLeads
-      })
-      
-      // Update counts optimistically (counts will update automatically via useMemo)
-      console.log('📊 [Optimistic] Counts will update automatically via useMemo')
-    } else {
-      // For other updates (like follow-ups in pending section), just refresh normally
+    // Small delay because the PUT is triggered inside the modal after this callback
+    setTimeout(() => {
       fetchAssignedLeads()
-      
-      // Also schedule a refresh after background processing completes
+      // Second pass to guarantee consistency even if DB commit lags briefly
       setTimeout(() => {
-        console.log('🔄 [Post-Update] Refreshing data after background processing')
         fetchAssignedLeads()
-      }, 3000) // Wait 3 seconds for background worker to complete
-      
-      // Additional count-specific refresh
-      setTimeout(() => {
-        console.log('📊 [Count-Update] Force refreshing counts after qualification')
-        fetchAssignedLeads()
-      }, 6000) // Wait 6 seconds for counts to update
-    }
-    
-    // Show a subtle success indicator - real-time updates will handle the rest
-    if (shouldRemoveFromUI) {
-      // For leads being removed from UI (qualifications, fresh updates), show brief success
-      setIsRefreshing(true)
-      setTimeout(() => setIsRefreshing(false), 1000) // Hide after 1 second
-      console.log('✅ [Optimistic] Lead removed from UI - real-time updates will sync counts')
-    } else {
-      // For leads staying in UI (follow-ups), show brief success
-      setIsRefreshing(true)
-      setTimeout(() => setIsRefreshing(false), 1000) // Hide after 1 second
-      console.log('✅ [Optimistic] Lead updated - real-time updates will sync data')
-    }
-
-    // Removed automatic navigation - user stays on current tab
+        setIsRefreshing(false)
+      }, 1200)
+    }, 600)
   }
 
   const openUpdateModal = (lead: Lead) => {
@@ -510,10 +463,8 @@ export default function CREDashboard() {
       const created = (lead.date || '').slice(0,10)
       
       // Use new date range filter if dates are set
-      if (startDate || endDate) {
-        if (startDate && !endDate) return created >= startDate
-        if (!startDate && endDate) return created <= endDate
-        if (startDate && endDate) return created >= startDate && created <= endDate
+      if (startDate) {
+        return created === startDate
       }
       
       // Fallback to old date mode system
@@ -521,10 +472,7 @@ export default function CREDashboard() {
       if (dateMode === 'Today') return created === todayIso
       if (dateMode === 'This Week') return created >= startOfWeek && created <= todayIso
       if (dateMode === 'Date Range') {
-        if (!dateFrom && !dateTo) return true
-        if (dateFrom && !dateTo) return created >= dateFrom
-        if (!dateFrom && dateTo) return created <= dateTo
-        return created >= dateFrom && created <= dateTo
+        return startDate ? created === startDate : true
       }
       return true
     }
@@ -681,7 +629,7 @@ export default function CREDashboard() {
   
   const filteredLeads = useMemo(() => {
     return getFilteredLeads()
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, endDate])
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate])
   
   const tabCounts = useMemo(() => getTabCounts(), [leads])
   const statusCounts = useMemo(() => getStatusCounts(), [leads])
@@ -886,31 +834,18 @@ export default function CREDashboard() {
                     <option>This Week</option>
                     <option>Date Range</option>
                   </select>
+                  
+                  {/* Date input for Date Range mode */}
                   {dateMode === "Date Range" && (
-                    <div className="relative">
-                      <Button variant="outline" size="sm" onClick={() => setShowRangePicker(v => !v)} className="h-8">
-                        {dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : 'Select date range'}
-                      </Button>
-                      {showRangePicker && (
-                        <div className="absolute right-0 mt-2 z-20 bg-white border rounded shadow-lg p-3">
-                          <div className="flex gap-2">
-                            <div className="space-y-1">
-                              <label className="text-xs text-gray-500">From</label>
-                              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-xs text-gray-500">To</label>
-                              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-                            </div>
-                          </div>
-                          <div className="flex justify-end gap-2 mt-3">
-                            <Button size="sm" variant="ghost" onClick={() => { setDateFrom(""); setDateTo(""); }}>Clear</Button>
-                            <Button size="sm" onClick={() => setShowRangePicker(false)} className="bg-blue-600 hover:bg-blue-700 text-white">Apply</Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="text-sm w-36"
+                      placeholder="Select Date"
+                    />
                   )}
+                  
                   <div className="relative">
                     <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                     <Input 
@@ -928,39 +863,6 @@ export default function CREDashboard() {
                     <X className="h-4 w-4" />
                   </Button>
                   
-                  {/* Date Range Filter */}
-                  <div className="flex items-center space-x-2">
-                    <Calendar className="h-4 w-4 text-gray-400" />
-                    <span className="text-sm text-gray-600">Date Range:</span>
-                    <Input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="text-sm w-36"
-                      placeholder="From"
-                    />
-                    <span className="text-gray-400">to</span>
-                    <Input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="text-sm w-36"
-                      placeholder="To"
-                    />
-                    {(startDate || endDate) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setStartDate('')
-                          setEndDate('')
-                        }}
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
                 </div>
               </div>
             </CardHeader>

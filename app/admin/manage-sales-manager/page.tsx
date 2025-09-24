@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Plus, Edit, Trash2, Eye, Users, Building2, Phone, Mail, Shield, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
 
 interface SalesManagerUser {
   id: string
@@ -52,9 +53,11 @@ const ManageSalesManagerPage = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/users?role=sales_manager', {
+      // Call FastAPI backend directly
+      const response = await fetch('http://localhost:8000/api/users?role=sales_manager', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       })
 
@@ -82,7 +85,8 @@ const ManageSalesManagerPage = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/users', {
+      // Call FastAPI backend directly
+      const response = await fetch('http://localhost:8000/api/users', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -203,7 +207,8 @@ const ManageSalesManagerPage = () => {
   const branches = Array.from(new Set(users.map(user => user.branch)))
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
+    <DashboardLayout>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
@@ -284,7 +289,7 @@ const ManageSalesManagerPage = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Branches</SelectItem>
-                    <SelectItem value="">No Branch</SelectItem>
+                    <SelectItem value="none">No Branch</SelectItem>
                     {branches.map(branch => (
                       <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                     ))}
@@ -428,13 +433,15 @@ const ManageSalesManagerPage = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="branch">Branch (Optional)</Label>
+                  <Label htmlFor="branch">Branch *</Label>
                   <Select value={formData.branch} onValueChange={(value) => setFormData({...formData, branch: value})}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select branch (optional)" />
+                      <SelectValue placeholder="Select branch (required)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No Branch</SelectItem>
+                      <SelectItem value="Mount Road">Mount Road</SelectItem>
+                      <SelectItem value="Vyasarpadi">Vyasarpadi</SelectItem>
+                      <SelectItem value="Cuddalore">Cuddalore</SelectItem>
                       {branches.map((branch) => (
                         <SelectItem key={branch} value={branch}>
                           {branch}
@@ -555,6 +562,7 @@ const ManageSalesManagerPage = () => {
         </Dialog>
       </div>
     </div>
+    </DashboardLayout>
   )
 }
 
