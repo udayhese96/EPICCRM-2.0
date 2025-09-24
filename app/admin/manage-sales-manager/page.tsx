@@ -278,13 +278,13 @@ const ManageSalesManagerPage = () => {
               </div>
               <div className="md:w-48">
                 <Label htmlFor="branch">Branch</Label>
-                <Select value={branchFilter} onValueChange={setBranchFilter}>
+                <Select value={branchFilter} onValueChange={(value) => setBranchFilter(value === 'none' ? '' : value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="All Branches" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Branches</SelectItem>
-                    <SelectItem value="">No Branch</SelectItem>
+                    <SelectItem value="none">No Branch</SelectItem>
                     {branches.map(branch => (
                       <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                     ))}
@@ -429,12 +429,12 @@ const ManageSalesManagerPage = () => {
                 </div>
                 <div>
                   <Label htmlFor="branch">Branch (Optional)</Label>
-                  <Select value={formData.branch} onValueChange={(value) => setFormData({...formData, branch: value})}>
+                  <Select value={formData.branch || 'none'} onValueChange={(value) => setFormData({...formData, branch: value === 'none' ? '' : value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select branch (optional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No Branch</SelectItem>
+                      <SelectItem value="none">No Branch</SelectItem>
                       {branches.map((branch) => (
                         <SelectItem key={branch} value={branch}>
                           {branch}

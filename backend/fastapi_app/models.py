@@ -10,6 +10,8 @@ class UserRole(str, Enum):
     cre_icrop = "cre_icrop"
     cre = "cre"
     ps = "ps"
+    sales_team_leader = "sales_team_leader"
+    team_leader = "team_leader"
     receptionist = "receptionist"
 
 class LeadStatus(str, Enum):
@@ -211,6 +213,38 @@ class BulkAssignRequest(BaseModel):
 class BulkStatusUpdateRequest(BaseModel):
     lead_ids: List[str]
     status: LeadStatus
+
+# PS Assignment models
+class PSAssignmentBase(BaseModel):
+    ps_user_id: str
+    sales_team_leader_id: str
+
+class PSAssignmentCreate(PSAssignmentBase):
+    pass
+
+class PSAssignmentResponse(PSAssignmentBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+class PSAssignmentUpdate(BaseModel):
+    sales_team_leader_id: Optional[str] = None
+
+# Team Leader Assignment models
+class TeamLeaderAssignmentBase(BaseModel):
+    ps_user_id: str
+    team_leader_id: str
+
+class TeamLeaderAssignmentCreate(TeamLeaderAssignmentBase):
+    pass
+
+class TeamLeaderAssignmentResponse(TeamLeaderAssignmentBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+class TeamLeaderAssignmentUpdate(BaseModel):
+    team_leader_id: Optional[str] = None
 
 # Statistics models
 class LeadStatistics(BaseModel):

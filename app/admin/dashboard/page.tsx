@@ -252,6 +252,22 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-team-leaders')}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-cyan-100 rounded-lg">
+                    <Shield className="h-5 w-5 text-cyan-600" />
+                  </div>
+                  <CardTitle className="text-sm font-medium">Manage Team Leaders</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-xs">
+                  Configure Team Leaders and PS assignments
+                </CardDescription>
+              </CardContent>
+            </Card>
+
             <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/users')}>
               <CardHeader className="pb-2">
                 <div className="flex items-center space-x-2">

@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { hasPermission, canAccessRoute, type UserRole } from "@/lib/permissions"
+import { getUser } from "@/lib/auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ShieldX, ArrowLeft } from "lucide-react"
@@ -30,12 +31,42 @@ export function RoleGuard({ children, requiredRole, requiredPermission, route, f
   }, [requiredRole, requiredPermission, route])
 
   const checkAccess = async () => {
-    const supabase = createClient()
-
     try {
+      // First try to get user from localStorage (your current auth system)
+      const localUser = getUser()
+      
+      if (localUser && localUser.role) {
+        const role = localUser.role as UserRole
+        setUserRole(role)
+        
+        let access = true
+
+        // Check role requirement
+        if (requiredRole) {
+          access = access && (role === requiredRole || role === "admin")
+        }
+
+        // Check permission requirement
+        if (requiredPermission) {
+          access = access && hasPermission(role, requiredPermission.resource, requiredPermission.action)
+        }
+
+        // Check route access
+        if (route) {
+          access = access && canAccessRoute(role, route)
+        }
+
+        setHasAccess(access)
+        setLoading(false)
+        return
+      }
+
+      // Fallback to Supabase auth if localStorage doesn't have user
+      const supabase = createClient()
       const {
         data: { user },
       } = await supabase.auth.getUser()
+      
       if (!user) {
         setHasAccess(false)
         setLoading(false)

@@ -1,5 +1,5 @@
 // Role hierarchy and permissions system
-export type UserRole = "admin" | "branch_head" | "cre_team_leader" | "cre" | "ps" | "receptionist"
+export type UserRole = "admin" | "branch_head" | "cre_team_leader" | "cre" | "ps" | "sales_team_leader" | "team_leader" | "receptionist"
 
 export interface Permission {
   resource: string
@@ -8,9 +8,11 @@ export interface Permission {
 
 // Define role hierarchy (higher roles inherit permissions from lower roles)
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
-  admin: 6,
-  branch_head: 5,
-  cre_team_leader: 4,
+  admin: 8,
+  branch_head: 7,
+  cre_team_leader: 6,
+  sales_team_leader: 5,
+  team_leader: 4,
   cre: 3,
   ps: 2,
   receptionist: 1,
@@ -43,6 +45,23 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { resource: "ps_users", action: "read" }, // Read PS users for assignment
     { resource: "branches", action: "read" }, // Read branches
     { resource: "reports", action: "read" }, // Read reports
+  ],
+  sales_team_leader: [
+    // Sales Team Leader permissions
+    { resource: "ps_users", action: "read" }, // Read PS users for monitoring
+    { resource: "ps_performance", action: "read" }, // Monitor PS performance
+    { resource: "leads", action: "read" }, // Read leads assigned to their PS team
+    { resource: "reports", action: "read" }, // Read performance reports
+    { resource: "branches", action: "read" }, // Read branches
+  ],
+  team_leader: [
+    // Team Leader permissions - analytical oversight of assigned PS teams
+    { resource: "ps_users", action: "read" }, // Read assigned PS users
+    { resource: "ps_performance", action: "read" }, // Monitor PS performance analytics
+    { resource: "leads", action: "read" }, // Read leads from assigned PS team
+    { resource: "reports", action: "read" }, // Read comprehensive analytics reports
+    { resource: "team_analytics", action: "read" }, // Access team analytics
+    { resource: "branches", action: "read" }, // Read branch information
   ],
   cre: [
     // Customer relationship management

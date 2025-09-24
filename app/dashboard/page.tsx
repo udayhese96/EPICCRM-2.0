@@ -17,6 +17,13 @@ interface User {
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [recentLeads, setRecentLeads] = useState<any[]>([])
+  const [dashboardStats, setDashboardStats] = useState({
+    leads: 0,
+    users: 0,
+    branches: 0,
+    conversionRate: "0%"
+  })
   const router = useRouter()
 
   useEffect(() => {
@@ -73,14 +80,6 @@ export default function DashboardPage() {
     branches: user.role === "admin" ? 8 : 0,
     conversionRate: "12.5%",
   }
-
-  const [recentLeads, setRecentLeads] = useState<any[]>([])
-  const [dashboardStats, setDashboardStats] = useState({
-    leads: 0,
-    users: 0,
-    branches: 0,
-    conversionRate: "0%"
-  })
 
   useEffect(() => {
     if (user) {

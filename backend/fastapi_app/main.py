@@ -105,7 +105,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from .models import (UserCreate, UserUpdate, UserResponse, LoginRequest, LoginResponse, ChangePasswordRequest,
                     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, ActivityCreate, ActivityResponse,
-                    BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics)
+                    BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics, PSAssignmentCreate, 
+                    PSAssignmentResponse, PSAssignmentUpdate)
 from .optimized_endpoints import router as optimized_router
 from .redis_cache import (cache, cache_leads, get_cached_leads, cache_users, get_cached_users, 
                          cache_lead_stats, get_cached_lead_stats, invalidate_on_lead_change)
@@ -2712,6 +2713,129 @@ async def update_qualified_lead_icrop_id(
             'lead_id': lead_id,
             'icrop_id': icrop_id
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# PS ASSIGNMENT ENDPOINTS
+# ========================================
+
+@app.get("/api/ps-assignments", response_model=List[PSAssignmentResponse])
+async def get_ps_assignments(current_user=Depends(admin_or_branch_head)):
+    """Get all PS assignments"""
+    try:
+        response = supabase.table('ps_assignments').select("""
+            id,
+            ps_user_id,
+            sales_team_leader_id,
+            created_at,
+            updated_at,
+            ps_user:users!ps_assignments_ps_user_id_fkey(
+                id,
+                username,
+                email,
+                full_name,
+                phone,
+                branch,
+                is_active
+            ),
+            sales_team_leader:users!ps_assignments_sales_team_leader_id_fkey(
+                id,
+                username,
+                email,
+                full_name,
+                phone,
+                branch,
+                is_active
+            )
+        """).execute()
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ps-assignments", response_model=PSAssignmentResponse)
+async def create_ps_assignment(assignment_data: PSAssignmentCreate, current_user=Depends(admin_or_branch_head)):
+    """Create a new PS assignment"""
+    try:
+        # Verify PS user exists and has correct role
+        ps_user_response = supabase.table('users').select('id, role').eq('id', assignment_data.ps_user_id).eq('role', 'ps').execute()
+        if not ps_user_response.data:
+            raise HTTPException(status_code=400, detail="PS user not found or invalid role")
+        
+        # Verify sales team leader exists and has correct role
+        stl_response = supabase.table('users').select('id, role').eq('id', assignment_data.sales_team_leader_id).eq('role', 'sales_team_leader').execute()
+        if not stl_response.data:
+            raise HTTPException(status_code=400, detail="Sales team leader not found or invalid role")
+        
+        # Check if PS user is already assigned
+        existing_response = supabase.table('ps_assignments').select('id').eq('ps_user_id', assignment_data.ps_user_id).execute()
+        if existing_response.data:
+            raise HTTPException(status_code=400, detail="PS user is already assigned to a sales team leader")
+        
+        # Create assignment
+        response = supabase.table('ps_assignments').insert({
+            'ps_user_id': assignment_data.ps_user_id,
+            'sales_team_leader_id': assignment_data.sales_team_leader_id,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to create assignment")
+        
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/ps-assignments/{assignment_id}", response_model=PSAssignmentResponse)
+async def update_ps_assignment(assignment_id: str, assignment_data: PSAssignmentUpdate, current_user=Depends(admin_or_branch_head)):
+    """Update a PS assignment"""
+    try:
+        # Verify assignment exists
+        existing_response = supabase.table('ps_assignments').select('id').eq('id', assignment_id).execute()
+        if not existing_response.data:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+        
+        # Verify sales team leader exists and has correct role
+        if assignment_data.sales_team_leader_id:
+            stl_response = supabase.table('users').select('id, role').eq('id', assignment_data.sales_team_leader_id).eq('role', 'sales_team_leader').execute()
+            if not stl_response.data:
+                raise HTTPException(status_code=400, detail="Sales team leader not found or invalid role")
+        
+        # Update assignment
+        update_data = {'updated_at': datetime.now().isoformat()}
+        if assignment_data.sales_team_leader_id:
+            update_data['sales_team_leader_id'] = assignment_data.sales_team_leader_id
+        
+        response = supabase.table('ps_assignments').update(update_data).eq('id', assignment_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to update assignment")
+        
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/ps-assignments/{assignment_id}")
+async def delete_ps_assignment(assignment_id: str, current_user=Depends(admin_or_branch_head)):
+    """Delete a PS assignment"""
+    try:
+        # Verify assignment exists
+        existing_response = supabase.table('ps_assignments').select('id').eq('id', assignment_id).execute()
+        if not existing_response.data:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+        
+        # Delete assignment
+        response = supabase.table('ps_assignments').delete().eq('id', assignment_id).execute()
+        
+        return {"message": "Assignment deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:

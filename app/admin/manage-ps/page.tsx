@@ -74,7 +74,7 @@ export default function ManagePSPage() {
     e.preventDefault()
     
     try {
-      const url = editingUser ? `/api/ps-users/${editingUser.id}` : '/api/ps-users'
+      const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users'
       const method = editingUser ? 'PUT' : 'POST'
       
       const response = await fetch(url, {
@@ -83,19 +83,29 @@ export default function ManagePSPage() {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          username: formData.username,
+          email: formData.email,
+          full_name: formData.full_name,
+          phone: formData.phone,
+          branch: formData.branch,
+          password: formData.password,
+          is_active: formData.is_active,
+          role: 'ps'
+        })
       })
 
       if (response.ok) {
         await fetchPSUsers() // Refresh the list
         // Reset form
         setFormData({
-          name: "",
           username: "",
           email: "",
+          full_name: "",
           phone: "",
           branch: "",
-          password: ""
+          password: "",
+          is_active: true
         })
         setEditingUser(null)
         setIsDialogOpen(false)
@@ -110,19 +120,20 @@ export default function ManagePSPage() {
   const handleEdit = (user: PSUser) => {
     setEditingUser(user)
     setFormData({
-      name: user.name,
       username: user.username,
       email: user.email,
-      phone: user.phone,
+      full_name: user.full_name,
+      phone: user.phone || "",
       branch: user.branch,
-      password: ""
+      password: "",
+      is_active: user.is_active
     })
     setIsDialogOpen(true)
   }
 
   const handleDelete = async (userId: string) => {
     try {
-      const response = await fetch(`/api/ps-users/${userId}`, {
+      const response = await fetch(`/api/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -141,7 +152,7 @@ export default function ManagePSPage() {
       const user = psUsers.find(u => u.id === userId)
       if (!user) return
 
-      const response = await fetch(`/api/ps-users/${userId}`, {
+      const response = await fetch(`/api/users/${userId}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,

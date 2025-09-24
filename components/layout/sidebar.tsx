@@ -58,6 +58,16 @@ const getNavigationForRole = (role: string) => {
           icon: UserPlus,
         },
         {
+          name: "Manage Sales Team Leader",
+          href: "/admin/manage-sales-team-leader",
+          icon: Users,
+        },
+        {
+          name: "Manage Team Leaders",
+          href: "/admin/manage-team-leaders",
+          icon: Users,
+        },
+        {
           name: "Users",
           href: "/admin/users",
           icon: UsersIcon,
@@ -153,6 +163,24 @@ const getNavigationForRole = (role: string) => {
           name: "Manage PS",
           href: "/admin/users",
           icon: UsersIcon,
+        },
+      ]
+    case "team_leader":
+      return [
+        {
+          name: "Team Leader Dashboard",
+          href: "/team-leader-dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Team Analytics",
+          href: "/analytics",
+          icon: BarChart3,
+        },
+        {
+          name: "PS Performance",
+          href: "/reports",
+          icon: Users,
         },
       ]
     default:
