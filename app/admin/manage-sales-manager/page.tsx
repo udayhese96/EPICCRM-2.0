@@ -283,7 +283,7 @@ const ManageSalesManagerPage = () => {
               </div>
               <div className="md:w-48">
                 <Label htmlFor="branch">Branch</Label>
-                <Select value={branchFilter} onValueChange={setBranchFilter}>
+                <Select value={branchFilter} onValueChange={(value) => setBranchFilter(value === 'none' ? '' : value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="All Branches" />
                   </SelectTrigger>
@@ -433,15 +433,13 @@ const ManageSalesManagerPage = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="branch">Branch *</Label>
-                  <Select value={formData.branch} onValueChange={(value) => setFormData({...formData, branch: value})}>
+                  <Label htmlFor="branch">Branch (Optional)</Label>
+                  <Select value={formData.branch || 'none'} onValueChange={(value) => setFormData({...formData, branch: value === 'none' ? '' : value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select branch (required)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Mount Road">Mount Road</SelectItem>
-                      <SelectItem value="Vyasarpadi">Vyasarpadi</SelectItem>
-                      <SelectItem value="Cuddalore">Cuddalore</SelectItem>
+                      <SelectItem value="none">No Branch</SelectItem>
                       {branches.map((branch) => (
                         <SelectItem key={branch} value={branch}>
                           {branch}

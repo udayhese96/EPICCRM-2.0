@@ -240,7 +240,7 @@ export default function ManageCREPage() {
                 </div>
                 <div>
                   <Label htmlFor="branch">Branch (Optional)</Label>
-                  <Select value={formData.branch} onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}>
+                  <Select value={formData.branch || 'none'} onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value === 'none' ? '' : value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select branch (optional)" />
                     </SelectTrigger>
