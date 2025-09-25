@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 
 const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
@@ -33,6 +34,25 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
   const body = await request.json()
 
+  // Fast path: if team_leader_id is present, try updating directly in Supabase
+  if (Object.prototype.hasOwnProperty.call(body, 'team_leader_id')) {
+    try {
+      const supabase = await createClient()
+      const { data, error } = await supabase
+        .from('users')
+        .update({ team_leader_id: body.team_leader_id, updated_at: new Date().toISOString() })
+        .eq('id', params.id)
+        .select()
+        .single()
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ user: data }, { status: 200 })
+    } catch (e: any) {
+      // fall through to FastAPI attempt
+    }
+  }
+
   try {
     const response = await fetch(`${API_BASE_URL}/api/users/${params.id}`, {
       method: 'PUT',
@@ -44,8 +64,25 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     })
 
     if (!response.ok) {
-      const errorData = await response.json()
-      return NextResponse.json({ error: errorData.detail || 'Failed to update user' }, { status: response.status })
+      // Fallback: attempt a generic Supabase update with provided fields
+      try {
+        const supabase = await createClient()
+        const update: Record<string, any> = { ...body, updated_at: new Date().toISOString() }
+        const { data, error } = await supabase
+          .from('users')
+          .update(update)
+          .eq('id', params.id)
+          .select()
+          .single()
+        if (error) {
+          const errorData = await response.json().catch(() => ({} as any))
+          return NextResponse.json({ error: errorData.detail || error.message || 'Failed to update user' }, { status: 500 })
+        }
+        return NextResponse.json({ user: data }, { status: 200 })
+      } catch (fallbackErr: any) {
+        const errorData = await response.json().catch(() => ({} as any))
+        return NextResponse.json({ error: errorData.detail || fallbackErr?.message || 'Failed to update user' }, { status: response.status || 500 })
+      }
     }
 
     const data = await response.json()
