@@ -259,7 +259,14 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                             'trade_in': ld.get('trade_in', ''),
                             'branch': ld.get('branch', ''),
                             'ps_name': ld.get('ps_name', ''),
-                            'updated_at': now_ts
+                            'updated_at': now_ts,
+                            # Explicitly set booking/retail timestamps to null to override database defaults
+                            'booking_requested_at': None,
+                            'retailed_requested_at': None,
+                            'booking_approved_timestamp': None,
+                            'retailed_approved_timestamp': None,
+                            'booking_approved_by': None,
+                            'retailed_approved_by': None
                         }
                         # Insert or update depending on existence
                         existing_q = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
@@ -423,7 +430,14 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
             'trade_in': form_data.get('trade_in') or lead_data.get('trade_in', ''),
             'branch': lead_data.get('branch', ''),
             'created_at': current_time,
-            'updated_at': current_time
+            'updated_at': current_time,
+            # Explicitly set booking/retail timestamps to null to override database defaults
+            'booking_requested_at': None,
+            'retailed_requested_at': None,
+            'booking_approved_timestamp': None,
+            'retailed_approved_timestamp': None,
+            'booking_approved_by': None,
+            'retailed_approved_by': None
         }
         
         logger.info(f"Lead {lead_id} qualification: Using form data with model_interested='{form_data.get('model_interested')}', variant='{form_data.get('variant')}', first_remark='{form_data.get('first_remark')}'")

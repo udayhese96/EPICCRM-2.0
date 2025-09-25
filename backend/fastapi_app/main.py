@@ -133,19 +133,18 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     print("[FastAPI] Missing Supabase credentials. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars.")
 
 # Initialize Supabase client with error handling - FORCE REAL CONNECTION
-try:
-    if SUPABASE_AVAILABLE:
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-        print("[FastAPI] Connected to real Supabase database")
-        # Test connection
-        test_response = supabase.table('admin_users').select('id').limit(1).execute()
-        print(f"[FastAPI] Supabase connection test successful: {len(test_response.data)} records in admin_users")
-    else:
-        print("[FastAPI] Supabase library not available, using dummy client")
-        supabase: Client = create_client("dummy_url", "dummy_key")
-except Exception as e:
-    print(f"[FastAPI] Supabase connection failed: {e}")
-    print("[FastAPI] Falling back to dummy client")
+if SUPABASE_AVAILABLE:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    print("[FastAPI] Connected to real Supabase database")
+    # Test connection against an existing table (users)
+    try:
+        test_response = supabase.table('users').select('id').limit(1).execute()
+        print(f"[FastAPI] Supabase connection test successful: {len(test_response.data)} records in users")
+    except Exception as e:
+        # Do not replace the client; just warn and continue
+        print(f"[FastAPI] Supabase connection test warning (users): {e}")
+else:
+    print("[FastAPI] Supabase library not available, using dummy client")
     supabase: Client = create_client("dummy_url", "dummy_key")
 
 security = HTTPBearer()
@@ -2047,7 +2046,7 @@ async def assign_lead_to_ps(lead_uid: str, ps_data: dict, current_user=Depends(a
             "lead_uid": lead_uid,
             "ps_id": ps_data["ps_id"],
             "ps_name": ps_data["ps_name"],
-            "follow_up_date": ps_data.get("follow_up_date", now_ist_iso()),
+            "follow_up_date": ps_data.get("follow_up_date", None),  # Only set when PS manually enters it
             "notes": ps_data.get("notes", "Initial PS assignment"),
             "status": "pending",
             "created_at": now_ist_iso()
@@ -2344,7 +2343,7 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     "variant": lead_data['variant'],
                     "buying_plan": lead_data['buying_plan'],
                     "finance_option": lead_data['finance_option'],
-                    "follow_up_date": now_ist_iso(),
+                    "follow_up_date": None,  # Only set when PS manually enters it
                     "lead_status": "Pending",
                     "final_status": "Pending",
                     "ps_assigned_at": now_ist_iso(),

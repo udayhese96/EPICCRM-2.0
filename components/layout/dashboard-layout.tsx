@@ -33,11 +33,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         // Check for session in localStorage
         const manualSession = localStorage.getItem("supabase_user")
         if (manualSession) {
-          console.log("📝 Manual session found")
           const userData = JSON.parse(manualSession)
           setUser(userData)
         } else {
-          console.log("❌ No session found, redirecting to login")
           router.push("/auth/login")
           return
         }

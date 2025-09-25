@@ -125,18 +125,13 @@ export default function CREDashboard() {
   const setupRealtimeSubscriptions = () => {
     // Only setup if we have a user
     if (!user?.username) {
-      console.log('⚠️ [Real-time] No user found, skipping real-time setup')
       return () => {}
     }
     
-    console.log('🔌 [Real-time] Setting up Supabase real-time subscriptions for user:', user.username)
-    
     try {
       const supabase = createClient()
-      console.log('✅ [Real-time] Supabase client created successfully')
     
     // Subscribe to lead_master changes for this CRE user
-    console.log('🔌 [Real-time] Setting up lead_master subscription with filter: cre_name=eq.' + user.username)
     const leadSubscription = supabase
       .channel(`lead_master_changes_${user.username}`)
       .on('postgres_changes', 
@@ -147,41 +142,14 @@ export default function CREDashboard() {
           filter: `cre_name=eq.${user.username}`
         }, 
         (payload) => {
-          console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, payload.new || payload.old)
+          console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
           
-          // Check if this affects pending/qualified counts
-          const newRecord = payload.new as any
-          const oldRecord = payload.old as any
-          
-          if (newRecord) {
-            const affectsPending = newRecord?.final_status === 'pending' && newRecord?.first_call_date
-            const affectsQualified = newRecord?.lead_status === 'Qualified' && newRecord?.final_status === 'pending'
-            
-            if (affectsPending || affectsQualified) {
-              console.log('📊 [Real-time] Count-affecting change detected - refreshing data immediately')
-              setCountsUpdating(true)
-              setTimeout(() => {
-                if (!isLoading && !isRefreshing) {
-                  fetchAssignedLeads()
-                  setTimeout(() => setCountsUpdating(false), 1000)
-                }
-              }, 500) // Faster refresh for count-affecting changes
-            } else {
-              // Regular refresh for other changes
-              setTimeout(() => {
-                if (!isLoading && !isRefreshing) {
-                  fetchAssignedLeads()
-                }
-              }, 1000)
-            }
-          } else {
-            // For deletions, always refresh
-            setTimeout(() => {
-              if (!isLoading && !isRefreshing) {
-                fetchAssignedLeads()
-              }
-            }, 500)
-          }
+          // Always refresh on any change to lead_master for this CRE user
+          // This ensures the dashboard stays up-to-date with all lead changes
+          console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
+          setCountsUpdating(true)
+          fetchAssignedLeads()
+          setTimeout(() => setCountsUpdating(false), 1000)
         }
       )
       .subscribe((status) => {
@@ -204,24 +172,16 @@ export default function CREDashboard() {
           filter: `cre_name=eq.${user.username}`
         }, 
         (payload) => {
-          console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, payload.new || payload.old)
-          
           // Qualified leads changes always affect counts, so refresh immediately
-          console.log('📊 [Real-time] Qualified leads change - refreshing counts immediately')
+          console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+          console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
           setCountsUpdating(true)
-          setTimeout(() => {
-            if (!isLoading && !isRefreshing) {
-              fetchAssignedLeads()
-              setTimeout(() => setCountsUpdating(false), 1000)
-            }
-          }, 500) // Fast refresh for qualified leads changes
+          fetchAssignedLeads()
+          setTimeout(() => setCountsUpdating(false), 1000)
         }
       )
       .subscribe((status) => {
-        console.log('📡 [Real-time] Qualified leads subscription status:', status)
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ [Real-time] Qualified leads subscription active')
-        } else if (status === 'CHANNEL_ERROR') {
+        if (status === 'CHANNEL_ERROR') {
           console.error('❌ [Real-time] Qualified leads subscription error')
         }
       })
@@ -236,30 +196,22 @@ export default function CREDashboard() {
           table: 'ps_followup_master'
         }, 
         (payload) => {
-          console.log('🔄 [Real-time] Follow-up master change detected:', payload.eventType)
           // Refresh leads data when ICROP IDs are updated
-          setTimeout(() => {
-            if (!isLoading && !isRefreshing) {
-              fetchAssignedLeads()
-            }
-          }, 1000)
+          console.log('🔄 [Real-time] Follow-up change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+          console.log('🔄 [Real-time] Refreshing leads data due to follow-up change')
+          fetchAssignedLeads()
         }
       )
       .subscribe((status) => {
-        console.log('📡 [Real-time] Follow-up subscription status:', status)
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ [Real-time] Follow-up subscription active')
-        } else if (status === 'CHANNEL_ERROR') {
+        if (status === 'CHANNEL_ERROR') {
           console.error('❌ [Real-time] Follow-up subscription error')
         }
       })
     
-    console.log('✅ [Real-time] All subscriptions established')
     setRealtimeStatus('connected')
     
     // Return cleanup function
     return () => {
-      console.log('🔌 [Real-time] Cleaning up subscriptions...')
       setRealtimeStatus('disconnected')
       supabase.removeChannel(leadSubscription)
       supabase.removeChannel(qualifiedSubscription)
@@ -324,29 +276,10 @@ export default function CREDashboard() {
       const qs = new URLSearchParams({ username })
       if (fullName) qs.append('name', fullName)
       
-      console.log('📊 [CRE Dashboard] Fetching leads for:', { username, fullName })
-      console.log('📊 [CRE Dashboard] Query string:', qs.toString())
-      console.log('📊 [CRE Dashboard] Full URL:', `/api/cre-assigned?${qs.toString()}`)
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
       
       if (response.ok) {
         const data = await response.json()
-        console.log('API Response:', data)
-        console.log('Sample lead data:', data[0]) // Debug: log first lead
-        
-        // DEBUG: Check for LD000529 specifically
-        const targetLead = data.find((l: any) => l.uid === 'LD000529')
-        if (targetLead) {
-          console.log('🎯 [DEBUG] Found target lead LD000529 in API response:')
-          console.log('   - UID:', targetLead.uid)
-          console.log('   - Customer:', targetLead.customer_name)
-          console.log('   - Raw icrop_id:', targetLead.icrop_id)
-          console.log('   - icrop_id type:', typeof targetLead.icrop_id)
-          console.log('   - All keys:', Object.keys(targetLead))
-        } else {
-          console.log('❌ [DEBUG] Target lead LD000529 NOT found in API response')
-          console.log('   - Available UIDs:', data.map((l: any) => l.uid))
-        }
         
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
@@ -380,20 +313,6 @@ export default function CREDashboard() {
           fifth_remark: l.fifth_remark
         }))
         
-        // DEBUG: Check mapped data for LD000529
-        const mappedTargetLead = mapped.find((l: any) => l.uid === 'LD000529')
-        if (mappedTargetLead) {
-          console.log('🎯 [DEBUG] Mapped target lead LD000529:')
-          console.log('   - UID:', mappedTargetLead.uid)
-          console.log('   - Customer:', mappedTargetLead.customer_name)
-          console.log('   - Mapped icrop_id:', mappedTargetLead.icrop_id)
-          console.log('   - Mapped icrop_id type:', typeof mappedTargetLead.icrop_id)
-        } else {
-          console.log('❌ [DEBUG] Target lead LD000529 NOT found in mapped data')
-        }
-        
-        console.log('Mapped leads:', mapped)
-        console.log('Sample lead data:', mapped[0])
         setLeads(mapped)
       } else {
         console.error('API Error:', response.status, response.statusText)

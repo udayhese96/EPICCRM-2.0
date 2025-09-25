@@ -4,6 +4,12 @@ export const API_CONFIG = {
   NEXTJS_API_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
 } as const
 
+// Supabase Configuration
+export const SUPABASE_CONFIG = {
+  URL: process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+} as const
+
 // API Endpoints
 export const API_ENDPOINTS = {
   // CRE Users
