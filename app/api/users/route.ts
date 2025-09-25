@@ -28,7 +28,8 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data, { status: 200 })
+    const users = Array.isArray(data) ? data : (data?.users ?? [])
+    return NextResponse.json({ users }, { status: 200 })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
