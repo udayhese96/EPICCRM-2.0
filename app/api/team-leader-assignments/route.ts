@@ -13,26 +13,31 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Error fetching team leader assignments:', error)
-      return NextResponse.json({ error: 'Failed to fetch assignments' }, { status: 500 })
+      // Return empty data to avoid frontend crash
+      return NextResponse.json({ assignments: [] }, { status: 200 })
     }
 
     // Get PS users and team leaders separately
     const psUserIds = assignments?.map(a => a.ps_user_id) || []
     const teamLeaderIds = assignments?.map(a => a.team_leader_id) || []
 
-    // Fetch PS users from unified users table
-    const { data: psUsers } = await supabase
-      .from('users')
-      .select('id, username, full_name, email, branch')
-      .in('id', psUserIds)
-      .eq('role', 'ps')
+    // Fetch PS users from unified users table (skip if no ids)
+    const { data: psUsers } = psUserIds.length > 0
+      ? await supabase
+          .from('users')
+          .select('id, username, full_name, email, branch')
+          .in('id', psUserIds)
+          .eq('role', 'ps')
+      : { data: [] as any[] }
 
-    // Fetch team leaders from unified users table
-    const { data: teamLeaders } = await supabase
-      .from('users')
-      .select('id, username, full_name, email, branch')
-      .in('id', teamLeaderIds)
-      .eq('role', 'team_leader')
+    // Fetch team leaders from unified users table (skip if no ids)
+    const { data: teamLeaders } = teamLeaderIds.length > 0
+      ? await supabase
+          .from('users')
+          .select('id, username, full_name, email, branch')
+          .in('id', teamLeaderIds)
+          .eq('role', 'team_leader')
+      : { data: [] as any[] }
 
     // Combine the data
     const assignmentsWithUsers = assignments?.map(assignment => ({
