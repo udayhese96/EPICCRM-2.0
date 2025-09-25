@@ -23,12 +23,12 @@ interface User {
   role: string
 }
 
-interface TeamLeaderAssignment {
+interface TeamLeaderAssignmentLike {
   id: string
   ps_user_id: string
   team_leader_id: string
   ps_user: User
-  team_leader: User
+  team_leader?: User
 }
 
 interface TeamLeader {
@@ -37,7 +37,7 @@ interface TeamLeader {
   full_name: string
   email: string
   branch: string
-  assigned_ps: TeamLeaderAssignment[]
+  assigned_ps: TeamLeaderAssignmentLike[]
 }
 
 export default function ManageTeamLeadersPage() {
@@ -69,13 +69,21 @@ export default function ManageTeamLeadersPage() {
       const tlResponse = await fetch('/api/users?role=team_leader')
       const tlData = await tlResponse.json()
       
-      // No assignments table; show raw lists only
+      // Build assignments from ps users' team_leader_id
+      const psList: User[] = psData.users
       const teamLeadersWithPS: TeamLeader[] = tlData.users.map((tl: User) => ({
         ...tl,
-        assigned_ps: []
+        assigned_ps: psList
+          .filter((ps: any) => ps.team_leader_id === tl.id)
+          .map((ps: any) => ({
+            id: ps.id,
+            ps_user_id: ps.id,
+            team_leader_id: tl.id,
+            ps_user: ps
+          }))
       }))
-      
-      const unassigned = psData.users
+
+      const unassigned = psList.filter((ps: any) => !ps.team_leader_id)
       
       // Extract unique branches
       const branches = [...new Set(unassigned.map(ps => ps.branch).filter(Boolean))]
@@ -121,16 +129,13 @@ export default function ManageTeamLeadersPage() {
     applyBranchFilter(selectedBranch, unassignedPS)
   }, [unassignedPS])
 
-  // Handle PS assignment
+  // Handle PS assignment by updating PS user's team_leader_id
   const handleAssignPS = async (psUserId: string, teamLeaderId: string) => {
     try {
-      const response = await fetch('/api/team-leader-assignments', {
-        method: 'POST',
+      const response = await fetch(`/api/users/${psUserId}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ps_user_id: psUserId,
-          team_leader_id: teamLeaderId
-        })
+        body: JSON.stringify({ team_leader_id: teamLeaderId })
       })
 
       if (!response.ok) {
@@ -145,11 +150,13 @@ export default function ManageTeamLeadersPage() {
     }
   }
 
-  // Handle PS unassignment
+  // Handle PS unassignment by clearing team_leader_id on the PS user
   const handleUnassignPS = async (assignmentId: string) => {
     try {
-      const response = await fetch(`/api/team-leader-assignments/${assignmentId}`, {
-        method: 'DELETE'
+      const response = await fetch(`/api/users/${assignmentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_leader_id: null })
       })
 
       if (!response.ok) {
