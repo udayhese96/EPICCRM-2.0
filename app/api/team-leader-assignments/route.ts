@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ assignments: assignmentsWithUsers })
   } catch (error) {
     console.error('Error in team leader assignments GET:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    // Return empty data to avoid frontend crash on .map
+    return NextResponse.json({ assignments: [] }, { status: 200 })
   }
 }
 

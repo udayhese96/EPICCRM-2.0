@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
 export async function GET(request: NextRequest) {
-  const token = request.headers.get('Authorization')
+  const headerAuth = request.headers.get('Authorization')
+  const cookieToken = request.cookies.get('access_token')?.value
+  const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
   const { searchParams } = new URL(request.url)
   const role = searchParams.get('role')
 
@@ -33,7 +35,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const token = request.headers.get('Authorization')
+  const headerAuth = request.headers.get('Authorization')
+  const cookieToken = request.cookies.get('access_token')?.value
+  const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
   const body = await request.json()
 
   try {

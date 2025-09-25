@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-  const token = request.headers.get('Authorization')
+  const headerAuth = request.headers.get('Authorization')
+  const cookieToken = request.cookies.get('access_token')?.value
+  const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
 
   try {
     const response = await fetch(`${API_BASE_URL}/api/users/${params.id}`, {
@@ -26,7 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
-  const token = request.headers.get('Authorization')
+  const headerAuth = request.headers.get('Authorization')
+  const cookieToken = request.cookies.get('access_token')?.value
+  const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
   const body = await request.json()
 
   try {
@@ -52,7 +56,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
-  const token = request.headers.get('Authorization')
+  const headerAuth = request.headers.get('Authorization')
+  const cookieToken = request.cookies.get('access_token')?.value
+  const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
 
   try {
     const response = await fetch(`${API_BASE_URL}/api/users/${params.id}`, {
