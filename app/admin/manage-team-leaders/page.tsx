@@ -306,17 +306,17 @@ export default function ManageTeamLeadersPage() {
           </div>
 
           {/* Branch Filter */}
-          <Card>
+          <Card className="border rounded-md">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <Users className="h-5 w-5 mr-2" />
-                  Unassigned PS Team Members
+                  <Users className="h-4 w-4 mr-2" />
+                  <span className="text-base">Unassigned PS Team Members</span>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">Filter by Branch:</span>
+                <div className="flex items-center space-x-2 text-sm">
+                  <span className="text-gray-600">Filter:</span>
                   <Select value={selectedBranch} onValueChange={(value) => applyBranchFilter(value)}>
-                    <SelectTrigger className="w-48">
+                    <SelectTrigger className="h-8 w-44">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -330,24 +330,24 @@ export default function ManageTeamLeadersPage() {
                   </Select>
                 </div>
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs">
                 Drag and drop PS users to assign them to team leaders
                 {selectedBranch !== 'all' && (
-                  <span className="ml-2 text-blue-600 font-medium">
-                    • Showing {filteredPS.length} PS members from {selectedBranch}
+                  <span className="ml-1 text-blue-600 font-medium">
+                    • {filteredPS.length} from {selectedBranch}
                   </span>
                 )}
               </CardDescription>
             </CardHeader>
             <CardContent>
               {/* Quick Branch Filter Buttons */}
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="mb-3 flex flex-wrap gap-2">
                 <Button
                   variant={selectedBranch === 'all' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => applyBranchFilter('all')}
                 >
-                  All Branches ({psUsers.length})
+                  All ({psUsers.length})
                 </Button>
                 {availableBranches.slice(1).map((branch) => (
                   <Button
@@ -361,11 +361,11 @@ export default function ManageTeamLeadersPage() {
                 ))}
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {filteredPS.map((ps) => (
                   <div
                     key={ps.id}
-                    className="p-4 border rounded-lg bg-gray-50 cursor-move hover:bg-gray-100 transition-colors"
+                    className="p-2 border rounded-md bg-gray-50 cursor-move hover:bg-gray-100 transition-colors text-sm"
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', ps.id)
@@ -373,23 +373,23 @@ export default function ManageTeamLeadersPage() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="font-medium">{ps.full_name}</h4>
-                        <p className="text-sm text-gray-600">{ps.username}</p>
-                        <Badge variant="secondary" className="mt-1">
+                        <h4 className="font-medium text-sm">{ps.full_name}</h4>
+                        <p className="text-xs text-gray-600">{ps.username}</p>
+                        <Badge variant="secondary" className="mt-1 px-2 py-0.5 text-[10px]">
                           {ps.branch}
                         </Badge>
                       </div>
-                      <GripVertical className="h-4 w-4 text-gray-400" />
+                      <GripVertical className="h-3 w-3 text-gray-400" />
                     </div>
                   </div>
                 ))}
               </div>
               
               {filteredPS.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <Users className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <h3 className="text-lg font-medium mb-2">No PS Members Found</h3>
-                  <p>
+                <div className="text-center py-6 text-gray-500 text-sm">
+                  <Users className="h-10 w-10 mx-auto mb-2 text-gray-300" />
+                  <h3 className="text-base font-medium mb-1">No PS Members Found</h3>
+                  <p className="text-xs">
                     {selectedBranch === 'all' 
                       ? 'No PS members available.'
                       : `No unassigned PS members found in ${selectedBranch} branch.`
@@ -417,26 +417,26 @@ export default function ManageTeamLeadersPage() {
               </p>
             </div>
           )}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {getFilteredTeamLeaders().map((teamLeader) => (
-              <Card key={teamLeader.id}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
+              <Card key={teamLeader.id} className="rounded-md">
+                <CardHeader className="py-3">
+                  <CardTitle className="flex items-center justify-between text-base">
                     <div className="flex items-center">
-                      <Users className="h-5 w-5 mr-2" />
+                      <Users className="h-4 w-4 mr-2" />
                       {teamLeader.full_name}
                     </div>
-                    <Badge variant="outline">
-                      {teamLeader.assigned_ps.length} PS Members
+                    <Badge variant="outline" className="text-xs px-2 py-0.5">
+                      {teamLeader.assigned_ps.length} PS
                     </Badge>
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-xs">
                     {teamLeader.username} • {teamLeader.branch}
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0 pb-3">
                   <div
-                    className="min-h-[200px] p-4 border-2 border-dashed border-gray-300 rounded-lg"
+                    className="min-h-[140px] p-3 border-2 border-dashed border-gray-300 rounded-md"
                     onDragOver={(e) => {
                       e.preventDefault()
                       e.currentTarget.classList.add('border-blue-500', 'bg-blue-50')
@@ -452,7 +452,7 @@ export default function ManageTeamLeadersPage() {
                     }}
                   >
                     {teamLeader.assigned_ps.length === 0 ? (
-                      <div className="text-center text-gray-500 py-8">
+                      <div className="text-center text-gray-500 py-6 text-sm">
                         Drop PS members here to assign them to this team leader
                       </div>
                     ) : (
@@ -460,18 +460,18 @@ export default function ManageTeamLeadersPage() {
                         {teamLeader.assigned_ps.map((assignment) => (
                           <div
                             key={assignment.id}
-                            className="flex items-center justify-between p-3 bg-white border rounded-lg"
+                            className="flex items-center justify-between p-2 bg-white border rounded-md text-sm"
                           >
                             <div>
-                              <h4 className="font-medium">{assignment.ps_user.full_name}</h4>
-                              <p className="text-sm text-gray-600">{assignment.ps_user.username}</p>
-                              <Badge variant="secondary" className="mt-1">
+                              <h4 className="font-medium text-sm">{assignment.ps_user.full_name}</h4>
+                              <p className="text-xs text-gray-600">{assignment.ps_user.username}</p>
+                              <Badge variant="secondary" className="mt-1 px-2 py-0.5 text-[10px]">
                                 {assignment.ps_user.branch}
                               </Badge>
                             </div>
                             <Button
                               variant="outline"
-                              size="sm"
+                              size="icon"
                               onClick={() => handleUnassignPS(assignment.id)}
                               className="text-red-600 hover:text-red-700"
                             >
