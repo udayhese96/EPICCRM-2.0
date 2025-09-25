@@ -219,7 +219,7 @@ export default function ManageTeamLeadersPage() {
 
   return (
     <DashboardLayout>
-      <RoleGuard requiredRole="admin">
+      <RoleGuard requiredRole="admin" route="/admin/manage-team-leaders">
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <div>

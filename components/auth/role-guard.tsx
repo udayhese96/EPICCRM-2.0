@@ -32,8 +32,8 @@ export function RoleGuard({ children, requiredRole, requiredPermission, route, f
 
   const checkAccess = async () => {
     try {
-      // First try to get user from localStorage (your current auth system)
-      const localUser = getUser()
+      // First try to get user from localStorage (both legacy and supabase formats)
+      const localUser = getUser() || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('supabase_user') || 'null') : null)
       
       if (localUser && localUser.role) {
         const role = localUser.role as UserRole
