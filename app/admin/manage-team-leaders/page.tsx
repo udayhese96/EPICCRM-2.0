@@ -21,6 +21,7 @@ interface User {
   email: string
   branch: string
   role: string
+  team_leader_id?: string | null
 }
 
 interface TeamLeaderAssignmentLike {
@@ -83,10 +84,13 @@ export default function ManageTeamLeadersPage() {
           }))
       }))
 
+      // Compute available branches from PS and TL
+      const branchSet = new Set<string>()
+      psList.forEach(u => { if (u.branch) branchSet.add(u.branch) })
+      tlData.users.forEach((u: User) => { if (u.branch) branchSet.add(u.branch) })
+
       const unassigned = psList.filter((ps: any) => !ps.team_leader_id)
-      
-      // Extract unique branches
-      const branches = [...new Set(unassigned.map(ps => ps.branch).filter(Boolean))]
+      const branches = [...branchSet]
       branches.sort()
       
       setTeamLeaders(teamLeadersWithPS)
@@ -126,8 +130,8 @@ export default function ManageTeamLeadersPage() {
   }, [])
 
   useEffect(() => {
-    applyBranchFilter(selectedBranch, unassignedPS)
-  }, [unassignedPS])
+    applyBranchFilter(selectedBranch, psUsers)
+  }, [psUsers])
 
   // Handle PS assignment by updating PS user's team_leader_id
   const handleAssignPS = async (psUserId: string, teamLeaderId: string) => {
