@@ -42,7 +42,7 @@ interface TeamLeader {
 
 export default function ManageTeamLeadersPage() {
   const [teamLeaders, setTeamLeaders] = useState<TeamLeader[]>([])
-  const [unassignedPS, setUnassignedPS] = useState<User[]>([])
+  const [psUsers, setPsUsers] = useState<User[]>([])
   const [filteredPS, setFilteredPS] = useState<User[]>([])
   const [selectedBranch, setSelectedBranch] = useState<string>('all')
   const [availableBranches, setAvailableBranches] = useState<string[]>([])
@@ -69,28 +69,20 @@ export default function ManageTeamLeadersPage() {
       const tlResponse = await fetch('/api/users?role=team_leader')
       const tlData = await tlResponse.json()
       
-      // Fetch assignments
-      const assignmentsResponse = await fetch('/api/team-leader-assignments')
-      const assignmentsData = await assignmentsResponse.json()
-      
-      const assignments: TeamLeaderAssignment[] = assignmentsData.assignments || []
-      
-      // Group PS users by team leader
+      // No assignments table; show raw lists only
       const teamLeadersWithPS: TeamLeader[] = tlData.users.map((tl: User) => ({
         ...tl,
-        assigned_ps: assignments.filter(a => a.team_leader_id === tl.id)
+        assigned_ps: []
       }))
       
-      // Find unassigned PS users
-      const assignedPSIds = assignments.map(a => a.ps_user_id)
-      const unassigned = psData.users.filter((ps: User) => !assignedPSIds.includes(ps.id))
+      const unassigned = psData.users
       
       // Extract unique branches
       const branches = [...new Set(unassigned.map(ps => ps.branch).filter(Boolean))]
       branches.sort()
       
       setTeamLeaders(teamLeadersWithPS)
-      setUnassignedPS(unassigned)
+      setPsUsers(unassigned)
       setAvailableBranches(['all', ...branches])
       
       // Apply initial filter
@@ -104,7 +96,7 @@ export default function ManageTeamLeadersPage() {
   }
 
   // Apply branch filter
-  const applyBranchFilter = (branch: string, psList: User[] = unassignedPS) => {
+  const applyBranchFilter = (branch: string, psList: User[] = psUsers) => {
     const filtered = branch === 'all' 
       ? psList 
       : psList.filter(ps => ps.branch === branch)
@@ -317,10 +309,10 @@ export default function ManageTeamLeadersPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Branches ({unassignedPS.length})</SelectItem>
+                      <SelectItem value="all">All Branches ({psUsers.length})</SelectItem>
                       {availableBranches.slice(1).map((branch) => (
                         <SelectItem key={branch} value={branch}>
-                          {branch} ({unassignedPS.filter(ps => ps.branch === branch).length})
+                          {branch} ({psUsers.filter(ps => ps.branch === branch).length})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -344,7 +336,7 @@ export default function ManageTeamLeadersPage() {
                   size="sm"
                   onClick={() => applyBranchFilter('all')}
                 >
-                  All Branches ({unassignedPS.length})
+                  All Branches ({psUsers.length})
                 </Button>
                 {availableBranches.slice(1).map((branch) => (
                   <Button
@@ -353,7 +345,7 @@ export default function ManageTeamLeadersPage() {
                     size="sm"
                     onClick={() => applyBranchFilter(branch)}
                   >
-                    {branch} ({unassignedPS.filter(ps => ps.branch === branch).length})
+                    {branch} ({psUsers.filter(ps => ps.branch === branch).length})
                   </Button>
                 ))}
               </div>
@@ -388,7 +380,7 @@ export default function ManageTeamLeadersPage() {
                   <h3 className="text-lg font-medium mb-2">No PS Members Found</h3>
                   <p>
                     {selectedBranch === 'all' 
-                      ? 'All PS members have been assigned to team leaders.'
+                      ? 'No PS members available.'
                       : `No unassigned PS members found in ${selectedBranch} branch.`
                     }
                   </p>
