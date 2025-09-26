@@ -69,103 +69,129 @@ export default function TeamLeaderDashboard() {
   const [selectedPS, setSelectedPS] = useState<string>('all')
   const [dateRange, setDateRange] = useState<string>('30')
   const [isLoading, setIsLoading] = useState(true)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
-  // Mock data for demonstration - replace with actual API calls
   const mockTeamPerformance: TeamPerformanceData = {
-    total_leads: 156,
-    new_leads: 45,
-    qualified_leads: 67,
-    closed_won: 23,
-    closed_lost: 21,
-    conversion_rate: 14.7,
-    call_volume: 342,
-    revenue: 1250000,
-    avg_response_time: 2.3
+    total_leads: 0,
+    new_leads: 0,
+    qualified_leads: 0,
+    closed_won: 0,
+    closed_lost: 0,
+    conversion_rate: 0,
+    call_volume: 0,
+    revenue: 0,
+    avg_response_time: 0
   }
 
-  const mockAssignedPS: PSUser[] = [
-    { id: '1', username: 'john_ps', full_name: 'John Smith', email: 'john@example.com', branch: 'Main' },
-    { id: '2', username: 'sarah_ps', full_name: 'Sarah Johnson', email: 'sarah@example.com', branch: 'Main' },
-    { id: '3', username: 'mike_ps', full_name: 'Mike Wilson', email: 'mike@example.com', branch: 'Branch 1' }
-  ]
+  // Fallback when no data is available
+  const mockAssignedPS: PSUser[] = []
 
-  const mockIndividualPerformance: PSIndividualPerformance[] = [
-    {
-      ps_user: mockAssignedPS[0],
-      metrics: {
-        total_leads: 52,
-        new_leads: 15,
-        qualified_leads: 22,
-        closed_won: 8,
-        closed_lost: 7,
-        conversion_rate: 15.4,
-        call_volume: 118,
-        revenue: 420000,
-        avg_response_time: 1.8
-      },
-      recent_activities: [
-        { id: '1', type: 'call', description: 'Follow-up call with potential client', created_at: '2024-01-15T10:30:00Z' },
-        { id: '2', type: 'meeting', description: 'Product demonstration scheduled', created_at: '2024-01-15T09:15:00Z' }
-      ]
-    },
-    {
-      ps_user: mockAssignedPS[1],
-      metrics: {
-        total_leads: 48,
-        new_leads: 18,
-        qualified_leads: 20,
-        closed_won: 7,
-        closed_lost: 3,
-        conversion_rate: 14.6,
-        call_volume: 95,
-        revenue: 380000,
-        avg_response_time: 2.1
-      },
-      recent_activities: [
-        { id: '3', type: 'email', description: 'Sent proposal to qualified lead', created_at: '2024-01-15T14:20:00Z' },
-        { id: '4', type: 'call', description: 'Initial qualification call', created_at: '2024-01-15T11:45:00Z' }
-      ]
-    },
-    {
-      ps_user: mockAssignedPS[2],
-      metrics: {
-        total_leads: 56,
-        new_leads: 12,
-        qualified_leads: 25,
-        closed_won: 8,
-        closed_lost: 11,
-        conversion_rate: 14.3,
-        call_volume: 129,
-        revenue: 450000,
-        avg_response_time: 3.1
-      },
-      recent_activities: [
-        { id: '5', type: 'meeting', description: 'Client presentation completed', created_at: '2024-01-15T16:00:00Z' },
-        { id: '6', type: 'call', description: 'Negotiation call scheduled', created_at: '2024-01-15T13:30:00Z' }
-      ]
-    }
-  ]
+  const mockIndividualPerformance: PSIndividualPerformance[] = []
+
+  // Read current user id (sales TL) from localStorage once on mount
+  useEffect(() => {
+    try {
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      if (supabaseUserRaw) {
+        const u = JSON.parse(supabaseUserRaw)
+        if (u?.id) {
+          console.log('[TL-Dashboard] Loaded supabase user:', u)
+          setCurrentUserId(u.id as string)
+        } else {
+          console.warn('[TL-Dashboard] supabase_user found but no id field:', u)
+        }
+      } else {
+        const legacyUserRaw = typeof window !== 'undefined' ? localStorage.getItem('user') : null
+        if (legacyUserRaw) {
+          const u = JSON.parse(legacyUserRaw)
+          if (u?.id) {
+            console.log('[TL-Dashboard] Loaded legacy user:', u)
+            setCurrentUserId(u.id as string)
+          } else {
+            console.warn('[TL-Dashboard] legacy user found but no id field:', u)
+          }
+        }
+      }
+    } catch {}
+  }, [])
 
   useEffect(() => {
-    // Simulate API call
-    const fetchDashboardData = async () => {
+    const load = async () => {
       setIsLoading(true)
-      
-      // In a real implementation, fetch from APIs:
-      // - /api/team-leader-assignments to get assigned PS users
-      // - /api/team-leader/performance to get team performance
-      // - /api/team-leader/individual-performance to get individual PS performance
-      
-      setTimeout(() => {
+      try {
+        // Fetch PS users and filter by team_leader_id === current TL id
+        console.log('[TL-Dashboard] Fetching PS users for TL:', currentUserId)
+        const resp = await fetch(`/api/users?role=ps&_=${Date.now()}`, { cache: 'no-store' as any })
+        if (!resp.ok) {
+          console.error('[TL-Dashboard] /api/users?role=ps failed', resp.status)
+        }
+        const data = await resp.json().catch((e) => ({ error: String(e) }))
+        const allPs: any[] = (data?.users || [])
+        console.log('[TL-Dashboard] PS fetched:', allPs.length, allPs)
+        const users: PSUser[] = allPs.filter((u: any) => u.team_leader_id === currentUserId)
+        console.log('[TL-Dashboard] PS assigned to current TL:', users.length, users)
+        setAssignedPS(users)
+
+        // Fetch per-PS performance from API if available
+        try {
+          const perfResp = await fetch(`/api/team-leader/individual-performance?team_leader_id=${currentUserId}&days=${dateRange}`)
+          if (perfResp.ok) {
+            const perfData = await perfResp.json()
+            console.log('[TL-Dashboard] Performance API payload:', perfData)
+            const raw = Array.isArray(perfData?.individual) ? perfData.individual : (Array.isArray(perfData?.individual_performance) ? perfData.individual_performance : [])
+            const byId = new Set(users.map(u => u.id))
+            const filtered = raw.filter((p: any) => byId.has(p?.ps_user?.id))
+            console.log('[TL-Dashboard] Filtered PS perf count:', filtered.length, filtered)
+            filtered.forEach((p: any) => {
+              console.log('[TL-Dashboard] PS metrics:', p?.ps_user?.username, p?.metrics, p?.debug || {})
+            })
+            setIndividualPerformance(filtered.length ? filtered : users.map(u => ({ ps_user: u, metrics: { total_leads: 0, new_leads: 0, qualified_leads: 0, closed_won: 0, closed_lost: 0, conversion_rate: 0, call_volume: 0, revenue: 0, avg_response_time: 0 }, recent_activities: [] })))
+
+            // Aggregate KPIs from PS metrics
+            const agg = (filtered.length ? filtered : []).reduce((acc: TeamPerformanceData, cur: any) => {
+              const m = cur.metrics || {}
+              acc.total_leads += m.total_leads || 0
+              acc.new_leads += m.new_leads || 0
+              acc.qualified_leads += m.qualified_leads || 0
+              acc.closed_won += m.closed_won || 0
+              acc.closed_lost += m.closed_lost || 0
+              acc.call_volume += m.call_volume || 0
+              acc.revenue += m.revenue || 0
+              acc.avg_response_time += m.avg_response_time || 0
+              return acc
+            }, { ...mockTeamPerformance })
+            const denom = filtered.length || 1
+            agg.conversion_rate = agg.total_leads > 0 ? Math.round((agg.closed_won / agg.total_leads) * 1000) / 10 : 0
+            agg.avg_response_time = Math.round((agg.avg_response_time / denom) * 10) / 10
+            console.log('[TL-Dashboard] Aggregated KPIs from ps_follow_up_master:', agg)
+            setTeamPerformance(agg)
+          } else {
+            console.warn('[TL-Dashboard] Performance API not ok:', perfResp.status)
+            setTeamPerformance(mockTeamPerformance)
+          }
+        } catch {
+          console.error('[TL-Dashboard] Performance fetch threw, using zeroed metrics')
+          setIndividualPerformance(users.map(u => ({
+            ps_user: u,
+            metrics: { total_leads: 0, new_leads: 0, qualified_leads: 0, closed_won: 0, closed_lost: 0, conversion_rate: 0, call_volume: 0, revenue: 0, avg_response_time: 0 },
+            recent_activities: []
+          })))
+        }
+
+        // Team aggregate is derived above; nothing to do here
+      } catch (e) {
+        console.error('[TL-Dashboard] Unexpected error loading dashboard:', e)
         setAssignedPS(mockAssignedPS)
         setTeamPerformance(mockTeamPerformance)
         setIndividualPerformance(mockIndividualPerformance)
+      } finally {
         setIsLoading(false)
-      }, 1000)
+      }
     }
-
-    fetchDashboardData()
-  }, [dateRange])
+    if (currentUserId) {
+      load()
+    }
+  }, [currentUserId, dateRange])
 
   const filteredPerformance = selectedPS === 'all' 
     ? individualPerformance 
@@ -219,8 +245,8 @@ export default function TeamLeaderDashboard() {
             </div>
           </div>
 
-          {/* Team Performance Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Simplified KPIs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
@@ -228,25 +254,8 @@ export default function TeamLeaderDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{teamPerformance?.total_leads}</div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-green-600">+12%</span> from last month
-                </p>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Conversion Rate</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{teamPerformance?.conversion_rate}%</div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-green-600">+2.1%</span> from last month
-                </p>
-              </CardContent>
-            </Card>
-
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Call Volume</CardTitle>
@@ -254,22 +263,6 @@ export default function TeamLeaderDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{teamPerformance?.call_volume}</div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-green-600">+8%</span> from last month
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{(teamPerformance?.revenue || 0).toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-green-600">+15%</span> from last month
-                </p>
               </CardContent>
             </Card>
           </div>
@@ -280,87 +273,91 @@ export default function TeamLeaderDashboard() {
             individualPerformance={filteredPerformance}
           />
 
+          {/* Per-PS Lead Counts */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Leads by PS Member</CardTitle>
+              <CardDescription>Segregation of leads per assigned PS</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {individualPerformance.map((perf) => (
+                  <div key={perf.ps_user.id} className="p-3 border rounded-md flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{perf.ps_user.full_name}</div>
+                      <div className="text-xs text-gray-500">{perf.ps_user.username} • {perf.ps_user.branch}</div>
+                    </div>
+                    <Badge className="text-xs">{perf.metrics.total_leads} leads</Badge>
+                  </div>
+                ))}
+                {individualPerformance.length === 0 && (
+                  <div className="text-sm text-gray-500">No PS members assigned.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Lead Source Distribution</CardTitle>
-                <CardDescription>Distribution of leads by source for your team</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <LeadSourceChart />
-              </CardContent>
-            </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Lead Source Distribution</CardTitle>
+              <CardDescription>Distribution of leads by source for your team</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LeadSourceChart data={[]} />
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Lead Status Overview</CardTitle>
-                <CardDescription>Current status of all leads in your team</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <LeadStatusChart />
-              </CardContent>
-            </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Lead Status Overview</CardTitle>
+              <CardDescription>Current status of all leads in your team</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LeadStatusChart data={[]} />
+            </CardContent>
+          </Card>
           </div>
 
-          {/* Individual PS Performance */}
+          {/* Leads by PS with drilldown */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Users className="h-5 w-5 mr-2" />
-                Individual PS Performance
+                Leads by PS Member
               </CardTitle>
-              <CardDescription>
-                Performance metrics for each PS team member
-              </CardDescription>
+              <CardDescription>Click a PS to view their leads</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>PS Member</TableHead>
-                    <TableHead>Total Leads</TableHead>
-                    <TableHead>Qualified</TableHead>
-                    <TableHead>Closed Won</TableHead>
-                    <TableHead>Conversion Rate</TableHead>
-                    <TableHead>Revenue</TableHead>
-                    <TableHead>Avg Response Time</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPerformance.map((perf) => (
-                    <TableRow key={perf.ps_user.id}>
-                      <TableCell className="font-medium">
-                        <div>
-                          <div>{perf.ps_user.full_name}</div>
-                          <div className="text-sm text-gray-500">{perf.ps_user.username}</div>
+              <div className="space-y-4">
+                {filteredPerformance.map((perf) => (
+                  <div key={perf.ps_user.id} className="border rounded-md">
+                    <div className="flex items-center justify-between p-3">
+                      <div>
+                        <div className="font-medium">{perf.ps_user.full_name}</div>
+                        <div className="text-xs text-muted-foreground">{perf.ps_user.username}</div>
+                      </div>
+                      <Badge>{perf.metrics.total_leads} leads</Badge>
+                    </div>
+                    {/* Leads list */}
+                    <div className="divide-y">
+                      {(perf as any).leads?.map((lead: any) => (
+                        <div key={lead.id || lead.lead_uid} className="flex items-center justify-between p-3">
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{lead.customer_name} • {lead.customer_mobile_number}</div>
+                            <div className="text-xs text-muted-foreground truncate">{lead.lead_uid} • {lead.source} • {lead.final_status || lead.lead_status}</div>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => alert(JSON.stringify(lead, null, 2))}>Eye</Button>
                         </div>
-                      </TableCell>
-                      <TableCell>{perf.metrics.total_leads}</TableCell>
-                      <TableCell>{perf.metrics.qualified_leads}</TableCell>
-                      <TableCell>{perf.metrics.closed_won}</TableCell>
-                      <TableCell>
-                        <Badge variant={perf.metrics.conversion_rate > 15 ? "default" : "secondary"}>
-                          {perf.metrics.conversion_rate}%
-                        </Badge>
-                      </TableCell>
-                      <TableCell>₹{perf.metrics.revenue.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center">
-                          <Clock className="h-4 w-4 mr-1" />
-                          {perf.metrics.avg_response_time}h
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={perf.metrics.conversion_rate > 15 ? "default" : "secondary"}>
-                          {perf.metrics.conversion_rate > 15 ? "High Performer" : "Standard"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      ))}
+                      {!(perf as any).leads?.length && (
+                        <div className="p-3 text-sm text-muted-foreground">No leads found.</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 

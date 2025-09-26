@@ -8,7 +8,9 @@ export async function GET(
 ) {
   try {
     const { source } = await params
-    const auth = request.headers.get('authorization') || ''
+    const headerAuth = request.headers.get('authorization')
+    const cookieToken = request.cookies.get('access_token')?.value
+    const auth = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
 
     let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned/${encodeURIComponent(source)}`, {
       method: 'GET',

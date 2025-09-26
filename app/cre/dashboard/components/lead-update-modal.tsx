@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -607,6 +607,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           <DialogTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
             Update Lead - {lead.uid}
           </DialogTitle>
+          <DialogDescription>
+            Update lead information and call history
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -1249,6 +1252,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Trade In Vehicle Details</DialogTitle>
+          <DialogDescription>
+            Enter details about the trade-in vehicle
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

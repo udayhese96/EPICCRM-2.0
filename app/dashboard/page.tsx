@@ -26,70 +26,11 @@ export default function DashboardPage() {
   })
   const router = useRouter()
 
-  useEffect(() => {
-    const checkAuth = () => {
-      try {
-        // Check for new session format first
-        const supabaseUser = localStorage.getItem("supabase_user")
-        const legacyToken = localStorage.getItem("access_token")
-        const legacyUser = localStorage.getItem("user")
-
-        if (supabaseUser) {
-          console.log("✅ Dashboard loaded for user (supabase):", JSON.parse(supabaseUser))
-          setUser(JSON.parse(supabaseUser))
-        } else if (legacyToken && legacyUser) {
-          console.log("✅ Dashboard loaded for user (legacy):", JSON.parse(legacyUser))
-          setUser(JSON.parse(legacyUser))
-        } else {
-          console.log("❌ No session found, redirecting to login")
-          router.push("/auth/login")
-          return
-        }
-      } catch (error) {
-        console.error("Auth verification failed:", error)
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("user")
-        localStorage.removeItem("supabase_user")
-        router.push("/auth/login")
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    checkAuth()
-  }, [router])
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return null
-  }
-
-  const mockStats = {
-    leads: user.role === "admin" ? 150 : user.role === "branch_head" ? 75 : 25,
-    users: user.role === "admin" ? 45 : user.role === "branch_head" ? 12 : 0,
-    branches: user.role === "admin" ? 8 : 0,
-    conversionRate: "12.5%",
-  }
-
-  useEffect(() => {
-    if (user) {
-      fetchDashboardData()
-    }
-  }, [user])
-
   const fetchDashboardData = async () => {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token')
+      const supabaseUserRaw = localStorage.getItem('supabase_user')
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || localStorage.getItem('token') || localStorage.getItem('access_token')
       
       // Fetch leads statistics
       const leadsResponse = await fetch('/api/leads/statistics', {
@@ -125,6 +66,58 @@ export default function DashboardPage() {
     }
   }
 
+  // Authentication check effect
+  useEffect(() => {
+    const checkAuth = () => {
+      try {
+        // Check for new session format first
+        const supabaseUser = localStorage.getItem("supabase_user")
+        const legacyToken = localStorage.getItem("access_token")
+        const legacyUser = localStorage.getItem("user")
+
+        if (supabaseUser) {
+          const u = JSON.parse(supabaseUser)
+          console.log("✅ Dashboard loaded for user (supabase):", u)
+          // Redirect team leaders to their purpose-built dashboard
+          if (u?.role === 'team_leader') {
+            router.push('/team-leader-dashboard')
+            return
+          }
+          setUser(u)
+        } else if (legacyToken && legacyUser) {
+          const u = JSON.parse(legacyUser)
+          console.log("✅ Dashboard loaded for user (legacy):", u)
+          if (u?.role === 'team_leader') {
+            router.push('/team-leader-dashboard')
+            return
+          }
+          setUser(u)
+        } else {
+          console.log("❌ No session found, redirecting to login")
+          router.push("/auth/login")
+          return
+        }
+      } catch (error) {
+        console.error("Auth verification failed:", error)
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("supabase_user")
+        router.push("/auth/login")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    checkAuth()
+  }, [router])
+
+  // Dashboard data fetching effect
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData()
+    }
+  }, [user])
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "new":
@@ -140,6 +133,28 @@ export default function DashboardPage() {
       default:
         return "bg-gray-100 text-gray-800"
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  const mockStats = {
+    leads: user.role === "admin" ? 150 : user.role === "branch_head" ? 75 : 25,
+    users: user.role === "admin" ? 45 : user.role === "branch_head" ? 12 : 0,
+    branches: user.role === "admin" ? 8 : 0,
+    conversionRate: "12.5%",
   }
 
   return (
@@ -160,7 +175,7 @@ export default function DashboardPage() {
               <Contact className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{mockStats.leads}</div>
+              <div className="text-2xl font-bold">{dashboardStats.leads || mockStats.leads}</div>
               <p className="text-xs text-muted-foreground">{user.role === "admin" ? "All leads" : "Your leads"}</p>
             </CardContent>
           </Card>
@@ -197,7 +212,7 @@ export default function DashboardPage() {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{mockStats.conversionRate}</div>
+              <div className="text-2xl font-bold">{dashboardStats.conversionRate || mockStats.conversionRate}</div>
               <p className="text-xs text-muted-foreground">This month</p>
             </CardContent>
           </Card>
@@ -241,3 +256,4 @@ export default function DashboardPage() {
     </DashboardLayout>
   )
 }
+

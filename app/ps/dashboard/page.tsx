@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -212,8 +212,7 @@ export default function PSDashboard() {
       if (response.ok) {
         const data = await response.json()
         console.log('Qualified leads loaded:', data)
-        console.log('Current PS user:', currentPSUser)
-        console.log('Current PS name:', currentPSUser?.name || currentPSUser?.username || '')
+        // Debug logging removed
         
         // Check for status changes before updating state
         checkForStatusChanges(data)
@@ -357,7 +356,7 @@ export default function PSDashboard() {
         // Don't update follow_up_date for won leads - keep existing date
         delete updateData.follow_up_date
       } else if (isLeadLost(callOutcome)) {
-        updateData.final_status = 'Lost'
+        updateData.final_status = 'Lost Requested'
         // Don't update follow_up_date for lost leads - keep existing date
         delete updateData.follow_up_date
       }
@@ -421,6 +420,8 @@ export default function PSDashboard() {
           } else {
         toast.success('Follow-up updated successfully')
           }
+        } else if (isLeadLost(callOutcome)) {
+          toast.success('Lost status requested! Awaiting CRE approval')
         } else {
           toast.success('Follow-up updated successfully')
         }
@@ -432,6 +433,7 @@ export default function PSDashboard() {
         setFollowUpDate("")
         setFinalStatus("")
         loadFollowUps()
+        loadQualifiedLeads() // Also refresh qualified leads to get updated lost status
       } else {
         const errorData = await response.json()
         console.error('❌ [PS Follow-up] Update failed:', errorData)
@@ -479,6 +481,8 @@ export default function PSDashboard() {
         return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Won</Badge>
       case 'lost':
         return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Lost</Badge>
+      case 'lost requested':
+        return <Badge className="bg-orange-100 text-orange-800"><Clock className="w-3 h-3 mr-1" />Lost Requested</Badge>
       case 'qualified':
         return <Badge className="bg-blue-100 text-blue-800"><Star className="w-3 h-3 mr-1" />Qualified</Badge>
       case 'pending':
@@ -533,7 +537,12 @@ export default function PSDashboard() {
 
   // Helper function to check if lead is lost
   const isLeadLost = (status: string) => {
-    return status === 'Lost to Competition' || status === 'Lost to Codealer' || status === 'Dropped'
+    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped'
+  }
+
+  // Helper function to check if lead status requires lost request
+  const requiresLostRequest = (status: string) => {
+    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped'
   }
 
   // Helper function to check if follow-up date should be locked
@@ -653,7 +662,7 @@ export default function PSDashboard() {
   }
 
   // Fresh leads: Leads that have never been updated (no call remarks)
-  const freshList = followUps.filter(f => !hasBeenUpdated(f))
+  const freshList = followUps.filter(f => !hasBeenUpdated(f) && ((f.final_status || '').toLowerCase() !== 'lost'))
   const freshCount = freshList.length
   
   // Today's follow-ups: Leads with follow-up dates for today or overdue
@@ -681,7 +690,7 @@ export default function PSDashboard() {
   const currentPSName = currentPSUser?.name || currentPSUser?.username || ''
   
   // Debug: Log current PS name
-  console.log('👤 [Current PS] Name:', currentPSName)
+  // Debug logging removed
 
   // Booked leads: Separate by status
   const bookedRequestedList = qualifiedLeads.filter(lead => {
@@ -708,13 +717,7 @@ export default function PSDashboard() {
   const bookedList = [...bookedRequestedList, ...bookedApprovedList, ...bookedRejectedList]
   const bookedCount = bookedList.length
   
-  // Debug counts
-  console.log('Booked counts:', {
-    requested: bookedRequestedList.length,
-    approved: bookedApprovedList.length,
-    rejected: bookedRejectedList.length,
-    total: bookedCount
-  })
+  // Debug counts removed
   
   // Retailed leads: Separate by status
   const retailedRequestedList = qualifiedLeads.filter(lead => {
@@ -725,17 +728,7 @@ export default function PSDashboard() {
     const hasRetailedId = !!lead.retailed_id
     const isWaitingForApproval = lead.retailed_status === 'Waiting for Approval'
     
-    // Debug logging for retailed requested
-    if (lead.retailed_id) {
-      console.log('🛍️ [Retailed Debug] Lead:', lead.lead_uid, {
-        ps_name: lead.ps_name,
-        currentPSName,
-        psNameMatch,
-        hasRetailedId,
-        retailed_status: lead.retailed_status,
-        isWaitingForApproval
-      })
-    }
+    // Debug logging removed
     
     return psNameMatch && hasRetailedId && isWaitingForApproval
   })
@@ -760,16 +753,13 @@ export default function PSDashboard() {
   const retailedList = [...retailedRequestedList, ...retailedApprovedList, ...retailedRejectedList]
   const retailedCount = retailedList.length
   
-  // Debug: Log retailed counts
-  console.log('🛍️ [Retailed Counts]', {
-    requested: retailedRequestedList.length,
-    approved: retailedApprovedList.length,
-    rejected: retailedRejectedList.length,
-    total: retailedCount
-  })
+  // Debug logging removed
   
-  // Won/Lost leads: Leads with final_status = 'won' or 'lost'
-  const wonLostList = applyDateFilter(followUps.filter(f => ['won','lost'].includes((f.final_status || '').toLowerCase())))
+  // Won/Lost leads: Leads with final_status = 'won', 'lost', or 'lost requested'
+  const wonLostList = applyDateFilter(followUps.filter(f => {
+    const status = (f.final_status || '').toLowerCase()
+    return ['won','lost','lost requested'].includes(status)
+  }))
   const wonLostCount = wonLostList.length
 
   const filteredFollowUps = (() => {
@@ -1271,12 +1261,19 @@ export default function PSDashboard() {
                             {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
                           </div>
                         ) : (
-                          <button
-                            onClick={() => openUpdateDialog(item)}
-                            className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
-                          >
-                        Update
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openUpdateDialog(item)}
+                              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+                            >
+                              Update
+                            </button>
+                            {item.final_status === 'Lost Requested' && (
+                              <div className="text-xs text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded">
+                                Awaiting CRE Approval
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1294,6 +1291,9 @@ export default function PSDashboard() {
                 <DialogTitle className="text-lg font-semibold text-gray-900">
                   Update Follow-up - {selectedFollowUp?.lead_uid}
                 </DialogTitle>
+                <DialogDescription>
+                  Update follow-up information and status
+                </DialogDescription>
             </DialogHeader>
 
               <div className="space-y-3">
@@ -1661,6 +1661,9 @@ export default function PSDashboard() {
                   <Car className="w-5 h-5 text-blue-600" />
                   Trade-in Details
                 </DialogTitle>
+                <DialogDescription>
+                  View trade-in vehicle information
+                </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4">

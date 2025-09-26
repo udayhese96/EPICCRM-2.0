@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -127,6 +127,9 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
           <DialogTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
             Add New Lead
           </DialogTitle>
+          <DialogDescription>
+            Create a new lead with customer information
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">

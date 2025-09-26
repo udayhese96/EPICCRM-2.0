@@ -22,6 +22,7 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { LeadUpdateModal } from "./components/lead-update-modal"
 import { AddLeadModal } from "./components/add-lead-modal"
+import { RemarksSync } from "./components/remarks-sync"
 
 interface User {
   id: string
@@ -57,6 +58,10 @@ interface Lead {
   ps_name?: string
   ps_id?: string
   icrop_id?: string
+  // Additional fields for lost requests
+  lost_reason?: string
+  lost_requested_at?: string
+  ps_requested_by?: string
 }
 
 export default function CREDashboard() {
@@ -64,7 +69,9 @@ export default function CREDashboard() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isRemarksSyncOpen, setIsRemarksSyncOpen] = useState(false)
   const [leads, setLeads] = useState<Lead[]>([])
+  const [lostRequests, setLostRequests] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<string>("fresh")
   const [activeStatus, setActiveStatus] = useState<string>("Fresh")
   const [searchTerm, setSearchTerm] = useState("")
@@ -72,7 +79,7 @@ export default function CREDashboard() {
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
-  const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost">("all")
+  const [wonLostFilter, setWonLostFilter] = useState<"all" | "Booked" | "Retailed" | "Lost" | "Lost Requested">("all")
   const [startDate, setStartDate] = useState('')
   const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting')
@@ -84,6 +91,7 @@ export default function CREDashboard() {
       setUser(JSON.parse(supabaseUser))
     }
     fetchAssignedLeads()
+    fetchLostRequests()
     checkRedisWorkerStatus()
     
     // Set up real-time subscriptions instead of polling
@@ -94,6 +102,7 @@ export default function CREDashboard() {
       if (!isLoading && !isRefreshing) {
         console.log('🔄 [Primary] Automatic refresh...')
         fetchAssignedLeads()
+        fetchLostRequests()
       }
     }, 3000) // 3 seconds - even more aggressive polling
     
@@ -102,6 +111,7 @@ export default function CREDashboard() {
       if (!isLoading && !isRefreshing) {
         console.log('📊 [Count] Checking for count updates...')
         fetchAssignedLeads()
+        fetchLostRequests()
       }
     }, 15000) // 15 seconds - less frequent count checks
     
@@ -324,6 +334,30 @@ export default function CREDashboard() {
     }
   }
 
+  const fetchLostRequests = async () => {
+    try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+      const response = await fetch('/api/leads/lost-requests', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setLostRequests(data || [])
+      } else {
+        console.error('Error fetching lost requests:', response.status, response.statusText)
+      }
+    } catch (e) {
+      console.error('Failed to fetch lost requests', e)
+    }
+  }
+
   const handleUpdateLead = (leadData: any) => {
     console.log("🔄 [UI Sync] Lead update initiated; syncing from lead_master", leadData)
     
@@ -364,6 +398,66 @@ export default function CREDashboard() {
       lead_remark: leadData.remarks || ''
     }
     setLeads(prevLeads => [newLead, ...prevLeads])
+  }
+
+  const handleApproveLost = async (leadUid: string) => {
+    try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+      const response = await fetch(`/api/leads/${leadUid}/lost-approve`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        alert('Lost status approved successfully!')
+        fetchLostRequests()
+        fetchAssignedLeads() // Refresh main leads
+      } else {
+        const errorData = await response.json()
+        alert(`Error: ${errorData.error || 'Failed to approve lost status'}`)
+      }
+    } catch (error) {
+      console.error('Error approving lost status:', error)
+      alert('Failed to approve lost status')
+    }
+  }
+
+  const handleRejectLost = async (leadUid: string) => {
+    const reason = prompt('Please provide a reason for rejection (optional):')
+    if (reason === null) return // User cancelled
+
+    try {
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+      const response = await fetch(`/api/leads/${leadUid}/lost-reject`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ rejection_reason: reason })
+      })
+
+      if (response.ok) {
+        alert('Lost status rejected successfully!')
+        fetchLostRequests()
+        fetchAssignedLeads() // Refresh main leads
+      } else {
+        const errorData = await response.json()
+        alert(`Error: ${errorData.error || 'Failed to reject lost status'}`)
+      }
+    } catch (error) {
+      console.error('Error rejecting lost status:', error)
+      alert('Failed to reject lost status')
+    }
   }
 
   // Filter leads based on active tab and status
@@ -439,19 +533,41 @@ export default function CREDashboard() {
         break
       case "wonlost":
         filteredLeads = leads.filter(lead => {
-          const isLost = lead.lead_status === 'Lost'
-          const isBooked = (lead.final_status || '').toLowerCase() === 'booked'
-          const isRetailed = (lead.final_status || '').toLowerCase() === 'retailed'
-          let ok = isLost || isBooked || isRetailed
-          if (!ok) return false
-          if (wonLostFilter === 'Booked') return isBooked
-          if (wonLostFilter === 'Retailed') return isRetailed
-          if (wonLostFilter === 'Lost') return isLost
-          return true
+          const fs = (lead.final_status || '').toLowerCase()
+          const isLost = fs === 'lost' || lead.lead_status === 'Lost'
+          const isLostRequested = fs === 'lost requested'
+          const isBooked = fs === 'booked'
+          const isRetailed = fs === 'retailed'
+          return isLost || isLostRequested || isBooked || isRetailed
         })
         break
       case "lostconfirm":
-        filteredLeads = []
+        // Lost confirmation = leads with lost_status = "Requested" for this CRE
+        filteredLeads = lostRequests.map(request => ({
+          id: request.lead_uid,
+          uid: request.lead_uid,
+          customer_name: request.customer_name,
+          customer_mobile_number: request.customer_mobile_number,
+          source: request.source,
+          campaign: request.model_interested || '',
+          date: request.created_at ? request.created_at.slice(0,10) : '',
+          lead_status: 'Lost Requested',
+          final_status: 'Lost Requested',
+          lead_category: request.lead_category || 'Warm',
+          followup_count: 0,
+          follow_up_date: '',
+          first_call_date: '',
+          branch: request.branch,
+          ps_name: request.ps_name,
+          ps_id: request.ps_id,
+          icrop_id: request.icrop_id,
+          lead_remark: request.lost_reason || '',
+          pending_reason: '',
+          // Additional fields for lost requests
+          lost_reason: request.lost_reason,
+          lost_requested_at: request.lost_requested_at,
+          ps_requested_by: request.ps_name
+        }))
         break
       case "walkin":
         filteredLeads = []
@@ -518,16 +634,20 @@ export default function CREDashboard() {
       // Qualified = lead_status Qualified AND final_status Pending
       qualified: leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
       wonlost: leads.filter(lead => {
-        const isLost = lead.lead_status === 'Lost'
         const fs = (lead.final_status || '').toLowerCase()
-        return isLost || fs === 'booked' || fs === 'retailed'
+        const isLost = fs === 'lost' || lead.lead_status === 'Lost'
+        const isLostRequested = fs === 'lost requested'
+        const isBooked = fs === 'booked'
+        const isRetailed = fs === 'retailed'
+        return isLost || isLostRequested || isBooked || isRetailed
       }).length,
       won: leads.filter(lead => {
         const fs = (lead.final_status || '').toLowerCase()
         return fs === 'booked' || fs === 'retailed'
       }).length,
       lost: leads.filter(lead => lead.lead_status === 'Lost').length,
-      lostconfirm: 0,
+      lostRequested: leads.filter(lead => (lead.final_status || '').toLowerCase() === 'lost requested').length,
+      lostconfirm: lostRequests.length,
       walkin: 0
     }
   }
@@ -586,6 +706,7 @@ export default function CREDashboard() {
             <Button variant="outline" onClick={() => {
               console.log('🔄 [Manual] Manual refresh triggered')
               fetchAssignedLeads()
+              fetchLostRequests()
             }} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
               <Search className="h-4 w-4 mr-2" />
               Refresh
@@ -831,19 +952,7 @@ export default function CREDashboard() {
               )}
 
               {activeTab === "wonlost" && (
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-sm text-gray-600">Filter:</span>
-                  {(["all", "Booked", "Retailed", "Lost"] as const).map(cat => (
-                    <Badge
-                      key={cat}
-                      variant="secondary"
-                      className={`cursor-pointer ${wonLostFilter === cat ? "bg-gray-900 text-white" : "bg-gray-100"}`}
-                      onClick={() => setWonLostFilter(cat)}
-                    >
-                      {cat.toString()}
-                    </Badge>
-                  ))}
-                </div>
+                <></>
               )}
 
               {/* Subtle Refreshing Indicator */}
@@ -861,9 +970,10 @@ export default function CREDashboard() {
                     <tr className="bg-gradient-to-r from-teal-50 via-blue-50 to-indigo-50">
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ACTION</th>
                       {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LEAD STATUS</th>
+                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
+                          {activeTab === 'wonlost' ? 'FINAL STATUS' : 'LEAD STATUS'}
+                        </th>
                       )}
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CALL STATS</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CUSTOMER NAME</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>MOBILE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>SOURCE</th>
@@ -873,6 +983,9 @@ export default function CREDashboard() {
                         <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ICROP ID</th>
                       )}
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>GEM</th>
+                      {activeTab === "lostconfirm" && (
+                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LOST REASON</th>
+                      )}
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>DATE</th>
                       <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>UID</th>
                     </tr>
@@ -880,7 +993,7 @@ export default function CREDashboard() {
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 8 : 9} className="p-8 text-center text-gray-500">
+                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 8} className="p-8 text-center text-gray-500">
                           Loading leads...
                         </td>
                       </tr>
@@ -891,39 +1004,82 @@ export default function CREDashboard() {
                         return (
                         <tr key={lead.id} className="border-b hover:bg-gray-50">
                           <td className="p-3">
-                            <Button 
-                              size="sm" 
-                              className="bg-red-500 hover:bg-red-600 text-white"
-                              onClick={() => openUpdateModal(lead)}
-                              style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
-                            >
-                              Update
-                            </Button>
+                            <div className="flex gap-2">
+                              {activeTab === "lostconfirm" ? (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    className="bg-green-500 hover:bg-green-600 text-white"
+                                    onClick={() => handleApproveLost(lead.uid)}
+                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                    onClick={() => handleRejectLost(lead.uid)}
+                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                  >
+                                    Reject
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    className="bg-red-500 hover:bg-red-600 text-white"
+                                    onClick={() => openUpdateModal(lead)}
+                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                  >
+                                    Update
+                                  </Button>
+                                  {/* Only show Remarks button for leads that are not fresh/untouched */}
+                                  {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                      onClick={() => {
+                                        setSelectedLead(lead)
+                                        setIsRemarksSyncOpen(true)
+                                      }}
+                                      style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                    >
+                                      Remarks
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           </td>
                           {!(activeTab === "fresh" && activeStatus === "Fresh") && (
                             <td className="p-3">
                               <Badge 
                                 variant="outline"
                                 className={
-                                  lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
-                                  lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
-                                  lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
-                                  lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
-                                  lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
-                                  lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
-                                  "bg-gray-100 text-gray-800"
+                                  activeTab === 'wonlost'
+                                    ? ((lead.final_status || '').toLowerCase() === 'won' || (lead.final_status || '').toLowerCase() === 'booked' ? 'bg-green-100 text-green-800' :
+                                       (lead.final_status || '').toLowerCase() === 'retailed' ? 'bg-green-100 text-green-800' :
+                                       (lead.final_status || '').toLowerCase() === 'lost' ? 'bg-red-100 text-red-800' :
+                                       (lead.final_status || '').toLowerCase() === 'lost requested' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800')
+                                    : (lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
+                                       lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
+                                       lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
+                                       lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
+                                       lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
+                                       lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
+                                       "bg-gray-100 text-gray-800")
                                 }
                               >
-                                {lead.lead_status}
+                                {activeTab === 'wonlost' ? (lead.final_status || '') : lead.lead_status}
                               </Badge>
                               {activeTab === "followup" && overdueDays > 0 && (
                                 <Badge variant="secondary" className="ml-2 bg-red-600 text-white">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
                               )}
                             </td>
                           )}
-                          <td className="p-3 text-sm text-gray-600">
-                            {lead.lead_status === "Called" ? "1 call" : "No calls"}
-                          </td>
                           <td className="p-3 font-medium">{lead.customer_name}</td>
                           <td className="p-3">{lead.customer_mobile_number}</td>
                           <td className="p-3">{lead.source}</td>
@@ -945,6 +1101,20 @@ export default function CREDashboard() {
                               {lead.ps_name || 'Unassigned'}
                             </Badge>
                           </td>
+                          {activeTab === "wonlost" && (
+                            <td className="p-3">
+                              <Badge variant="outline" className={lead.final_status ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
+                                {lead.final_status || 'Pending'}
+                              </Badge>
+                            </td>
+                          )}
+                          {activeTab === "lostconfirm" && (
+                            <td className="p-3">
+                              <div className="text-sm text-gray-800 bg-red-50 rounded p-2 border border-red-200">
+                                {lead.lost_reason || 'No reason provided'}
+                              </div>
+                            </td>
+                          )}
                           <td className="p-3 text-sm">{lead.date}</td>
                           <td className="p-3 text-sm font-mono">{lead.uid}</td>
                         </tr>
@@ -952,7 +1122,7 @@ export default function CREDashboard() {
                       })
                     ) : (
                       <tr>
-                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 8 : 9} className="p-8 text-center text-gray-500">
+                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 8} className="p-8 text-center text-gray-500">
                           No leads found for the selected criteria
                         </td>
                       </tr>
@@ -979,6 +1149,14 @@ export default function CREDashboard() {
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddLead}
         user={user}
+      />
+
+      {/* Remarks Sync Modal */}
+      <RemarksSync
+        isOpen={isRemarksSyncOpen}
+        onClose={() => setIsRemarksSyncOpen(false)}
+        leadUid={selectedLead?.uid || ''}
+        customerName={selectedLead?.customer_name || ''}
       />
     </DashboardLayout>
   )

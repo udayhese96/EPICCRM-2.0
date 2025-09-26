@@ -4,7 +4,9 @@ const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = request.headers.get('authorization') || ''
+    const headerAuth = request.headers.get('authorization')
+    const cookieToken = request.cookies.get('access_token')?.value
+    const auth = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
     // Try private endpoint (requires auth)
     let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned`, {
       method: 'GET',

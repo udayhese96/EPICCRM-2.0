@@ -160,6 +160,49 @@ def now_ist_iso() -> str:
         # Fallback to naive ISO if zoneinfo not available
         return datetime.now().isoformat()
 
+# Final status sync helper
+def sync_final_status(lead_uid: str, final_status: str) -> None:
+    """Synchronize final_status across ps_followup_master, lead_master, and qualified_leads.
+
+    Best-effort: log failures and continue.
+    """
+    timestamp = now_ist_iso()
+    # ps_followup_master
+    try:
+        supabase.table('ps_followup_master').update({
+            'final_status': final_status,
+            'updated_at': timestamp
+        }).eq('lead_uid', lead_uid).execute()
+    except Exception as e:
+        try:
+            print(f"[sync_final_status] ps_followup_master update failed for {lead_uid}: {e}")
+        except Exception:
+            pass
+
+    # lead_master
+    try:
+        supabase.table('lead_master').update({
+            'final_status': final_status,
+            'updated_at': timestamp
+        }).eq('uid', lead_uid).execute()
+    except Exception as e:
+        try:
+            print(f"[sync_final_status] lead_master update failed for {lead_uid}: {e}")
+        except Exception:
+            pass
+
+    # qualified_leads
+    try:
+        supabase.table('qualified_leads').update({
+            'final_status': final_status,
+            'updated_at': timestamp
+        }).eq('lead_uid', lead_uid).execute()
+    except Exception as e:
+        try:
+            print(f"[sync_final_status] qualified_leads update failed for {lead_uid}: {e}")
+        except Exception:
+            pass
+
 # Pydantic models
 class LeadCreate(BaseModel):
     name: str
@@ -322,17 +365,13 @@ async def get_leads(
 ):
     """Get leads with filtering and pagination"""
     try:
-        query = supabase.table('leads').select('''
-            *,
-            assigned_user:users!assigned_to(id, first_name, last_name, email),
-            branch:branches!branch_id(id, name, code)
-        ''')
+        query = supabase.table('lead_master').select('*')
         
         # Apply role-based filtering
         if current_user.role == 'branch_head':
             query = query.eq('branch_id', current_user.branch_id)
         elif current_user.role not in ['admin', 'branch_head']:
-            query = query.eq('assigned_to', current_user.id)
+            query = query.eq('cre_id', current_user.id)
         
         # Apply filters
         if status:
@@ -340,7 +379,7 @@ async def get_leads(
         if source:
             query = query.eq('source', source)
         if assigned_to:
-            query = query.eq('assigned_to', assigned_to)
+            query = query.eq('cre_id', assigned_to)
         if search:
             query = query.or_(f'name.ilike.%{search}%,email.ilike.%{search}%,phone.ilike.%{search}%,company.ilike.%{search}%')
         
@@ -380,10 +419,10 @@ async def create_lead(lead: LeadCreate, current_user=Depends(can_manage_leads)):
             **lead.dict(),
             "status": "new",
             "branch_id": current_user.branch_id,
-            "assigned_to": lead.assigned_to or current_user.id
+            "cre_id": lead.assigned_to or current_user.id
         }
         
-        response = supabase.table('leads').insert(lead_data).execute()
+        response = supabase.table('lead_master').insert(lead_data).execute()
         
         if response.data:
             # Create initial activity
@@ -403,20 +442,77 @@ async def create_lead(lead: LeadCreate, current_user=Depends(can_manage_leads)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/leads/lost-requests")
+async def get_lost_requests(current_user=Depends(get_current_user)):
+    """Get lost requests for CRE approval"""
+    try:
+        print(f"[DEBUG] Lost requests endpoint called by user: {current_user.username} (role: {current_user.role})")
+        
+        # Check if user is CRE
+        if current_user.role not in ['cre', 'cre_icrop']:
+            print(f"[DEBUG] Access denied - user role {current_user.role} not allowed")
+            raise HTTPException(status_code=403, detail="Access denied - CRE role required")
+        
+        print(f"[DEBUG] Querying ps_followup_master for Lost Requested leads...")
+        # Get leads with final_status = 'Lost Requested' from ps_followup_master
+        # Filter by CRE name directly since ps_followup_master has cre_name field
+        # Use case-insensitive comparison
+        response = supabase.table('ps_followup_master').select('*').eq('final_status', 'Lost Requested').execute()
+        
+        print(f"[DEBUG] Found {len(response.data or [])} Lost Requested leads")
+        
+        # Filter by CRE name (case-insensitive)
+        filtered_data = []
+        for item in response.data or []:
+            cre_name = item.get('cre_name', '').lower()
+            user_name = current_user.username.lower()
+            if cre_name == user_name:
+                filtered_data.append(item)
+        
+        print(f"[DEBUG] Filtered to {len(filtered_data)} leads for CRE {current_user.username}")
+        
+        # Format the response to match expected structure
+        lost_requests = []
+        for item in filtered_data:
+            # Get the latest call remark as lost reason
+            lost_reason = ''
+            call_fields = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+            for field in call_fields:
+                remark = item.get(f'{field}_call_remark')
+                if remark:
+                    lost_reason = remark
+            
+            formatted_item = {
+                'lead_uid': item.get('lead_uid'),
+                'customer_name': item.get('customer_name'),
+                'customer_mobile_number': item.get('customer_mobile_number'),
+                'source': item.get('source'),
+                'lead_category': item.get('lead_category'),
+                'model_interested': item.get('model_interested'),
+                'branch': item.get('ps_branch'),  # Use ps_branch from ps_followup_master
+                'ps_name': item.get('ps_name'),
+                'ps_id': item.get('ps_id'),
+                'icrop_id': item.get('icrop_id'),
+                'lost_reason': lost_reason,
+                'lost_requested_at': item.get('updated_at'),
+                'created_at': item.get('created_at')
+            }
+            lost_requests.append(formatted_item)
+        
+        print(f"[DEBUG] Returning {len(lost_requests)} lost requests")
+        return lost_requests
+        
+    except Exception as e:
+        print(f"[DEBUG] Error in lost-requests endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
     """Get lead by ID with activities"""
     try:
-        response = supabase.table('leads').select('''
-            *,
-            assigned_user:users!assigned_to(id, first_name, last_name, email),
-            branch:branches!branch_id(id, name, code),
-            activities:lead_activities(
-                id, activity_type, subject, description, 
-                scheduled_at, completed_at, created_at,
-                user:users(id, first_name, last_name, email)
-            )
-        ''').eq('id', lead_id).execute()
+        response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -428,7 +524,7 @@ async def get_lead(lead_id: str, current_user=Depends(get_current_user)):
             lead_data.get('branch_id') != current_user.branch_id):
             raise HTTPException(status_code=403, detail="Access denied")
         elif (current_user.role not in ['admin', 'branch_head'] and 
-              lead_data.get('assigned_to') != current_user.id):
+              lead_data.get('cre_id') != current_user.id):
             raise HTTPException(status_code=403, detail="Access denied")
         
         return LeadResponse(**lead_data)
@@ -445,7 +541,7 @@ async def update_lead(
     """Update lead information"""
     try:
         # Get existing lead
-        existing_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+        existing_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
         
         if not existing_response.data:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -457,12 +553,12 @@ async def update_lead(
             existing_lead.get('branch_id') != current_user.branch_id):
             raise HTTPException(status_code=403, detail="Access denied")
         elif (current_user.role not in ['admin', 'branch_head'] and 
-              existing_lead.get('assigned_to') != current_user.id):
+              existing_lead.get('cre_id') != current_user.id):
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Update lead
         update_data = {k: v for k, v in lead.dict().items() if v is not None}
-        response = supabase.table('leads').update(update_data).eq('id', lead_id).execute()
+        response = supabase.table('lead_master').update(update_data).eq('id', lead_id).execute()
         
         # Track status changes
         if lead.status and existing_lead['status'] != lead.status:
@@ -485,7 +581,7 @@ async def delete_lead(lead_id: str, current_user=Depends(can_manage_leads)):
     """Delete a lead"""
     try:
         # Check if lead exists and permissions
-        existing_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+        existing_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
         
         if not existing_response.data:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -501,7 +597,7 @@ async def delete_lead(lead_id: str, current_user=Depends(can_manage_leads)):
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Delete lead (activities will be deleted by cascade)
-        supabase.table('leads').delete().eq('id', lead_id).execute()
+        supabase.table('lead_master').delete().eq('id', lead_id).execute()
         
         return {"message": "Lead deleted successfully"}
         
@@ -513,7 +609,7 @@ async def get_lead_activities(lead_id: str, current_user=Depends(get_current_use
     """Get activities for a specific lead"""
     try:
         # Check lead access
-        lead_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+        lead_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
         
         if not lead_response.data:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -525,7 +621,7 @@ async def get_lead_activities(lead_id: str, current_user=Depends(get_current_use
             lead_data.get('branch_id') != current_user.branch_id):
             raise HTTPException(status_code=403, detail="Access denied")
         elif (current_user.role not in ['admin', 'branch_head'] and 
-              lead_data.get('assigned_to') != current_user.id):
+              lead_data.get('cre_id') != current_user.id):
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Get activities
@@ -548,7 +644,7 @@ async def create_lead_activity(
     """Create a new activity for a lead"""
     try:
         # Check lead access
-        lead_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+        lead_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
         
         if not lead_response.data:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -557,7 +653,7 @@ async def create_lead_activity(
         
         # Check permissions
         if (current_user.role not in ['admin', 'branch_head'] and 
-            lead_data.get('assigned_to') != current_user.id):
+            lead_data.get('cre_id') != current_user.id):
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Create activity
@@ -579,12 +675,12 @@ async def get_lead_statistics(current_user=Depends(get_current_user)):
     """Get lead statistics for dashboard"""
     try:
         # Base query based on user role
-        base_query = supabase.table('leads').select('*', count='exact')
+        base_query = supabase.table('lead_master').select('*', count='exact')
         
         if current_user.role == 'branch_head':
             base_query = base_query.eq('branch_id', current_user.branch_id)
         elif current_user.role not in ['admin', 'branch_head']:
-            base_query = base_query.eq('assigned_to', current_user.id)
+            base_query = base_query.eq('cre_id', current_user.id)
         
         # Get total leads
         total_response = base_query.execute()
@@ -593,12 +689,12 @@ async def get_lead_statistics(current_user=Depends(get_current_user)):
         # Get status counts
         status_counts = {}
         for status in ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'closed_won', 'closed_lost']:
-            query = supabase.table('leads').select('*', count='exact').eq('status', status)
+            query = supabase.table('lead_master').select('*', count='exact').eq('status', status)
             
             if current_user.role == 'branch_head':
                 query = query.eq('branch_id', current_user.branch_id)
             elif current_user.role not in ['admin', 'branch_head']:
-                query = query.eq('assigned_to', current_user.id)
+                query = query.eq('cre_id', current_user.id)
             
             response = query.execute()
             status_counts[status] = response.count or 0
@@ -615,12 +711,12 @@ async def get_lead_statistics(current_user=Depends(get_current_user)):
         # Get source distribution
         source_distribution = []
         for source in ['website', 'referral', 'social_media', 'advertisement', 'cold_call', 'walk_in']:
-            query = supabase.table('leads').select('*', count='exact').eq('source', source)
+            query = supabase.table('lead_master').select('*', count='exact').eq('source', source)
             
             if current_user.role == 'branch_head':
                 query = query.eq('branch_id', current_user.branch_id)
             elif current_user.role not in ['admin', 'branch_head']:
-                query = query.eq('assigned_to', current_user.id)
+                query = query.eq('cre_id', current_user.id)
             
             response = query.execute()
             count = response.count or 0
@@ -664,7 +760,7 @@ async def bulk_assign_leads(
         # Update each lead
         for lead_id in request.lead_ids:
             # Check lead exists and permissions
-            lead_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+            lead_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
             
             if not lead_response.data:
                 continue
@@ -679,7 +775,7 @@ async def bulk_assign_leads(
                 continue
             
             # Update lead
-            supabase.table('leads').update({"assigned_to": request.assigned_to}).eq('id', lead_id).execute()
+            supabase.table('lead_master').update({"cre_id": request.assigned_to}).eq('id', lead_id).execute()
             
             # Create activity
             activity_data = {
@@ -713,7 +809,7 @@ async def bulk_update_status(
         # Update each lead
         for lead_id in request.lead_ids:
             # Check lead exists and permissions
-            lead_response = supabase.table('leads').select('*').eq('id', lead_id).execute()
+            lead_response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
             
             if not lead_response.data:
                 continue
@@ -728,7 +824,7 @@ async def bulk_update_status(
                 continue
             
             # Update lead
-            supabase.table('leads').update({"status": request.status}).eq('id', lead_id).execute()
+            supabase.table('lead_master').update({"status": request.status}).eq('id', lead_id).execute()
             
             # Create activity
             activity_data = {
@@ -930,9 +1026,18 @@ async def change_password(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/users", response_model=List[UserResponse])
-async def get_users(role: Optional[str] = None, current_user=Depends(admin_or_branch_head)):
-    """Get list of users based on role permissions"""
+async def get_users(role: Optional[str] = None, current_user=Depends(get_current_user)):
+    """Get list of users based on role permissions.
+    Admin: full access
+    Branch Head: restricted to own branch
+    Team Leader: can fetch PS users assigned to them (role=ps & team_leader_id=self)
+    """
     try:
+        # Allow only specific roles
+        allowed_roles = ['admin', 'branch_head', 'team_leader']
+        if current_user.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Access denied")
+
         query = supabase.table('users').select('*')
         
         # Filter by role if specified
@@ -941,7 +1046,16 @@ async def get_users(role: Optional[str] = None, current_user=Depends(admin_or_br
         
         # Branch heads can only see users in their branch
         if current_user.role == 'branch_head':
-            query = query.eq('branch', current_user.branch)
+            # current_user.branch may be branch name in this schema
+            query = query.eq('branch', getattr(current_user, 'branch', None))
+
+        # Team leaders can only see PS assigned to them when asking for role=ps
+        if current_user.role == 'team_leader':
+            if role == 'ps':
+                query = query.eq('team_leader_id', current_user.id)
+            else:
+                # Prevent broad access for other roles
+                query = query.eq('id', current_user.id)
         
         response = query.execute()
         return [UserResponse(**user) for user in response.data]
@@ -1203,32 +1317,6 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/leads/{lead_id}", response_model=LeadResponse)
-async def get_lead(lead_id: str, current_user=Depends(can_manage_leads)):
-    """Get a specific lead by ID or UID"""
-    try:
-        # Try to find by UID first, then by ID
-        response = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
-        
-        if not response.data:
-            response = supabase.table('lead_master').select('*').eq('id', lead_id).execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Lead not found")
-        
-        lead = response.data[0]
-        
-        # Check permissions
-        if current_user.role == 'cre' and lead.get('cre_name') != current_user.username:
-            raise HTTPException(status_code=403, detail="Access denied")
-        elif current_user.role == 'ps' and lead.get('ps_name') != current_user.username:
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        return LeadResponse(**lead)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/leads/{lead_id}")
 async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
@@ -1515,32 +1603,63 @@ class CREUserResponse(BaseModel):
 
 @app.get("/api/cre-users", response_model=List[CREUserResponse])
 async def get_cre_users():
-    """Get all CRE users"""
+    """Get all CRE users from unified users table"""
     try:
-        response = supabase.table('cre_users').select('*').order('created_at', desc=True).execute()
-        return [CREUserResponse(**user) for user in response.data or []]
+        response = (
+            supabase
+                .table('users')
+                .select('*')
+                .eq('role', 'cre')
+                .order('created_at', desc=True)
+                .execute()
+        )
+        users = response.data or []
+        # Map unified fields to legacy response model
+        mapped = []
+        for u in users:
+            mapped.append({
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('username'),
+                'username': u.get('username'),
+                'email': u.get('email'),
+                'phone': u.get('phone') or '',
+                'is_active': bool(u.get('is_active', True)),
+                'created_at': u.get('created_at') or ''
+            })
+        return [CREUserResponse(**user) for user in mapped]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/cre-users", response_model=CREUserResponse)
 async def create_cre_user(user_data: CREUserCreate):
-    """Create a new CRE user"""
+    """Create a new CRE user in unified users table"""
     try:
         # Store password as plain string per request (NOT recommended for production)
         password_hash = user_data.password
         
         insert_data = {
-            "name": user_data.name,
+            "full_name": user_data.name,
             "username": user_data.username,
             "email": user_data.email,
             "phone": user_data.phone,
             "password_hash": password_hash,
-            "is_active": True
+            "is_active": True,
+            "role": "cre"
         }
         
-        response = supabase.table('cre_users').insert(insert_data).execute()
+        response = supabase.table('users').insert(insert_data).execute()
         if response.data:
-            return CREUserResponse(**response.data[0])
+            u = response.data[0]
+            mapped = {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('username'),
+                'username': u.get('username'),
+                'email': u.get('email'),
+                'phone': u.get('phone') or '',
+                'is_active': bool(u.get('is_active', True)),
+                'created_at': u.get('created_at') or ''
+            }
+            return CREUserResponse(**mapped)
         else:
             raise HTTPException(status_code=500, detail="Failed to create CRE user")
     except Exception as e:
@@ -1548,12 +1667,12 @@ async def create_cre_user(user_data: CREUserCreate):
 
 @app.put("/api/cre-users/{user_id}", response_model=CREUserResponse)
 async def update_cre_user(user_id: str, user_data: CREUserUpdate):
-    """Update a CRE user"""
+    """Update a CRE user in unified users table"""
     try:
         update_data = {"updated_at": "NOW()"}
         
         if user_data.name:
-            update_data["name"] = user_data.name
+            update_data["full_name"] = user_data.name
         if user_data.username:
             update_data["username"] = user_data.username
         if user_data.email:
@@ -1565,9 +1684,26 @@ async def update_cre_user(user_id: str, user_data: CREUserUpdate):
         if user_data.is_active is not None:
             update_data["is_active"] = user_data.is_active
         
-        response = supabase.table('cre_users').update(update_data).eq('id', user_id).execute()
+        response = (
+            supabase
+                .table('users')
+                .update(update_data)
+                .eq('id', user_id)
+                .eq('role', 'cre')
+                .execute()
+        )
         if response.data:
-            return CREUserResponse(**response.data[0])
+            u = response.data[0]
+            mapped = {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('username'),
+                'username': u.get('username'),
+                'email': u.get('email'),
+                'phone': u.get('phone') or '',
+                'is_active': bool(u.get('is_active', True)),
+                'created_at': u.get('created_at') or ''
+            }
+            return CREUserResponse(**mapped)
         else:
             raise HTTPException(status_code=404, detail="CRE user not found")
     except Exception as e:
@@ -1575,9 +1711,16 @@ async def update_cre_user(user_id: str, user_data: CREUserUpdate):
 
 @app.delete("/api/cre-users/{user_id}")
 async def delete_cre_user(user_id: str):
-    """Delete a CRE user"""
+    """Delete a CRE user from unified users table"""
     try:
-        response = supabase.table('cre_users').delete().eq('id', user_id).execute()
+        response = (
+            supabase
+                .table('users')
+                .delete()
+                .eq('id', user_id)
+                .eq('role', 'cre')
+                .execute()
+        )
         return {"message": "CRE user deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1615,42 +1758,36 @@ class PSUserResponse(BaseModel):
 
 @app.get("/api/ps-users")
 async def get_ps_users(branch: Optional[str] = None):
-    """Get PS users, optionally filtered by branch"""
+    """Get PS users from users table, optionally filtered by branch"""
     try:
-        query = supabase.table('ps_users').select('*').eq('is_active', True)
+        query = supabase.table('users').select('*').eq('role', 'ps').eq('is_active', True)
         if branch:
             query = query.eq('branch', branch)
-        response = query.order('name').execute()
-        ps_users = response.data or []
-        
-        # If no PS users found, return sample data
-        if not ps_users:
-            sample_ps_users = [
-                {"id": "ps1", "name": "Raj Kumar", "username": "raj.ps", "branch": "Mount Road", "is_active": True},
-                {"id": "ps2", "name": "Priya Singh", "username": "priya.ps", "branch": "Mount Road", "is_active": True},
-                {"id": "ps3", "name": "Amit Patel", "username": "amit.ps", "branch": "Vyasarpadi", "is_active": True},
-                {"id": "ps4", "name": "Sneha Reddy", "username": "sneha.ps", "branch": "Vyasarpadi", "is_active": True},
-                {"id": "ps5", "name": "Vikram Sharma", "username": "vikram.ps", "branch": "Cuddalore", "is_active": True}
-            ]
-            
-            if branch:
-                return [ps for ps in sample_ps_users if ps['branch'] == branch]
-            return sample_ps_users
-            
-        return ps_users
-    except Exception as e:
-        # Return sample data if database error
-        sample_ps_users = [
-            {"id": "ps1", "name": "Raj Kumar", "username": "raj.ps", "branch": "Mount Road", "is_active": True},
-            {"id": "ps2", "name": "Priya Singh", "username": "priya.ps", "branch": "Mount Road", "is_active": True},
-            {"id": "ps3", "name": "Amit Patel", "username": "amit.ps", "branch": "Vyasarpadi", "is_active": True},
-            {"id": "ps4", "name": "Sneha Reddy", "username": "sneha.ps", "branch": "Vyasarpadi", "is_active": True},
-            {"id": "ps5", "name": "Vikram Sharma", "username": "vikram.ps", "branch": "Cuddalore", "is_active": True}
+        response = query.order('full_name').execute()
+        users = response.data or []
+
+        # Map to expected shape {id, name, username, branch, is_active}
+        mapped = [
+            {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('name') or u.get('username'),
+                'username': u.get('username'),
+                'branch': u.get('branch'),
+                'is_active': u.get('is_active', True),
+            }
+            for u in users
         ]
-        
-        if branch:
-            return [ps for ps in sample_ps_users if ps['branch'] == branch]
-        return sample_ps_users
+        return mapped
+    except Exception as e:
+        # Fallback: try ps_users table if users lookup fails
+        try:
+            query = supabase.table('ps_users').select('*').eq('is_active', True)
+            if branch:
+                query = query.eq('branch', branch)
+            response = query.order('name').execute()
+            return response.data or []
+        except Exception:
+            return []
 
 @app.post("/api/ps-users", response_model=PSUserResponse)
 async def create_ps_user(user_data: PSUserCreate):
@@ -1771,8 +1908,25 @@ async def get_unassigned_leads():
 
         source_counts = {src: len(lst) for src, lst in by_source.items()}
 
-        cre_query = supabase.table('cre_users').select('id, name, username').eq('is_active', True).execute()
-        available_cres = cre_query.data or []
+        # Fetch active CREs from unified users table
+        cre_query = (
+            supabase
+                .table('users')
+                .select('id, full_name, username, is_active, role')
+                .eq('is_active', True)
+                .eq('role', 'cre')
+                .execute()
+        )
+        raw_cres = cre_query.data or []
+        # Normalize to expected shape with `name` field preserved for consumers
+        available_cres = [
+            {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('username'),
+                'username': u.get('username')
+            }
+            for u in raw_cres
+        ]
 
         return UnassignedLeadsResponse(
             total_unassigned=len(unassigned_leads),
@@ -1836,8 +1990,25 @@ async def get_unassigned_public():
             by_source.setdefault(source, []).append(lead)
         source_counts = {s: len(lst) for s, lst in by_source.items()}
 
-        cre_query = supabase.table('cre_users').select('id, name, username, is_active').eq('is_active', True).execute()
-        available_cres = cre_query.data or []
+        # Fetch active CREs from unified users table
+        cre_query = (
+            supabase
+                .table('users')
+                .select('id, full_name, username, is_active, role')
+                .eq('is_active', True)
+                .eq('role', 'cre')
+                .execute()
+        )
+        raw_cres = cre_query.data or []
+        # Normalize to expected shape with `name` field preserved for consumers
+        available_cres = [
+            {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('username'),
+                'username': u.get('username')
+            }
+            for u in raw_cres
+        ]
 
         return UnassignedLeadsResponse(
             total_unassigned=len(unassigned_leads),
@@ -2002,6 +2173,107 @@ async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] =
         return response.data or []
     except Exception as e:
         print(f"Error in get_cre_assigned: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# REMARKS SYNC SYSTEM ENDPOINTS
+# ========================================
+
+@app.get("/api/leads/{lead_uid}/remarks")
+async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)):
+    """Get all remarks for a lead from both CRE and PS"""
+    try:
+        remarks = []
+        
+        # Get CRE remarks from lead_master
+        try:
+            cre_response = supabase.table('lead_master').select(
+                'uid', 'customer_name', 'first_remark', 'second_remark', 'third_remark', 
+                'fourth_remark', 'fifth_remark', 'first_call_date', 'second_call_date', 
+                'third_call_date', 'fourth_call_date', 'fifth_call_date', 'cre_name'
+            ).eq('uid', lead_uid).execute()
+            
+            if cre_response.data:
+                lead_data = cre_response.data[0]
+                cre_remarks = []
+                
+                # Collect CRE remarks
+                call_fields = [
+                    ('first_remark', 'first_call_date'),
+                    ('second_remark', 'second_call_date'),
+                    ('third_remark', 'third_call_date'),
+                    ('fourth_remark', 'fourth_call_date'),
+                    ('fifth_remark', 'fifth_call_date')
+                ]
+                
+                for remark_field, date_field in call_fields:
+                    if lead_data.get(remark_field):
+                        cre_remarks.append({
+                            'type': 'CRE',
+                            'call_number': len(cre_remarks) + 1,
+                            'remark': lead_data[remark_field],
+                            'date': lead_data.get(date_field),
+                            'user': lead_data.get('cre_name', 'CRE')
+                        })
+                
+                remarks.extend(cre_remarks)
+        except Exception as e:
+            print(f"Error fetching CRE remarks: {e}")
+        
+        # Get PS remarks from ps_followup_master
+        try:
+            ps_response = supabase.table('ps_followup_master').select(
+                'lead_uid', 'ps_name', 'first_call_remark', 'second_call_remark', 
+                'third_call_remark', 'fourth_call_remark', 'fifth_call_remark',
+                'sixth_call_remark', 'seventh_call_remark', 'eighth_call_remark',
+                'ninth_call_remark', 'tenth_call_remark', 'first_call_date',
+                'second_call_date', 'third_call_date', 'fourth_call_date',
+                'fifth_call_date', 'sixth_call_date', 'seventh_call_date',
+                'eighth_call_date', 'ninth_call_date', 'tenth_call_date'
+            ).eq('lead_uid', lead_uid).execute()
+            
+            if ps_response.data:
+                ps_data = ps_response.data[0]
+                ps_remarks = []
+                
+                # Collect PS remarks
+                ps_call_fields = [
+                    ('first_call_remark', 'first_call_date'),
+                    ('second_call_remark', 'second_call_date'),
+                    ('third_call_remark', 'third_call_date'),
+                    ('fourth_call_remark', 'fourth_call_date'),
+                    ('fifth_call_remark', 'fifth_call_date'),
+                    ('sixth_call_remark', 'sixth_call_date'),
+                    ('seventh_call_remark', 'seventh_call_date'),
+                    ('eighth_call_remark', 'eighth_call_date'),
+                    ('ninth_call_remark', 'ninth_call_date'),
+                    ('tenth_call_remark', 'tenth_call_date')
+                ]
+                
+                for remark_field, date_field in ps_call_fields:
+                    if ps_data.get(remark_field):
+                        ps_remarks.append({
+                            'type': 'PS',
+                            'call_number': len(ps_remarks) + 1,
+                            'remark': ps_data[remark_field],
+                            'date': ps_data.get(date_field),
+                            'user': ps_data.get('ps_name', 'PS')
+                        })
+                
+                remarks.extend(ps_remarks)
+        except Exception as e:
+            print(f"Error fetching PS remarks: {e}")
+        
+        # Sort remarks by date
+        remarks.sort(key=lambda x: x['date'] if x['date'] else '1900-01-01')
+        
+        return {
+            'lead_uid': lead_uid,
+            'remarks': remarks,
+            'total_remarks': len(remarks)
+        }
+        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
@@ -2594,10 +2866,7 @@ async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends
         
         # Handle final status timestamps
         if update_data.final_status:
-            if update_data.final_status.lower() == 'won' and not followup.get('won_timestamp'):
-                update_fields["won_timestamp"] = now_ist_iso()
-            elif update_data.final_status.lower() == 'lost' and not followup.get('lost_timestamp'):
-                update_fields["lost_timestamp"] = now_ist_iso()
+            pass
         
         response = supabase.table('ps_followup_master').update(update_fields).eq('id', update_data.id).execute()
         
@@ -2626,6 +2895,148 @@ async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
+# LOST STATUS WORKFLOW
+# ========================================
+
+@app.post("/api/leads/{lead_uid}/lost-request")
+async def request_lost_status(
+    lead_uid: str,
+    lost_reason: str,
+    current_user=Depends(get_current_user)
+):
+    """PS requests lost status for a lead - sends to CRE for approval"""
+    try:
+        # Check if user is PS
+        if current_user.role != 'ps':
+            raise HTTPException(status_code=403, detail="Access denied - PS role required")
+        
+        # Get the qualified lead to find the CRE
+        qualified_lead_response = supabase.table('qualified_leads').select('*').eq('lead_uid', lead_uid).execute()
+        if not qualified_lead_response.data:
+            raise HTTPException(status_code=404, detail="Qualified lead not found")
+        
+        qualified_lead = qualified_lead_response.data[0]
+        cre_name = qualified_lead.get('cre_name')
+        
+        if not cre_name:
+            raise HTTPException(status_code=400, detail="No CRE found for this lead")
+        
+        # Update qualified_leads with lost request (only update fields that exist)
+        update_data = {
+            "lost_reason": lost_reason,
+            "updated_at": now_ist_iso()
+        }
+        
+        # Note: qualified_leads table doesn't have lost_status columns, so we skip those
+        supabase.table('qualified_leads').update(update_data).eq('lead_uid', lead_uid).execute()
+        
+        # Update ps_followup_master
+        supabase.table('ps_followup_master').update({
+            "final_status": "Lost",
+            "lost_reason": lost_reason,
+            "lost_requested_by": current_user.id,
+            "lost_requested_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }).eq('lead_uid', lead_uid).execute()
+        
+        return {"message": f"Lost status requested for {lead_uid}. Awaiting CRE approval from {cre_name}."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/leads/{lead_uid}/lost-approve")
+async def approve_lost_status(
+    lead_uid: str,
+    current_user=Depends(get_current_user)
+):
+    """CRE approves lost status for a lead"""
+    try:
+        # Check if user is CRE
+        if current_user.role not in ['cre', 'cre_icrop']:
+            raise HTTPException(status_code=403, detail="Access denied - CRE role required")
+        
+        # Get the ps_followup_master record with Lost Requested status
+        followup_response = supabase.table('ps_followup_master').select('*').eq('lead_uid', lead_uid).eq('final_status', 'Lost Requested').execute()
+        
+        if not followup_response.data:
+            raise HTTPException(status_code=404, detail="Lost request not found")
+        
+        followup = followup_response.data[0]
+        
+        # Check if CRE matches the lead's CRE (case-insensitive)
+        cre_name = followup.get('cre_name', '').lower()
+        user_name = current_user.username.lower()
+        
+        if not cre_name or cre_name != user_name:
+            raise HTTPException(status_code=403, detail="Access denied - You can only approve lost status for your own leads")
+        
+        # Note: qualified_leads table doesn't have final_status column, so we skip this update
+        
+        # Update ps_followup_master
+        supabase.table('ps_followup_master').update({
+            "final_status": "Lost",
+            "updated_at": now_ist_iso()
+        }).eq('lead_uid', lead_uid).execute()
+
+        # Sync final_status across tables
+        try:
+            sync_final_status(lead_uid, "Lost")
+        except Exception:
+            pass
+        
+        return {"message": f"Lost status approved for {lead_uid}."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/leads/{lead_uid}/lost-reject")
+async def reject_lost_status(
+    lead_uid: str,
+    rejection_reason: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """CRE rejects lost status for a lead"""
+    try:
+        # Check if user is CRE
+        if current_user.role not in ['cre', 'cre_icrop']:
+            raise HTTPException(status_code=403, detail="Access denied - CRE role required")
+        
+        # Get the ps_followup_master record with Lost Requested status
+        followup_response = supabase.table('ps_followup_master').select('*').eq('lead_uid', lead_uid).eq('final_status', 'Lost Requested').execute()
+        
+        if not followup_response.data:
+            raise HTTPException(status_code=404, detail="Lost request not found")
+        
+        followup = followup_response.data[0]
+        
+        # Check if CRE matches the lead's CRE (case-insensitive)
+        cre_name = followup.get('cre_name', '').lower()
+        user_name = current_user.username.lower()
+        
+        if not cre_name or cre_name != user_name:
+            raise HTTPException(status_code=403, detail="Access denied - You can only reject lost status for your own leads")
+        
+        # Note: qualified_leads table doesn't have final_status column, so we skip this update
+        
+        # Update ps_followup_master
+        supabase.table('ps_followup_master').update({
+            "final_status": "Pending",
+            "updated_at": now_ist_iso()
+        }).eq('lead_uid', lead_uid).execute()
+
+        # Sync final_status across tables
+        try:
+            sync_final_status(lead_uid, "Pending")
+        except Exception:
+            pass
+        
+        return {"message": f"Lost status rejected for {lead_uid}."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
 # SALES MANAGER APPROVAL WORKFLOW
 # ========================================
 
@@ -2637,9 +3048,9 @@ async def approve_qualified_lead(
 ):
     """Approve a booking or retail request"""
     try:
-        # Check if user is sales manager
-        if current_user.role != 'sales_manager':
-            raise HTTPException(status_code=403, detail="Access denied - Sales Manager role required")
+        # Check if user is sales manager or branch head
+        if current_user.role not in ['sales_manager', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied - Sales Manager or Branch Head role required")
         
         # Get the qualified lead
         qualified_lead_response = supabase.table('qualified_leads').select('*').eq('lead_uid', lead_uid).execute()
@@ -2713,6 +3124,12 @@ async def approve_qualified_lead(
                 "updated_at": now_ist_iso()
             }).eq('lead_uid', lead_uid).execute()
             
+            # Set final_status to "Won" in lead_master for booking approval
+            supabase.table('lead_master').update({
+                "final_status": "Won",
+                "updated_at": now_ist_iso()
+            }).eq('uid', lead_uid).execute()
+            
         elif approval_type == 'retailed':
             # Retail approved - update existing row in master table and set final_status to "Won"
             master_update = {
@@ -2728,12 +3145,18 @@ async def approve_qualified_lead(
             
             supabase.table('booking_and_retail_master').update(master_update).eq('lead_uid', lead_uid).execute()
             
-            # Set final_status to "Won"
+            # Set final_status to "Won" in ps_followup_master
             supabase.table('ps_followup_master').update({
                 "final_status": "Won",
                 "won_timestamp": now_ist_iso(),
                 "updated_at": now_ist_iso()
             }).eq('lead_uid', lead_uid).execute()
+            
+            # Set final_status to "Won" in lead_master
+            supabase.table('lead_master').update({
+                "final_status": "Won",
+                "updated_at": now_ist_iso()
+            }).eq('uid', lead_uid).execute()
         
         return {"message": f"{approval_type.title()} approved successfully"}
         
@@ -2936,14 +3359,6 @@ async def create_activity(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/leads/{lead_id}/activities", response_model=List[ActivityResponse])
-async def get_lead_activities(lead_id: str, current_user=Depends(can_manage_leads)):
-    """Get all activities for a lead"""
-    try:
-        response = supabase.table('lead_activities').select('*').eq('lead_uid', lead_id).order('created_at', desc=True).execute()
-        return [ActivityResponse(**activity) for activity in response.data or []]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
 # CRE ICROP ENDPOINTS

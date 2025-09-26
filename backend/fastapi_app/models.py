@@ -59,6 +59,8 @@ class UserUpdate(BaseModel):
     branch: Optional[str] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    # Add linkage for PS -> Team Leader assignments
+    team_leader_id: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: str
@@ -69,6 +71,7 @@ class UserResponse(BaseModel):
     role: str
     branch: Optional[str] = None
     is_active: bool
+    team_leader_id: Optional[str] = None
     created_at: str
     updated_at: str
 
