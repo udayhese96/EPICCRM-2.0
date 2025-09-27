@@ -32,7 +32,9 @@ except ImportError as e:
         return Client()
 
 # Redis connection for RQ
-redis_conn = redis.Redis(host='localhost', port=6379, db=0)
+import os
+redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+redis_conn = redis.from_url(redis_url)
 q = Queue('lead_processing', connection=redis_conn)
 
 class TaskStatus(str, Enum):
@@ -96,7 +98,7 @@ class QueueManager:
     
     def __init__(self, supabase: Client):
         self.supabase = supabase
-        self.redis_conn = redis_conn
+        self.redis_conn = redis_conn  # Uses REDIS_URL from environment
         self.queue = q
     
     def create_task_id(self) -> str:
