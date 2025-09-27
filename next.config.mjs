@@ -20,8 +20,8 @@ const nextConfig = {
     optimizePackageImports: ['@vercel/analytics'],
   },
   // For static export (if needed for Netlify)
-  output: 'export',
-  trailingSlash: true,
+  // output: 'export',
+  // trailingSlash: true,
 }
 
 export default nextConfig
