@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get('Authorization')
     console.log('🔍 [Deassign API] Authorization header:', authHeader ? 'Present' : 'Missing')
 
-    const fastApiUrl = `${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/qualified-leads/deassign`
+    const fastApiUrl = `${process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')}/api/qualified-leads/deassign`
     console.log('🔍 [Deassign API] Forwarding to FastAPI:', fastApiUrl)
 
     // Forward the request to FastAPI

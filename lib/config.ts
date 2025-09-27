@@ -1,6 +1,6 @@
 // API Configuration
 export const API_CONFIG = {
-  FASTAPI_URL: process.env.FASTAPI_URL || 'http://localhost:8000',
+  FASTAPI_URL: process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com'),
   NEXTJS_API_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
 } as const
 
