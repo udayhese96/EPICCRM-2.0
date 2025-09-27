@@ -27,10 +27,9 @@ def start_worker():
     """Start the RQ worker"""
     try:
         # Redis connection with proper encoding handling
-        redis_conn = redis.Redis(
-            host='localhost', 
-            port=6379, 
-            db=0,
+        redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+        redis_conn = redis.from_url(
+            redis_url,
             decode_responses=False,  # Don't decode responses to avoid encoding issues
             encoding='utf-8',
             encoding_errors='ignore',  # Ignore encoding errors
