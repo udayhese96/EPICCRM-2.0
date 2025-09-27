@@ -198,7 +198,7 @@ export default function PSDashboard() {
 
   const loadQualifiedLeads = async () => {
     try {
-      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
@@ -327,7 +327,7 @@ export default function PSDashboard() {
 
     try {
       // Get authentication token
-      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
@@ -685,7 +685,7 @@ export default function PSDashboard() {
   const pendingCount = pendingList.length
   
   // Get current PS user name for filtering
-  const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+  const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
   const currentPSUser = session ? JSON.parse(session) : null
   const currentPSName = currentPSUser?.name || currentPSUser?.username || ''
   
