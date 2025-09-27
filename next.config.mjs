@@ -19,9 +19,8 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['@vercel/analytics'],
   },
-  // For static export (if needed for Netlify)
-  // output: 'export',
-  // trailingSlash: true,
+  // Disable static generation for dynamic routes
+  output: 'standalone',
 }
 
 export default nextConfig
