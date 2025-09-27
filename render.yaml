@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: epic-crm-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn fastapi_app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_PASSWORD
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: FASTAPI_URL
+        sync: false
+
+  - type: worker
+    name: epic-crm-worker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python start_worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
