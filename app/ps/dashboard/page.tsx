@@ -202,7 +202,7 @@ export default function PSDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('http://localhost:8000/api/qualified-leads', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/qualified-leads`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

@@ -54,7 +54,7 @@ const ManageSalesManagerPage = () => {
       const token = parsed?.access_token || ''
 
       // Call FastAPI backend directly
-      const response = await fetch('http://localhost:8000/api/users?role=sales_manager', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/users?role=sales_manager`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -86,7 +86,7 @@ const ManageSalesManagerPage = () => {
       const token = parsed?.access_token || ''
 
       // Call FastAPI backend directly
-      const response = await fetch('http://localhost:8000/api/users', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

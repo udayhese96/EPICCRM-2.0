@@ -75,7 +75,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('http://localhost:8000/api/qualified-leads/pending-approvals', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/qualified-leads/pending-approvals`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -107,7 +107,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`http://localhost:8000/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -141,7 +141,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`http://localhost:8000/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,

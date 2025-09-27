@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
-    const response = await fetch('http://localhost:8000/api/jobs/queue-stats', {
+    const response = await fetch(`${process.env.FASTAPI_URL || 'http://localhost:8000'}/api/jobs/queue-stats`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
