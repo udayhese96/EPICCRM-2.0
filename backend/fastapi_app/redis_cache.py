@@ -3,6 +3,7 @@ EPIC CRM 2.0 - Redis Caching System
 Ultra-fast caching layer for all database operations
 """
 
+import os
 import redis
 import json
 import hashlib

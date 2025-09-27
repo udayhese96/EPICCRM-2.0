@@ -3,6 +3,7 @@ EPIC CRM 2.0 - Background Task Processing
 Handles all database operations in background for ultra-fast UI
 """
 
+import os
 import redis
 from rq import Queue
 from rq.job import Job
