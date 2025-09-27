@@ -1,2 +1,2 @@
-web: cd backend && gunicorn fastapi_app.main:app --bind 0.0.0.0:$PORT --worker-class uvicorn.workers.UvicornWorker --workers 2
+web: cd backend && uvicorn fastapi_app.main:app --host 0.0.0.0 --port $PORT
 worker: python start_worker.py
