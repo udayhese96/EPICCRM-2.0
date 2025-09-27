@@ -52,7 +52,7 @@ const ManageCRETeamLeaderPage = () => {
       const token = parsed?.access_token || ''
 
       // Call FastAPI backend directly
-      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/users?role=cre_team_leader`, {
+      const response = await fetch('/api/users?role=cre_team_leader', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

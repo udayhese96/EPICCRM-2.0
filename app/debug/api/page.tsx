@@ -53,7 +53,7 @@ export default function DebugAPIPage() {
   const testFastAPIDirectly = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/api/cre-users`, {
+      const response = await fetch('/api/cre-users', {
         method: 'GET',
         headers: {
           'Authorization': 'Bearer test-token',
@@ -134,8 +134,8 @@ export default function DebugAPIPage() {
           <CardContent>
             <ol className="list-decimal list-inside space-y-2 text-sm">
               <li><strong>Restart Next.js:</strong> Stop the Next.js server (Ctrl+C) and run <code>npm run dev</code> again</li>
-              <li><strong>Check FastAPI:</strong> Make sure FastAPI is running on <code>{process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}</code></li>
-              <li><strong>Test FastAPI directly:</strong> Go to <code>{process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'}/docs</code> to see if FastAPI is running</li>
+              <li><strong>Check FastAPI:</strong> Make sure FastAPI is running on the backend server</li>
+              <li><strong>Test FastAPI directly:</strong> Go to the backend URL to see if FastAPI is running</li>
               <li><strong>Clear cache:</strong> Try opening in incognito mode or clear browser cache</li>
               <li><strong>Check ports:</strong> Make sure no other services are using ports 3000 or 8000</li>
             </ol>
