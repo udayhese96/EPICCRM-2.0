@@ -3,7 +3,7 @@ services:
     name: epic-crm-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: cd backend && gunicorn fastapi_app.main:app --bind 0.0.0.0:$PORT --workers 2
+    startCommand: cd backend && gunicorn fastapi_app.main:app --bind 0.0.0.0:$PORT --worker-class uvicorn.workers.UvicornWorker --workers 2
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
