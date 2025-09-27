@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {

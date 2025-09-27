@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET() {
   try {
     const response = await fetch(`${process.env.FASTAPI_URL || 'http://localhost:8000'}/api/jobs/queue-stats`, {
