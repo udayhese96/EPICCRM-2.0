@@ -212,6 +212,10 @@ const tradeInOptions = ["Yes", "Additional", "Buying for first time"]
 
 const leadCategories = ["Hot", "Warm", "Cold"]
 
+const chennaiLocations = [
+  "MOUNT ROAD", "CHINTHADRIPET", "EGMORE", "PUDHUPET", "CHETPET", "CHOOLAIMEDU", "NUNGAMBAKKAM", "KODAMBAKKAM", "VADAPALANI", "ANNASALAI", "ARUMBAKKAM", "ADYAR", "THIRUVANMIYUR", "VELACHERRY", "MEDAVAKKAM", "KILKATTALAI", "PERAMBAKKAM", "SHOLINGANALLUR", "PERUNGUDI", "NEELANGARAI", "SAIDAPET", "ST THOMAS MOUNT", "PAZHAVANTHANGAL", "PALLAVARAM", "MMDA COLONY", "MYLAPORE", "TRIPLICANE", "THOUSAND LIGHTS", "GREAMS ROAD", "ORMES ROAD", "ROYAPETTAH", "T NAGAR", "TEYNAMPET", "GUINDY", "MENAMBAKKAM", "TIRUSULAM", "ALWARPET", "R A PURAM", "AMINJIKARAI", "WEST MAMBALAM", "K K NAGAR", "ASHOK NAGAR", "EKKATUTHANGAL", "NANDANAM", "IIT", "KOTTURPURAM", "CHROMEPET", "SANITORIUM", "KELAMBAKKAM", "SELAIYUR", "KOVILAMBAKKAM", "SUNNAMBU KOLATHUR", "ASTHINAPURAM", "ANKAPUTTUR", "PAMMAL", "POZHICHALUR", "CHITLAPAKKAM", "VENGAIVASAL", "CHINMAYANAGAR", "VALASARAWALKAM", "VIRUGAMBAKKAM", "NESAPAKKAM", "MGR NAGAR", "JAFFERKHANPET", "FLOWERS ROAD", "GOPALAPURAM", "ALWARTHIRUNAGAR", "KOLAPAKKAM", "ADAMBAKKAM", "NANDAMBAKKAM", "MOULIVAKKAM", "RAMAPURAM", "MADIPAKKAM", "SALIGRAMAM", "KANDHANCHAVADI", "THARAMANI", "GOWRIVAKKAM", "TRUSTPURAM", "CIT NAGAR", "RANGARAJAPURAM", "ICE HOUSE", "JAM BAZAAR", "CENATOPH ROAD", "MRC NAGAR", "SANTHOME", "OKKIYAM", "NAVALUR", "THORAIPAKKAM", "GREENWAYS ROAD", "RAJAJI SALAI", "ECR", "OMR", "ABIRAMAPURAM", "MANDAVELI", "MUDICHUR", "IRUMBULIYUR", "PERUNGALATHUR", "VANDALUR", "URAPAKKAM", "KILAMBAKKAM", "GUDUVANCHERY", "MARAIMALAI NAGAR", "SP KOIL", "CHENGALPATTU", "VYSARPADI", "PURASAIWALKAM", "PERAMBUR", "CHOOLAI", "ANNANAGAR", "SHANTHI COLONY", "SHENOY NAGAR", "THIRUMANGALAM", "MUGAPPAIR", "NOLAMBUR", "AYANAVARAM", "VILLIVAKKAM", "PADI", "KORATTUR", "KOLATHUR", "MADHAVARAM", "KELLYS", "KILPAUK", "CENTRAL", "NERKUNDRAM", "MADURAVOYAL", "VELAPANCHAVADI", "IYYAPANTHANGAL", "POONAMALLEE", "THIRUMAZHISAI", "SRIPERUMBUTHUR", "PARRYS", "KANCHEEPURAM", "MANGADU", "SUNGUVARCHATIRAM", "REDHILLS", "CHOZHAVARAM", "KARANODAI", "PERIYAPALAYAM", "AMBATTUR", "THIRUMULLAIVOYAL", "AVADI", "PATTABIRAM", "THIRUNINRAVUR", "VEPPAMPATTU", "TIRUVALLUR", "ARAKONAM", "TIRUTHANI", "TIRUPATHI", "MINT", "WASHERMENPET", "TONDIARPET", "THIRUVOTRIYUR", "ENNORE", "PERAMBUR", "MOOLAKADAI", "ERUKANCHERY", "VYSARPADI", "MANALI", "GOOMIDIPOONDI", "PADAPPAI", "ORAGADAM", "KUNDRATHUR", "PORUR", "PARK TOWN", "VANAGARAM", "THIRUVERKADU", "MUGALIVAKKAM", "KATTUPAKKAM", "GERUGAMBAKKAM", "MADHURANTHANGAM", "MELMARUVATHUR", "AYAPAKKAM"
+]
+
 const lostReasons = [
   "Not interested", "Did not enquire", "Lost to co-dealer", "Lost to competition",
   "Low Budget", "Out of Territory", "Not Eligible", "Job Enquiry"
@@ -823,10 +827,44 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         <SelectValue placeholder="Select outcome" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Connected">Connected</SelectItem>
-                        <SelectItem value="Not Reachable">Not Reachable</SelectItem>
-                        <SelectItem value="Call Me Back">Call Me Back</SelectItem>
+                        <SelectItem value="Lead Status">Lead Status</SelectItem>
+                        <SelectItem value="DND">DND</SelectItem>
+                        <SelectItem value="Booked">Booked</SelectItem>
+                        <SelectItem value="Duplicate Lead">Duplicate Lead</SelectItem>
+                        <SelectItem value="Existing Enquiry">Existing Enquiry</SelectItem>
+                        <SelectItem value="Invalid Number">Invalid Number</SelectItem>
+                        <SelectItem value="Lost to Co-Dealer">Lost to Co-Dealer</SelectItem>
+                        <SelectItem value="Lost to competitor">Lost to competitor</SelectItem>
+                        <SelectItem value="RNR">RNR</SelectItem>
+                        <SelectItem value="Not Enquired">Not Enquired</SelectItem>
                         <SelectItem value="Not Interested">Not Interested</SelectItem>
+                        <SelectItem value="Plan Postponed">Plan Postponed</SelectItem>
+                        <SelectItem value="Interested">Interested</SelectItem>
+                        <SelectItem value="Call back">Call back</SelectItem>
+                        <SelectItem value="Not reachable">Not reachable</SelectItem>
+                        <SelectItem value="Switched off">Switched off</SelectItem>
+                        <SelectItem value="Busy">Busy</SelectItem>
+                        <SelectItem value="Disconnecting the call">Disconnecting the call</SelectItem>
+                        <SelectItem value="No Response">No Response</SelectItem>
+                        <SelectItem value="Low Budget">Low Budget</SelectItem>
+                        <SelectItem value="Out of Territory">Out of Territory</SelectItem>
+                        <SelectItem value="Number does not exist">Number does not exist</SelectItem>
+                        <SelectItem value="DSA">DSA</SelectItem>
+                        <SelectItem value="Just enquired">Just enquired</SelectItem>
+                        <SelectItem value="Not Eligible">Not Eligible</SelectItem>
+                        <SelectItem value="Out of Network">Out of Network</SelectItem>
+                        <SelectItem value="Used Car">Used Car</SelectItem>
+                        <SelectItem value="Incoming call not available">Incoming call not available</SelectItem>
+                        <SelectItem value="Plan Dropped">Plan Dropped</SelectItem>
+                        <SelectItem value="Temporary out of Service">Temporary out of Service</SelectItem>
+                        <SelectItem value="Service">Service</SelectItem>
+                        <SelectItem value="Internal call">Internal call</SelectItem>
+                        <SelectItem value="Wrong number">Wrong number</SelectItem>
+                        <SelectItem value="Insurance">Insurance</SelectItem>
+                        <SelectItem value="Warranty">Warranty</SelectItem>
+                        <SelectItem value="Marketing">Marketing</SelectItem>
+                        <SelectItem value="Yard">Yard</SelectItem>
+                        <SelectItem value="Job Enq">Job Enq</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -955,11 +993,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     </div>
                   <div className="space-y-3">
                     <Label htmlFor="customer_location" className="text-sm font-medium mb-2 block">Location</Label>
-                    <Input 
-                      placeholder="Enter customer location"
-                      value={formData.customer_location}
-                      onChange={(e) => setFormData(prev => ({ ...prev, customer_location: e.target.value }))}
-                    />
+                    <Select onValueChange={(value) => setFormData(prev => ({ ...prev, customer_location: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chennaiLocations.map((location) => (
+                          <SelectItem key={location} value={location}>{location}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   </CardContent>
                 </Card>

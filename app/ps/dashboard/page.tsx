@@ -173,15 +173,21 @@ export default function PSDashboard() {
   const loadFollowUps = async () => {
     setIsLoading(true)
     try {
+      console.log('📡 [API Debug] Loading PS follow-ups...')
+      
       const response = await fetch('/api/ps-followup', {
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        credentials: 'include', // Include cookies
+        credentials: 'include' // Include cookies for authentication
       })
+      
+      console.log('📡 [API Debug] Response status:', response.status)
+      
       if (response.ok) {
         const data = await response.json()
-        console.log('PS Follow-ups loaded:', data)
+        console.log('PS Follow-ups loaded:', data.length, 'items')
+        console.log('Sample follow-up data:', data[0])
         setFollowUps(data)
       } else {
         const errorData = await response.json()
@@ -615,6 +621,29 @@ export default function PSDashboard() {
     return normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd
   }
 
+  // Helper function to check if a follow-up is overdue
+  const isOverdue = (followUpDate: string) => {
+    if (!followUpDate) return false
+    
+    const followUp = followUpDate.includes('T') ? followUpDate.slice(0,10) : followUpDate
+    const today = new Date().toISOString().slice(0,10)
+    return followUp < today
+  }
+
+  // Helper function to get overdue days
+  const getOverdueDays = (followUpDate: string) => {
+    if (!followUpDate) return 0
+    
+    const followUp = followUpDate.includes('T') ? followUpDate.slice(0,10) : followUpDate
+    const today = new Date().toISOString().slice(0,10)
+    
+    if (followUp >= today) return 0
+    
+    const followUpTime = new Date(followUp + 'T00:00:00').getTime()
+    const todayTime = new Date(today + 'T00:00:00').getTime()
+    return Math.ceil((todayTime - followUpTime) / (1000 * 60 * 60 * 24))
+  }
+
   // Helper function to get pending temperature based on lead age
   const getPendingTemperature = (followUp: PSFollowUp) => {
     const assignedDate = new Date(followUp.ps_assigned_at)
@@ -661,26 +690,30 @@ export default function PSDashboard() {
     return callFields.some(field => followUp[field as keyof PSFollowUp])
   }
 
-  // Fresh leads: Leads that have never been updated (no call remarks)
-  const freshList = followUps.filter(f => !hasBeenUpdated(f) && ((f.final_status || '').toLowerCase() !== 'lost'))
+  // Fresh leads: Leads that have never been updated (no call remarks) and are not won/lost
+  const freshList = followUps.filter(f => 
+    !hasBeenUpdated(f) && 
+    !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
+    (f.final_status || '').toLowerCase() !== 'lost'
+  )
   const freshCount = freshList.length
   
+  // Debug logging
+  console.log('Fresh leads count:', freshCount, 'out of', followUps.length, 'total follow-ups')
+  console.log('Fresh leads sample:', freshList.slice(0, 2))
+  
   // Today's follow-ups: Leads with follow-up dates for today or overdue
-  // Today's follow-ups: Leads scheduled for today (including overdue, excluding won/lost)
   const todayList = applyDateFilter(followUps.filter(f => 
     !['won','lost'].includes((f.final_status || '').toLowerCase()) && 
-    (isToday(f.follow_up_date) || (() => {
-      const followUpDate = f.follow_up_date ? (f.follow_up_date.includes('T') ? f.follow_up_date.slice(0,10) : f.follow_up_date) : ""
-      const today = new Date().toISOString().slice(0,10)
-      return followUpDate && followUpDate < today
-    })())
+    (isToday(f.follow_up_date) || isOverdue(f.follow_up_date))
   ))
   const todayCount = todayList.length
   
   // Pending leads: Leads with final_status = 'pending' or 'booked' (excluding fresh leads and won/lost)
   const pendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(followUps.filter(f => 
     !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
-    (['pending', 'booked'].includes((f.final_status || '').toLowerCase())) && hasBeenUpdated(f)
+    (['pending', 'booked', 'waiting for approval'].includes((f.final_status || '').toLowerCase())) && 
+    hasBeenUpdated(f)
   ))))
   const pendingCount = pendingList.length
   
@@ -1237,9 +1270,7 @@ export default function PSDashboard() {
                               <div className="text-xs text-gray-500">{formatDate(item.follow_up_date)}</div>
                               {/* Overdue badge only shows in today's follow-up section */}
                               {activeTab === 'today' && (() => {
-                                const followUpDate = item.follow_up_date ? (item.follow_up_date.includes('T') ? item.follow_up_date.slice(0,10) : item.follow_up_date) : ""
-                                const today = new Date().toISOString().slice(0,10)
-                                const overdueDays = followUpDate && followUpDate < today ? Math.ceil((Date.now() - new Date(followUpDate + 'T00:00:00').getTime())/86400000) : 0
+                                const overdueDays = getOverdueDays(item.follow_up_date)
                                 return overdueDays > 0 && (
                                   <Badge variant="secondary" className="bg-red-600 text-white text-xs">
                                     Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}
