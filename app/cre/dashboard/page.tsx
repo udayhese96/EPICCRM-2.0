@@ -16,7 +16,14 @@ import {
   Search,
   X,
   Phone,
-  User
+  User,
+  RefreshCw,
+  Edit3,
+  Filter,
+  Clock,
+  Flame,
+  Snowflake,
+  Thermometer
 } from "lucide-react"
 import { useState, useEffect, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
@@ -699,24 +706,48 @@ export default function CREDashboard() {
               </div>
             )}
             
-            <Button className="bg-green-600 hover:bg-green-700" onClick={() => setIsAddModalOpen(true)} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
-              <Plus className="h-4 w-4 mr-2" />
+            {/* Primary Button - Add Lead */}
+            <button 
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-300 transition-all duration-150 min-h-[44px] min-w-[44px]"
+              onClick={() => setIsAddModalOpen(true)}
+              aria-label="Add new lead"
+            >
+              <Plus className="h-4 w-4" />
               Add Lead
-            </Button>
-            <Button variant="outline" onClick={() => {
-              console.log('🔄 [Manual] Manual refresh triggered')
-              fetchAssignedLeads()
-              fetchLostRequests()
-            }} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
-              <Search className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            </button>
             
-            <Button variant="outline" onClick={() => window.location.assign('/analytics')} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
-              <BarChart3 className="h-4 w-4 mr-2" />
+            {/* Secondary Button - Refresh */}
+            <button 
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
+              onClick={() => {
+                console.log('🔄 [Manual] Manual refresh triggered')
+                fetchAssignedLeads()
+                fetchLostRequests()
+              }}
+              aria-label="Refresh data"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </button>
+            
+            {/* Secondary Button - Analytics */}
+            <button 
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
+              onClick={() => window.location.assign('/analytics')}
+              aria-label="View analytics"
+            >
+              <BarChart3 className="h-4 w-4" />
               Analytics
-            </Button>
-            <Button variant="ghost" className="text-red-600" onClick={() => { localStorage.clear(); window.location.assign('/auth/login') }} style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>Sign Out</Button>
+            </button>
+            
+            {/* Ghost Button - Sign Out */}
+            <button 
+              className="px-2 py-1 rounded-md text-sm text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
+              onClick={() => { localStorage.clear(); window.location.assign('/auth/login') }}
+              aria-label="Sign out"
+            >
+              Sign Out
+            </button>
             </div>
           </div>
         </div>
@@ -724,131 +755,278 @@ export default function CREDashboard() {
         <div className="p-6 space-y-6">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-            <Card className="bg-blue-500 text-white">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-blue-100 text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Fresh Leads</p>
-                    <p className="text-3xl font-bold" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>{tabCounts.fresh}</p>
-                    <div className="flex items-center space-x-1 mt-2">
-                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">{statusCounts.untouched}</Badge>
-                      <Badge variant="secondary" className="bg-blue-400 text-white text-xs">{statusCounts.called}</Badge>
-                      <Badge variant="secondary" className="bg-blue-600 text-white text-xs">{statusCounts.followup}</Badge>
-                    </div>
-                  </div>
+            <Card className="relative overflow-hidden bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-slate-800 border border-blue-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Fresh Leads</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.fresh}</p>
+                </div>
+                
+                {/* Sub-values below count with Apple-Magnus glassy effect */}
+                <div className="flex items-center justify-center space-x-2 mt-3">
+                  <span className="relative w-7 h-7 flex items-center justify-center text-sm rounded-full font-semibold shadow-lg backdrop-blur-sm overflow-hidden">
+                    {/* Blue circle with glassy effect */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-blue-600"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/40 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[2px]"></div>
+                    <span className="relative text-white z-10 font-bold">{statusCounts.untouched}</span>
+                  </span>
+                  <span className="relative w-7 h-7 flex items-center justify-center text-sm rounded-full font-semibold shadow-lg backdrop-blur-sm overflow-hidden">
+                    {/* Gray circle with glassy effect */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-400 to-slate-600"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/40 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[2px]"></div>
+                    <span className="relative text-white z-10 font-bold">{statusCounts.called}</span>
+                  </span>
+                  <span className="relative w-7 h-7 flex items-center justify-center text-sm rounded-full font-semibold shadow-lg backdrop-blur-sm overflow-hidden">
+                    {/* Amber circle with glassy effect */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-amber-400 to-amber-600"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/40 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[2px]"></div>
+                    <span className="relative text-white z-10 font-bold">{statusCounts.followup}</span>
+                  </span>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-amber-500 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-amber-100 text-sm">Today's Follow-ups</p>
-                  <p className="text-3xl font-bold">{tabCounts.followup}</p>
-                  <Calendar className="h-6 w-6 mx-auto mt-2 text-amber-200" />
+            <Card className="relative overflow-hidden bg-gradient-to-br from-yellow-100/90 to-yellow-200/70 text-slate-800 border border-yellow-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-yellow-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Today's Follow-ups</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.followup}</p>
+                </div>
+                
+                {/* Icon below count */}
+                <div className="flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-yellow-600/70" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-teal-500 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-teal-100 text-sm">Pending Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.pending}</p>
-                  <AlertCircle className="h-6 w-6 mx-auto mt-2 text-teal-200" />
+            <Card className="relative overflow-hidden bg-gradient-to-br from-orange-100/90 to-orange-200/70 text-slate-800 border border-orange-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-orange-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Pending Leads</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.pending}</p>
+                </div>
+                
+                {/* Icon below count */}
+                <div className="flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-orange-600/70" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-emerald-600 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-emerald-100 text-sm">Qualified Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.qualified}</p>
-                  <Users className="h-6 w-6 mx-auto mt-2 text-emerald-200" />
+            <Card className="relative overflow-hidden bg-gradient-to-br from-green-100/90 to-green-200/70 text-slate-800 border border-green-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-green-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Qualified Leads</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.qualified}</p>
+                </div>
+                
+                {/* Icon below count */}
+                <div className="flex items-center justify-center">
+                  <Users className="w-5 h-5 text-green-600/70" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-green-600 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-green-100 text-sm">Won Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.won}</p>
-                  <Trophy className="h-6 w-6 mx-auto mt-2 text-green-200" />
+            <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-100/90 to-emerald-200/70 text-slate-800 border border-emerald-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-emerald-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Won Leads</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.won}</p>
+                </div>
+                
+                {/* Icon below count */}
+                <div className="flex items-center justify-center">
+                  <Trophy className="w-5 h-5 text-emerald-600/70" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-red-500 text-white">
-              <CardContent className="p-4">
-                <div className="text-center">
-                  <p className="text-red-100 text-sm">Lost Leads</p>
-                  <p className="text-3xl font-bold">{tabCounts.lost}</p>
-                  <X className="h-6 w-6 mx-auto mt-2 text-red-200" />
+            <Card className="relative overflow-hidden bg-gradient-to-br from-red-100/90 to-red-200/70 text-slate-800 border border-red-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+              {/* Apple-Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-red-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+              
+              <CardContent className="relative p-4 md:p-5 flex flex-col h-full items-center justify-between">
+                {/* Title at top center */}
+                <div className="flex items-center justify-center mb-2">
+                  <p className="text-slate-700 text-sm md:text-base font-medium text-center">Lost Leads</p>
+                </div>
+                
+                {/* Main count in center */}
+                <div className="flex items-center justify-center">
+                  <p className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 text-center leading-none">{tabCounts.lost}</p>
+                </div>
+                
+                {/* Icon below count */}
+                <div className="flex items-center justify-center">
+                  <X className="w-5 h-5 text-red-600/70" />
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Filter Tabs (compact) */}
-          <div className="flex flex-wrap gap-2 text-sm">
-            <Button 
-              variant={activeTab === "fresh" ? "default" : "outline"}
-              className={`${activeTab === "fresh" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+          {/* Filter Tabs - Consistent Styling */}
+          <div className="flex flex-wrap gap-2">
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "fresh" 
+                  ? "bg-blue-100 text-blue-800 border-blue-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("fresh")}
+              aria-label="View fresh leads"
             >
-              <Star className="h-4 w-4 mr-2" />
-              Fresh Leads ({tabCounts.fresh})
-            </Button>
-            <Button 
-              variant={activeTab === "followup" ? "default" : "outline"}
-              className={`${activeTab === "followup" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <Star className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Fresh Leads</div>
+                <div>({tabCounts.fresh})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "followup" 
+                  ? "bg-amber-100 text-amber-800 border-amber-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("followup")}
+              aria-label="View today's follow-ups"
             >
-              <Calendar className="h-4 w-4 mr-2" />
-              Today's Follow-ups ({tabCounts.followup})
-            </Button>
-            <Button 
-              variant={activeTab === "pending" ? "default" : "outline"}
-              className={`${activeTab === "pending" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <Calendar className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Today's Follow-ups</div>
+                <div>({tabCounts.followup})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "pending" 
+                  ? "bg-orange-100 text-orange-800 border-orange-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("pending")}
+              aria-label="View pending leads"
             >
-              <AlertCircle className="h-4 w-4 mr-2" />
-              Pending Leads ({tabCounts.pending})
-            </Button>
-            <Button 
-              variant={activeTab === "qualified" ? "default" : "outline"}
-              className={`${activeTab === "qualified" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <AlertCircle className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Pending Leads</div>
+                <div>({tabCounts.pending})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "qualified" 
+                  ? "bg-green-100 text-green-800 border-green-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("qualified")}
+              aria-label="View qualified leads"
             >
-              <Users className="h-4 w-4 mr-2" />
-              Qualified Leads ({tabCounts.qualified})
-            </Button>
-            <Button 
-              variant={activeTab === "wonlost" ? "default" : "outline"}
-              className={`${activeTab === "wonlost" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <Users className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Qualified Leads</div>
+                <div>({tabCounts.qualified})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "wonlost" 
+                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("wonlost")}
+              aria-label="View won/lost leads"
             >
-              <Trophy className="h-4 w-4 mr-2" />
-              Won/Lost Leads ({tabCounts.wonlost})
-            </Button>
-            <Button 
-              variant={activeTab === "lostconfirm" ? "default" : "outline"}
-              className={`${activeTab === "lostconfirm" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <Trophy className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Won/Lost Leads</div>
+                <div>({tabCounts.wonlost})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "lostconfirm" 
+                  ? "bg-red-100 text-red-800 border-red-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("lostconfirm")}
+              aria-label="View lost confirmation requests"
             >
-              <Calendar className="h-4 w-4 mr-2" />
-              Lost Confirmation ({tabCounts.lostconfirm})
-            </Button>
-            <Button 
-              variant={activeTab === "walkin" ? "default" : "outline"}
-              className={`${activeTab === "walkin" ? "bg-gray-900 text-white" : ""} h-8 px-3`}
+              <Calendar className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Lost Confirmation</div>
+                <div>({tabCounts.lostconfirm})</div>
+              </div>
+            </button>
+            <button 
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "walkin" 
+                  ? "bg-teal-100 text-teal-800 border-teal-300 shadow-sm" 
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
               onClick={() => setActiveTab("walkin")}
+              aria-label="View walk-in leads"
             >
-              <User className="h-4 w-4 mr-2" />
-              Walk-in Leads ({tabCounts.walkin})
-            </Button>
+              <User className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Walk-in Leads</div>
+                <div>({tabCounts.walkin})</div>
+              </div>
+            </button>
           </div>
 
           {/* Dynamic Leads Section */}
@@ -868,40 +1046,61 @@ export default function CREDashboard() {
                   </CardTitle>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <select className="border border-gray-300 rounded px-3 py-1 text-sm" value={dateMode} onChange={(e) => setDateMode(e.target.value as any)}>
-                    <option>All Time</option>
-                    <option>Today</option>
-                    <option>This Week</option>
-                    <option>Date Range</option>
-                  </select>
+                  <div className="relative overflow-hidden rounded-lg backdrop-blur-[6px]">
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <Clock className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500 z-10" />
+                    <select 
+                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-lg border border-blue-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base z-10"
+                      value={dateMode} 
+                      onChange={(e) => setDateMode(e.target.value as any)}
+                      aria-label="Select date filter"
+                    >
+                      <option>All Time</option>
+                      <option>Today</option>
+                      <option>This Week</option>
+                      <option>Date Range</option>
+                    </select>
+                  </div>
                   
                   {/* Date input for Date Range mode */}
                   {dateMode === "Date Range" && (
-                    <Input
+                    <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="text-sm w-36"
+                      className="w-full sm:w-64 px-3 py-2 rounded-lg border border-gray-200 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base"
                       placeholder="Select Date"
+                      aria-label="Select specific date"
                     />
                   )}
                   
-                  <div className="relative">
-                    <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <Input 
+                  <div className="relative overflow-hidden rounded-lg backdrop-blur-[6px]">
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-purple-300/25"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-500 z-10" />
+                    <input 
+                      type="text"
                       placeholder="Search by UID, name..." 
-                      className="pl-10 w-64"
+                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-lg border border-purple-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all duration-150 text-sm md:text-base z-10"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
+                      aria-label="Search leads"
                     />
                   </div>
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={() => setSearchTerm("")}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                      <button
+                    className="px-2 py-1 rounded-md text-sm text-gray-600 hover:bg-gray-50 focus:ring-2 focus:ring-gray-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
+                        onClick={() => setSearchTerm("")}
+                        aria-label="Clear search"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                   
                 </div>
               </div>
@@ -909,45 +1108,130 @@ export default function CREDashboard() {
             <CardContent>
               {/* Status Tabs - Untouched, Called, Follow Up for Fresh Leads */}
               {activeTab === "fresh" && (
-                <div className="flex space-x-2 mb-4">
-                  <Badge 
-                    variant="secondary" 
-                    className={`cursor-pointer ${activeStatus === "Fresh" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button 
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-150 min-h-[44px] ${
+                      activeStatus === "Fresh" 
+                        ? "bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-blue-800 border border-blue-300/30 shadow-md backdrop-blur-[6px]" 
+                        : "bg-gradient-to-br from-white/90 to-blue-50/70 text-blue-700 border border-blue-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                    }`}
                     onClick={() => setActiveStatus("Fresh")}
+                    aria-label="View untouched leads"
                   >
-                    Untouched <span className="ml-1 bg-gray-300 px-1 rounded">{statusCounts.untouched}</span>
-                  </Badge>
-                  <Badge 
-                    variant="secondary" 
-                    className={`cursor-pointer ${activeStatus === "Called" ? "bg-gray-900 text-white" : "bg-gray-100"}`}
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Star className="h-4 w-4" />
+                      Untouched <span className="ml-1 bg-blue-300/80 px-2 py-0.5 rounded-full text-xs backdrop-blur-sm">{statusCounts.untouched}</span>
+                    </span>
+                  </button>
+                  <button 
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-150 min-h-[44px] ${
+                      activeStatus === "Called" 
+                        ? "bg-gradient-to-br from-green-100/90 to-green-200/70 text-green-800 border border-green-300/30 shadow-md backdrop-blur-[6px]" 
+                        : "bg-gradient-to-br from-white/90 to-green-50/70 text-green-700 border border-green-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                    }`}
                     onClick={() => setActiveStatus("Called")}
+                    aria-label="View called leads"
                   >
-                    Called <span className="ml-1 bg-gray-300 px-1 rounded">{statusCounts.called}</span>
-                  </Badge>
-                  <Badge 
-                    variant="secondary" 
-                    className={`cursor-pointer ${activeStatus === "Follow Up" ? "bg-amber-900 text-white" : "bg-amber-100 text-amber-800"}`}
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Phone className="h-4 w-4" />
+                      Called <span className="ml-1 bg-green-300/80 px-2 py-0.5 rounded-full text-xs backdrop-blur-sm">{statusCounts.called}</span>
+                    </span>
+                  </button>
+                  <button 
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-150 min-h-[44px] ${
+                      activeStatus === "Follow Up" 
+                        ? "bg-gradient-to-br from-amber-100/90 to-amber-200/70 text-amber-800 border border-amber-300/30 shadow-md backdrop-blur-[6px]" 
+                        : "bg-gradient-to-br from-white/90 to-amber-50/70 text-amber-700 border border-amber-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                    }`}
                     onClick={() => setActiveStatus("Follow Up")}
+                    aria-label="View follow-up leads"
                   >
-                    Follow Up <span className="ml-1 bg-amber-300 px-1 rounded">{statusCounts.followup}</span>
-                  </Badge>
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Follow Up <span className="ml-1 bg-amber-300/80 px-2 py-0.5 rounded-full text-xs backdrop-blur-sm">{statusCounts.followup}</span>
+                    </span>
+                  </button>
                 </div>
               )}
 
               {/* Pending Filters - Hot/Warm/Cold */}
               {activeTab === "pending" && (
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-sm text-gray-600">Lead Category:</span>
-                  {(["all", "Hot", "Warm", "Cold"] as const).map(cat => (
-                    <Badge
-                      key={cat}
-                      variant="secondary"
-                      className={`cursor-pointer ${pendingCategory === cat ? "bg-gray-900 text-white" : "bg-gray-100"}`}
-                      onClick={() => setPendingCategory(cat)}
-                    >
-                      {cat.toString()}
-                    </Badge>
-                  ))}
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-4 w-4 text-gray-600" />
+                    <span className="text-sm md:text-base text-gray-600">Lead Category:</span>
+                  </div>
+                  {(["all", "Hot", "Warm", "Cold"] as const).map(cat => {
+                    const getIcon = () => {
+                      switch (cat) {
+                        case "all": return <Filter className="h-4 w-4" />
+                        case "Hot": return <Flame className="h-4 w-4" />
+                        case "Warm": return <Thermometer className="h-4 w-4" />
+                        case "Cold": return <Snowflake className="h-4 w-4" />
+                        default: return null
+                      }
+                    }
+                    
+                    const getButtonStyles = () => {
+                      const isActive = pendingCategory === cat
+                      
+                      switch (cat) {
+                        case "all":
+                          return isActive 
+                            ? "relative overflow-hidden bg-gradient-to-br from-slate-100/90 to-slate-200/70 text-slate-800 border border-slate-300/30 shadow-md backdrop-blur-[6px]"
+                            : "relative overflow-hidden bg-gradient-to-br from-white/90 to-gray-50/70 text-gray-700 border border-gray-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                        case "Hot":
+                          return isActive
+                            ? "relative overflow-hidden bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-md backdrop-blur-[6px]"
+                            : "relative overflow-hidden bg-gradient-to-br from-white/90 to-red-50/70 text-red-700 border border-red-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                        case "Warm":
+                          return isActive
+                            ? "relative overflow-hidden bg-gradient-to-br from-orange-100/90 to-orange-200/70 text-orange-800 border border-orange-300/30 shadow-md backdrop-blur-[6px]"
+                            : "relative overflow-hidden bg-gradient-to-br from-white/90 to-orange-50/70 text-orange-700 border border-orange-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                        case "Cold":
+                          return isActive
+                            ? "relative overflow-hidden bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-blue-800 border border-blue-300/30 shadow-md backdrop-blur-[6px]"
+                            : "relative overflow-hidden bg-gradient-to-br from-white/90 to-blue-50/70 text-blue-700 border border-blue-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                        default:
+                          return ""
+                      }
+                    }
+                    
+                    return (
+                      <button
+                        key={cat}
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-150 min-h-[44px] ${getButtonStyles()}`}
+                        onClick={() => setPendingCategory(cat)}
+                        aria-label={`Filter by ${cat} leads`}
+                      >
+                        {/* Apple Magnus glassy effect layers */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                        <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                        
+                        {/* Content */}
+                        <span className="relative z-10 flex items-center gap-2">
+                          {getIcon()}
+                          {cat.toString()}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
 
@@ -967,42 +1251,62 @@ export default function CREDashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead>
-                    <tr className="bg-gradient-to-r from-teal-50 via-blue-50 to-indigo-50">
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ACTION</th>
-                      {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>
-                          {activeTab === 'wonlost' ? 'FINAL STATUS' : 'LEAD STATUS'}
+                    <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>ACTION</th>
+                      {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
+                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>
+                          LEAD STATUS
                         </th>
                       )}
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CUSTOMER NAME</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>MOBILE</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>SOURCE</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>CAMPAIGN</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>BRANCH</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>CUSTOMER NAME</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>MOBILE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>SOURCE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>CAMPAIGN</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>BRANCH</th>
                       {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>ICROP ID</th>
+                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>ICROP ID</th>
                       )}
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>GEM</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>GEM</th>
                       {activeTab === "lostconfirm" && (
-                        <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>LOST REASON</th>
+                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>LOST REASON</th>
                       )}
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>DATE</th>
-                      <th className="text-left p-3 font-medium text-gray-700" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}>UID</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>DATE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>UID</th>
                     </tr>
                   </thead>
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 8} className="p-8 text-center text-gray-500">
+                        <td colSpan={
+                          (activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 
+                          activeTab === 'wonlost' ? 6 : 
+                          activeTab === 'qualified' ? 7 : 8
+                        } className="p-8 text-center text-gray-500">
                           Loading leads...
                         </td>
                       </tr>
                     ) : filteredLeads.length > 0 ? (
-                      filteredLeads.map((lead) => {
+                      filteredLeads.map((lead, index) => {
                         const followUpDate = lead.follow_up_date ? (lead.follow_up_date.includes('T') ? lead.follow_up_date.slice(0,10) : lead.follow_up_date) : ""
                         const overdueDays = followUpDate && followUpDate < new Date().toISOString().slice(0,10) ? Math.ceil((Date.now() - new Date(followUpDate + 'T00:00:00').getTime())/86400000) : 0
+                        
+                        // Zebra striping with alternating gray and white
+                        const isEvenRow = index % 2 === 0
+                        const baseRowClass = isEvenRow ? 'bg-white' : 'bg-gray-50'
+                        const hoverClass = 'hover:bg-blue-50'
+                        
+                        // Special status highlighting (pastel tints for special cases)
+                        let specialStatusClass = ''
+                        if (overdueDays > 0) {
+                          specialStatusClass = 'bg-red-50 hover:bg-red-100' // Overdue follow-ups
+                        } else if (lead.lead_category === 'Hot') {
+                          specialStatusClass = 'bg-orange-50 hover:bg-orange-100' // High-priority leads
+                        }
+                        
+                        const rowColorClass = specialStatusClass || `${baseRowClass} ${hoverClass}`
+                        
                         return (
-                        <tr key={lead.id} className="border-b hover:bg-gray-50">
+                        <tr key={lead.id} className={`border-b transition-colors duration-200 ${rowColorClass}`}>
                           <td className="p-3">
                             <div className="flex gap-2">
                               {activeTab === "lostconfirm" ? (
@@ -1027,63 +1331,75 @@ export default function CREDashboard() {
                                 </>
                               ) : (
                                 <>
-                                  <Button 
-                                    size="sm" 
-                                    className="bg-red-500 hover:bg-red-600 text-white"
+                                  <button 
+                                    className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-300 bg-gradient-to-br from-green-50/90 to-green-100/70 text-green-800 border border-green-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
                                     onClick={() => openUpdateModal(lead)}
-                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                    aria-label={`Update lead ${lead.uid}`}
                                   >
-                                    Update
-                                  </Button>
-                                  {/* Only show Remarks button for leads that are not fresh/untouched */}
+                                    {/* Apple Magnus glassy effect layers */}
+                                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-green-300/25"></div>
+                                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                                    
+                                    <span className="relative z-10 flex items-center gap-2">
+                                      <div className="p-1 bg-green-100/80 rounded-lg backdrop-blur-sm">
+                                        <Edit3 className="h-3 w-3 text-green-600" />
+                                      </div>
+                                      Update
+                                    </span>
+                                  </button>
+                                  {/* Only show History button for leads that are not fresh/untouched */}
                                   {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                                    <Button 
-                                      size="sm" 
-                                      variant="outline"
-                                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                    <button 
+                                      className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
                                       onClick={() => {
                                         setSelectedLead(lead)
                                         setIsRemarksSyncOpen(true)
                                       }}
-                                      style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
+                                      aria-label={`View history for lead ${lead.uid}`}
                                     >
-                                      Remarks
-                                    </Button>
+                                      {/* Apple Magnus glassy effect layers */}
+                                      <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                                      <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                                      
+                                      <span className="relative z-10 flex items-center gap-2">
+                                        <div className="p-1 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                                          <Clock className="h-3 w-3 text-blue-600" />
+                                        </div>
+                                        History
+                                      </span>
+                                    </button>
                                   )}
                                 </>
                               )}
                             </div>
                           </td>
-                          {!(activeTab === "fresh" && activeStatus === "Fresh") && (
+                          {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
                             <td className="p-3">
                               <Badge 
                                 variant="outline"
                                 className={
-                                  activeTab === 'wonlost'
-                                    ? ((lead.final_status || '').toLowerCase() === 'won' || (lead.final_status || '').toLowerCase() === 'booked' ? 'bg-green-100 text-green-800' :
-                                       (lead.final_status || '').toLowerCase() === 'retailed' ? 'bg-green-100 text-green-800' :
-                                       (lead.final_status || '').toLowerCase() === 'lost' ? 'bg-red-100 text-red-800' :
-                                       (lead.final_status || '').toLowerCase() === 'lost requested' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800')
-                                    : (lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
-                                       lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
-                                       lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
-                                       lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
-                                       lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
-                                       lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
-                                       "bg-gray-100 text-gray-800")
+                                  (lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
+                                   lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
+                                   lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
+                                   lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
+                                   lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
+                                   lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
+                                   "bg-gray-100 text-gray-800")
                                 }
                               >
-                                {activeTab === 'wonlost' ? (lead.final_status || '') : lead.lead_status}
+                                {lead.lead_status}
                               </Badge>
                               {activeTab === "followup" && overdueDays > 0 && (
                                 <Badge variant="secondary" className="ml-2 bg-red-600 text-white">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
                               )}
                             </td>
                           )}
-                          <td className="p-3 font-medium">{lead.customer_name}</td>
-                          <td className="p-3">{lead.customer_mobile_number}</td>
-                          <td className="p-3">{lead.source}</td>
-                          <td className="p-3">{lead.campaign}</td>
+                          <td className="p-3 font-medium text-gray-900" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.customer_name}</td>
+                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.customer_mobile_number}</td>
+                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.source}</td>
+                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.campaign}</td>
                           <td className="p-3">
                             <Badge variant="outline" className={lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}>
                               {lead.branch || 'Unassigned'}
@@ -1101,28 +1417,25 @@ export default function CREDashboard() {
                               {lead.ps_name || 'Unassigned'}
                             </Badge>
                           </td>
-                          {activeTab === "wonlost" && (
-                            <td className="p-3">
-                              <Badge variant="outline" className={lead.final_status ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
-                                {lead.final_status || 'Pending'}
-                              </Badge>
-                            </td>
-                          )}
                           {activeTab === "lostconfirm" && (
                             <td className="p-3">
-                              <div className="text-sm text-gray-800 bg-red-50 rounded p-2 border border-red-200">
+                              <div className="text-sm text-gray-800 bg-red-50 rounded p-2 border border-red-200" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>
                                 {lead.lost_reason || 'No reason provided'}
                               </div>
                             </td>
                           )}
-                          <td className="p-3 text-sm">{lead.date}</td>
-                          <td className="p-3 text-sm font-mono">{lead.uid}</td>
+                          <td className="p-3 text-sm text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.date}</td>
+                          <td className="p-3 text-sm font-mono text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.uid}</td>
                         </tr>
                         )
                       })
                     ) : (
                       <tr>
-                        <td colSpan={(activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 8} className="p-8 text-center text-gray-500">
+                        <td colSpan={
+                          (activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 
+                          activeTab === 'wonlost' ? 6 : 
+                          activeTab === 'qualified' ? 7 : 8
+                        } className="p-8 text-center text-gray-500">
                           No leads found for the selected criteria
                         </td>
                       </tr>
@@ -1161,3 +1474,8 @@ export default function CREDashboard() {
     </DashboardLayout>
   )
 }
+
+
+
+
+

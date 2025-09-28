@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calendar, Phone, Mail, MapPin, Building, User, Car, Clock, DollarSign, Home, Users, CheckCircle2, Lock, Circle } from "lucide-react"
+import { Calendar, Phone, Mail, MapPin, Building, User, Car, Clock, DollarSign, Home, Users, CheckCircle2, Lock, Circle, X, AlertTriangle, CheckCircle, Star, Thermometer, Snowflake, Flame, Search, ChevronDown } from "lucide-react"
 
 // Car make and model data
 const CAR_DATA = {
@@ -112,6 +112,246 @@ const CAR_DATA = {
   "Maserati": ["Maserati"],
   "Lexus": ["Lexus"],
   "Citroen": ["C3", "eC3", "C5 Aircross"]
+}
+
+// SearchableSelect Component
+interface SearchableSelectProps {
+  value: string
+  onValueChange: (value: string) => void
+  placeholder: string
+  options: string[]
+  searchPlaceholder?: string
+  disabled?: boolean
+  className?: string
+}
+
+const SearchableSelect = ({ 
+  value, 
+  onValueChange, 
+  placeholder, 
+  options, 
+  searchPlaceholder = "Search...",
+  disabled = false,
+  className = ""
+}: SearchableSelectProps) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedIndex, setSelectedIndex] = useState(-1)
+  const [isMobile, setIsMobile] = useState(false)
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
+  
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Filter options based on debounced search term
+  const filteredOptions = options.filter(option =>
+    option.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+  )
+
+  // Check if mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setIsOpen(true)
+        setTimeout(() => searchInputRef.current?.focus(), 100)
+      }
+      return
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setSelectedIndex(prev => 
+          prev < filteredOptions.length - 1 ? prev + 1 : 0
+        )
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setSelectedIndex(prev => 
+          prev > 0 ? prev - 1 : filteredOptions.length - 1
+        )
+        break
+      case 'Enter':
+        e.preventDefault()
+        if (selectedIndex >= 0 && filteredOptions[selectedIndex]) {
+          onValueChange(filteredOptions[selectedIndex])
+          setIsOpen(false)
+          setSearchTerm("")
+          setSelectedIndex(-1)
+        }
+        break
+      case 'Escape':
+        e.preventDefault()
+        setIsOpen(false)
+        setSearchTerm("")
+        setSelectedIndex(-1)
+        triggerRef.current?.focus()
+        break
+      case 'Home':
+        e.preventDefault()
+        setSelectedIndex(0)
+        break
+      case 'End':
+        e.preventDefault()
+        setSelectedIndex(filteredOptions.length - 1)
+        break
+    }
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setSearchTerm("")
+        setSelectedIndex(-1)
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isOpen])
+
+  // Reset selected index when search term changes
+  useEffect(() => {
+    setSelectedIndex(-1)
+  }, [debouncedSearchTerm])
+
+  const handleOptionClick = (option: string) => {
+    onValueChange(option)
+    setIsOpen(false)
+    setSearchTerm("")
+    setSelectedIndex(-1)
+  }
+
+  const handleTriggerClick = () => {
+    if (!disabled) {
+      setIsOpen(!isOpen)
+      if (!isOpen) {
+        setTimeout(() => searchInputRef.current?.focus(), 100)
+      }
+    }
+  }
+
+  // Highlight matched text
+  const highlightText = (text: string, query: string) => {
+    if (!query) return text
+    const regex = new RegExp(`(${query})`, 'gi')
+    const parts = text.split(regex)
+    return parts.map((part, index) => 
+      regex.test(part) ? (
+        <span key={index} className="font-semibold text-blue-600">{part}</span>
+      ) : part
+    )
+  }
+
+  return (
+    <div className={`relative ${className}`} ref={dropdownRef}>
+      {/* Trigger Button */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={handleTriggerClick}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        className={`w-full min-h-[44px] px-3 py-2 text-left text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between ${
+          disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+        }`}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-label={placeholder}
+      >
+        <span className={value ? "text-gray-900" : "text-gray-500"}>
+          {value || placeholder}
+        </span>
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${
+          isOpen ? 'rotate-180' : ''
+        }`} />
+      </button>
+
+      {/* Dropdown Panel */}
+      {isOpen && (
+        <div className={`absolute z-50 w-full mt-1 ${
+          isMobile ? 'fixed inset-x-4 bottom-4 top-auto max-h-96' : 'relative'
+        }`}>
+          <div className="bg-white/90 backdrop-blur-sm shadow-lg border border-gray-200 rounded-lg transition-all duration-200">
+            {/* Search Input */}
+            <div className="p-2 border-b border-gray-100">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  placeholder={searchPlaceholder}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  className="w-full pl-10 pr-3 py-2 text-sm border-b border-gray-100 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                  role="searchbox"
+                  aria-label="Search vehicle makes"
+                />
+              </div>
+            </div>
+
+            {/* Options List */}
+            <div className="max-h-60 overflow-y-auto">
+              {filteredOptions.length > 0 ? (
+                <>
+                  {filteredOptions.map((option, index) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => handleOptionClick(option)}
+                      onKeyDown={handleKeyDown}
+                      className={`w-full min-h-[44px] px-3 py-2 text-left text-sm cursor-pointer transition-colors duration-150 flex items-center ${
+                        index === selectedIndex
+                          ? 'bg-blue-50 text-blue-700 font-medium'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                      role="option"
+                      aria-selected={value === option}
+                    >
+                      {highlightText(option, debouncedSearchTerm)}
+                    </button>
+                  ))}
+                  {/* Results count */}
+                  <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-100">
+                    Showing {filteredOptions.length} of {options.length} makes
+                  </div>
+                </>
+              ) : (
+                <div className="px-3 py-4 text-sm text-gray-500 text-center" aria-live="polite">
+                  No options found
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface Lead {
@@ -255,6 +495,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   const [availablePS, setAvailablePS] = useState<string[]>([])
   const [isTradeInDialogOpen, setIsTradeInDialogOpen] = useState(false)
   const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({})
+  const [isLoadingVariants, setIsLoadingVariants] = useState(false)
+  const [selectedVariants, setSelectedVariants] = useState<string[]>([])
 
   // Validation functions
   const validateTradeInYear = (year: string): string => {
@@ -352,9 +594,19 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
   useEffect(() => {
     if (formData.model_interested && toyotaModels[formData.model_interested as keyof typeof toyotaModels]) {
+      setIsLoadingVariants(true)
+      // Simulate loading delay for better UX
+      setTimeout(() => {
       setAvailableVariants(toyotaModels[formData.model_interested as keyof typeof toyotaModels])
+        setIsLoadingVariants(false)
+        // Reset selected variants when model changes
+        setSelectedVariants([])
+        setFormData(prev => ({ ...prev, variant: "" }))
+      }, 300)
     } else {
       setAvailableVariants([])
+      setSelectedVariants([])
+      setIsLoadingVariants(false)
     }
   }, [formData.model_interested])
 
@@ -370,6 +622,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       lost_reason: "",
       pending_reason: ""
     }))
+  }
+
+  const handleModelSelect = (model: string) => {
+    setFormData(prev => ({ ...prev, model_interested: model }))
+  }
+
+  const handleVariantSelect = (variant: string) => {
+    // Single select for variants
+    setSelectedVariants([variant])
+    setFormData(prev => ({ ...prev, variant: variant }))
   }
 
   const handleSubmit = async () => {
@@ -602,121 +864,157 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+      <DialogContent className="max-w-[1100px] max-h-[90vh] overflow-y-auto p-0">
+        {/* Compact Header */}
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-gray-100 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="text-lg font-semibold text-gray-900 leading-tight" style={{ fontFamily: 'Inter, Roboto, sans-serif' }}>
             Update Lead - {lead.uid}
           </DialogTitle>
-          <DialogDescription>
+              <DialogDescription className="text-sm text-gray-500 mt-1">
             Update lead information and call history
           </DialogDescription>
-        </DialogHeader>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              aria-label="Close modal"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
 
-        <div className="space-y-6">
-          {/* Lead Details Card */}
-            <Card className="border-l-4 border-l-blue-500">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center space-x-2">
-                <User className="h-5 w-5 text-blue-600" />
-                <span>Customer Information</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="p-6 space-y-6">
+          {/* Customer Information Card - Apple Magnus Style */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-blue-50/90 to-indigo-50/70 rounded-xl border border-blue-200/30 shadow-lg backdrop-blur-sm">
+            {/* Apple Magnus glassy effect layers */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+            <div className="absolute inset-0 backdrop-filter backdrop-blur-[4px]"></div>
+            
+            <div className="relative p-5">
+              <div className="flex items-center space-x-2 mb-4">
+                <div className="p-2 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                  <User className="h-4 w-4 text-blue-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-800">Customer Information</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
                 <div className="flex items-center space-x-2">
-                  <User className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">Name:</span>
-                  <span>{lead.customer_name}</span>
+                    <User className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Name</span>
+                    <span className="text-sm font-medium text-gray-900">{lead.customer_name}</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Phone className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">Phone:</span>
-                  <span>{lead.customer_mobile_number}</span>
+                    <Calendar className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Date</span>
+                    <span className="text-sm font-medium text-gray-900">{lead.date}</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Building className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">Source:</span>
-                  <Badge variant="outline">{lead.source}</Badge>
+                    <MapPin className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Campaign</span>
+                    <span className="text-sm font-medium text-gray-900">{lead.campaign}</span>
+                </div>
+                {lead.lead_category && (
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs text-gray-500">Category:</span>
+                    <Badge variant="outline" className={`text-xs px-2 py-0.5 ${
+                      lead.lead_category === 'Hot' 
+                        ? 'bg-red-100 text-red-800 border-red-200' 
+                        : lead.lead_category === 'Warm' 
+                        ? 'bg-orange-100 text-orange-800 border-orange-200'
+                        : 'bg-blue-100 text-blue-800 border-blue-200'
+                    }`}>
+                      {lead.lead_category === 'Hot' && <Flame className="h-3 w-3 inline mr-1" />}
+                      {lead.lead_category === 'Warm' && <Thermometer className="h-3 w-3 inline mr-1" />}
+                      {lead.lead_category === 'Cold' && <Snowflake className="h-3 w-3 inline mr-1" />}
+                      {lead.lead_category}
+                    </Badge>
+                  </div>
+                )}
+                </div>
+                <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                    <Phone className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Phone</span>
+                    <span className="text-sm font-medium text-gray-900">{lead.customer_mobile_number}</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Calendar className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">Date:</span>
-                  <span>{lead.date}</span>
+                    <Building className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Source</span>
+                    <Badge variant="outline" className="bg-blue-100/80 text-blue-800 border-blue-200 text-xs px-2 py-0.5">{lead.source}</Badge>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <MapPin className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">Campaign:</span>
-                  <span>{lead.campaign}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-medium">UID:</span>
-                  <Badge variant="secondary">{lead.uid}</Badge>
+                    <span className="text-xs text-gray-500">UID</span>
+                    <Badge variant="secondary" className="bg-gray-100/80 text-gray-700 text-xs px-2 py-0.5">{lead.uid}</Badge>
+                  </div>
                 </div>
               </div>
 
-              {/* Previous Calls - placed right below customer info for visibility */}
-              <div className="rounded-md bg-gradient-to-r from-blue-50 to-indigo-50 p-4 border">
-                <div className="text-sm font-semibold text-blue-900 mb-1">Previous Calls</div>
-                <div className="text-sm text-gray-800 space-y-1">
+              {/* Previous Calls - Compact */}
+              <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200/40 backdrop-blur-sm">
+                <div className="text-xs font-semibold text-blue-900 mb-2">Previous Calls</div>
+                <div className="text-xs text-gray-700 space-y-1 leading-tight">
                   <div>Qualified: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.lead_remark || lead.remarks || '—'}</div>
                   {lead.second_remark && (
-                    <div>Follow Up 1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_remark}</div>
+                    <div>F1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_remark}</div>
                   )}
                   {lead.third_remark && (
-                    <div>Follow Up 2: <span className="font-medium">{(lead.third_call_date || '').slice(0,10)}</span> · {lead.third_remark}</div>
+                    <div>F2: <span className="font-medium">{(lead.third_call_date || '').slice(0,10)}</span> · {lead.third_remark}</div>
                   )}
                   {lead.fourth_remark && (
-                    <div>Follow Up 3: <span className="font-medium">{(lead.fourth_call_date || '').slice(0,10)}</span> · {lead.fourth_remark}</div>
+                    <div>F3: <span className="font-medium">{(lead.fourth_call_date || '').slice(0,10)}</span> · {lead.fourth_remark}</div>
                   )}
                   {lead.fifth_remark && (
-                    <div>Follow Up 4: <span className="font-medium">{(lead.fifth_call_date || '').slice(0,10)}</span> · {lead.fifth_remark}</div>
+                    <div>F4: <span className="font-medium">{(lead.fifth_call_date || '').slice(0,10)}</span> · {lead.fifth_remark}</div>
                   )}
                   {lead.sixth_remark && (
-                    <div>Follow Up 5: <span className="font-medium">{(lead.sixth_call_date || '').slice(0,10)}</span> · {lead.sixth_remark}</div>
+                    <div>F5: <span className="font-medium">{(lead.sixth_call_date || '').slice(0,10)}</span> · {lead.sixth_remark}</div>
                   )}
                 </div>
               </div>
 
               {/* Qualification Summary (if present) */}
               {(lead.model_interested || lead.branch || lead.ps_assigned || lead.lead_category) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2 border-t">
+                <div className="mt-4 pt-3 border-t border-blue-200/40">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {lead.model_interested && (
                     <div className="flex items-center space-x-2">
-                      <Car className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium">Model:</span>
-                      <span>{lead.model_interested}</span>
+                        <Car className="h-3 w-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">Model:</span>
+                        <span className="text-sm font-medium text-gray-900">{lead.model_interested}</span>
                     </div>
                   )}
                   {lead.variant && (
                     <div className="flex items-center space-x-2">
-                      <Car className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium">Variant:</span>
-                      <span>{lead.variant}</span>
+                        <Car className="h-3 w-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">Variant:</span>
+                        <span className="text-sm font-medium text-gray-900">{lead.variant}</span>
                     </div>
                   )}
                   {lead.branch && (
                     <div className="flex items-center space-x-2">
-                      <Building className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium">Branch:</span>
-                      <span>{lead.branch}</span>
+                        <Building className="h-3 w-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">Branch:</span>
+                        <span className="text-sm font-medium text-gray-900">{lead.branch}</span>
                     </div>
                   )}
                   {lead.ps_assigned && (
                     <div className="flex items-center space-x-2">
-                      <Users className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium">PS:</span>
-                      <span>{lead.ps_assigned}</span>
+                        <Users className="h-3 w-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">PS:</span>
+                        <span className="text-sm font-medium text-gray-900">{lead.ps_assigned}</span>
                     </div>
                   )}
-                  {lead.lead_category && (
-                    <div className="flex items-center space-x-2">
-                      <Badge variant="outline">{lead.lead_category}</Badge>
-                    </div>
-                  )}
+                  </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Previous Follow-ups */}
           {lead.call_logs && lead.call_logs.length > 0 && (
@@ -742,55 +1040,109 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
           {/* Status Selection or Follow-up Workflow */}
           {!shouldShowFollowUp ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Lead Status Update</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex space-x-6">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="qualified"
-                      checked={selectedStatus === "qualified"}
-                      onCheckedChange={() => handleStatusChange("qualified")}
-                    />
-                    <Label htmlFor="qualified" className="text-green-700 font-medium">Qualified</Label>
+            <div className="relative overflow-hidden bg-gradient-to-br from-gray-50/90 to-gray-100/70 rounded-xl border border-gray-200/30 shadow-lg backdrop-blur-sm">
+              {/* Apple Magnus glassy effect layers */}
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-gray-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[4px]"></div>
+              
+              <div className="relative p-5">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-gray-100/80 rounded-lg backdrop-blur-sm">
+                    <CheckCircle className="h-4 w-4 text-gray-600" />
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="unqualified"
-                      checked={selectedStatus === "unqualified"}
-                      onCheckedChange={() => handleStatusChange("unqualified")}
-                    />
-                    <Label htmlFor="unqualified" className="text-red-700 font-medium">Unqualified</Label>
+                  <h3 className="text-sm font-semibold text-gray-800">Lead Status Update</h3>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="pending"
-                      checked={selectedStatus === "pending"}
-                      onCheckedChange={() => handleStatusChange("pending")}
-                    />
-                    <Label htmlFor="pending" className="text-yellow-700 font-medium">Pending</Label>
+                
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 min-h-[44px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      selectedStatus === "qualified" 
+                        ? "bg-gradient-to-br from-green-100/90 to-green-200/70 text-green-800 border border-green-300/30 shadow-lg backdrop-blur-[6px] focus:ring-green-300" 
+                        : "bg-gradient-to-br from-white/90 to-green-50/70 text-green-700 border border-green-200/30 hover:shadow-md hover:from-green-50/90 hover:to-green-100/70 backdrop-blur-[6px] focus:ring-green-300"
+                    }`}
+                    onClick={() => handleStatusChange("qualified")}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    <span className="relative z-10 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Qualified
+                    </span>
+                  </button>
+                  
+                  <button
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 min-h-[44px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      selectedStatus === "unqualified" 
+                        ? "bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-lg backdrop-blur-[6px] focus:ring-red-300" 
+                        : "bg-gradient-to-br from-white/90 to-red-50/70 text-red-700 border border-red-200/30 hover:shadow-md hover:from-red-50/90 hover:to-red-100/70 backdrop-blur-[6px] focus:ring-red-300"
+                    }`}
+                    onClick={() => handleStatusChange("unqualified")}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    <span className="relative z-10 flex items-center gap-2">
+                      <X className="h-4 w-4" />
+                      Unqualified
+                    </span>
+                  </button>
+                  
+                  <button
+                    className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 min-h-[44px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      selectedStatus === "pending" 
+                        ? "bg-gradient-to-br from-amber-100/90 to-amber-200/70 text-amber-800 border border-amber-300/30 shadow-lg backdrop-blur-[6px] focus:ring-amber-300" 
+                        : "bg-gradient-to-br from-white/90 to-amber-50/70 text-amber-700 border border-amber-200/30 hover:shadow-md hover:from-amber-50/90 hover:to-amber-100/70 backdrop-blur-[6px] focus:ring-amber-300"
+                    }`}
+                    onClick={() => handleStatusChange("pending")}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Pending
+                    </span>
+                  </button>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+            </div>
           ) : (
             isClosedStatus ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>
+            <div className="relative overflow-hidden bg-gradient-to-br from-gray-50/90 to-gray-100/70 rounded-xl border border-gray-200/30 shadow-lg backdrop-blur-sm">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-gray-300/25"></div>
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+              <div className="absolute inset-0 backdrop-filter backdrop-blur-[4px]"></div>
+              
+              <div className="relative p-5">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-gray-100/80 rounded-lg backdrop-blur-sm">
+                    <Lock className="h-4 w-4 text-gray-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">
                   {currentStatus === "Won" ? "Lead is Closed as Won" : "Lead is Closed as Lost"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
+                  </h3>
+                </div>
+              </div>
+            </div>
             ) : (
-              <Card>
-              <CardHeader>
-                <CardTitle>Qualified Lead - Follow-up {nextFollowupNumber} of 5</CardTitle>
-                <span className="text-sm text-gray-500">Final: {lead.final_status || 'Pending'} · Status: {currentStatus || 'Qualified'}</span>
-              </CardHeader>
-              <CardContent>
+              <div className="relative overflow-hidden bg-gradient-to-br from-blue-50/90 to-indigo-50/70 rounded-xl border border-blue-200/30 shadow-lg backdrop-blur-sm">
+                <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                <div className="absolute inset-0 backdrop-filter backdrop-blur-[4px]"></div>
+                
+                <div className="relative p-5">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <div className="p-2 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                      <Clock className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-800">Qualified Lead - Follow-up {nextFollowupNumber} of 5</h3>
+                      <p className="text-xs text-gray-500">Final: {lead.final_status || 'Pending'} · Status: {currentStatus || 'Qualified'}</p>
+                    </div>
+                  </div>
+                  
                 {/* Stepper */}
                 <div className="flex items-center gap-3 mb-4">
                   {[1,2,3,4,5].map((step) => {
@@ -799,95 +1151,129 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     return (
                       <div key={step} className="flex items-center gap-2">
                         {completed ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-600" />
+                            <CheckCircle2 className="h-4 w-4 text-green-600" />
                         ) : current ? (
-                          <Circle className="h-5 w-5 text-blue-600" />
+                            <Circle className="h-4 w-4 text-blue-600" />
                         ) : (
-                          <Lock className="h-5 w-5 text-gray-400" />
+                            <Lock className="h-4 w-4 text-gray-400" />
                         )}
-                        <span className={`text-sm ${completed ? "text-green-700" : current ? "text-blue-700" : "text-gray-500"}`}>F{step}</span>
+                          <span className={`text-xs ${completed ? "text-green-700" : current ? "text-blue-700" : "text-gray-500"}`}>F{step}</span>
                       </div>
                     )
                   })}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <Label>Follow-up Date (Today)</Label>
-                    <Input type="date" value={today} readOnly />
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Follow-up Date (Today)</Label>
+                      <Input type="date" value={today} readOnly className="h-10 text-sm" />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Call Outcome</Label>
-                    <Select onValueChange={(value) => setFormData(prev => ({ ...prev, call_status: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select outcome" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Connected">Connected</SelectItem>
-                        <SelectItem value="Not Reachable">Not Reachable</SelectItem>
-                        <SelectItem value="Call Me Back">Call Me Back</SelectItem>
-                        <SelectItem value="Not Interested">Not Interested</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Call Outcome</Label>
+                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Call Outcome options">
+                        {["Connected", "Not Reachable", "Call Me Back", "Not Interested"].map((outcome) => (
+                          <button
+                            key={outcome}
+                            type="button"
+                            role="radio"
+                            aria-checked={formData.call_status === outcome}
+                            className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                              formData.call_status === outcome
+                                ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                                : "border-gray-200 bg-white hover:bg-gray-50"
+                            }`}
+                            onClick={() => setFormData(prev => ({ ...prev, call_status: outcome }))}
+                          >
+                            {outcome}
+                          </button>
+                        ))}
                   </div>
-                  <div className="space-y-2">
-                    <Label>Next Follow-up Date</Label>
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date</Label>
                     <Input
                       type="date"
                       value={formData.follow_up_date || today}
                       onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                        className="h-10 text-sm"
                     />
                   </div>
                 </div>
-                {/* Previous Calls removed from this section (shown under Customer Information) */}
 
-                {/* Sales Outcome - can close as Won/Lost anytime */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
-                  <div className="space-y-2">
-                    <Label>Sales Outcome</Label>
-                    <Select onValueChange={(value) => setFormData(prev => ({ ...prev, sales_outcome: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select outcome (Booked/Retailed/Lost/Pending)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Booked">Booked</SelectItem>
-                        <SelectItem value="Retailed">Retailed</SelectItem>
-                        <SelectItem value="Lost">Lost</SelectItem>
-                        <SelectItem value="Pending">Pending</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {/* Sales Outcome */}
+                  <div className="mt-4">
+                    <div>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Sales Outcome</Label>
+                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Sales Outcome options">
+                        {["Booked", "Retailed", "Lost", "Pending"].map((outcome) => (
+                          <button
+                            key={outcome}
+                            type="button"
+                            role="radio"
+                            aria-checked={formData.sales_outcome === outcome}
+                            className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                              formData.sales_outcome === outcome
+                                ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                                : "border-gray-200 bg-white hover:bg-gray-50"
+                            }`}
+                            onClick={() => setFormData(prev => ({ ...prev, sales_outcome: outcome }))}
+                          >
+                            {outcome}
+                          </button>
+                        ))}
                   </div>
                 </div>
+                  </div>
+                  
                 <div className="mt-4">
-                  <Label>Follow-up Remarks</Label>
-                  <Textarea
-                    placeholder="Add remarks for this follow-up"
-                    value={formData.general_remarks}
-                    onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
-                  />
+                  {/* History Button - Apple Magnus Blue Design */}
+                  <button
+                    type="button"
+                    className="relative overflow-hidden inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-h-[48px] w-full justify-center transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
+                    onClick={() => {
+                      // Add history functionality here
+                      console.log('History button clicked')
+                    }}
+                  >
+                    {/* Apple Magnus glassy effect layers */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                    
+                    <span className="relative z-10 flex items-center gap-2">
+                      <div className="p-1 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                        <Clock className="h-4 w-4 text-blue-600" />
+                      </div>
+                      History
+                      <ChevronDown className="h-4 w-4 text-blue-600" />
+                    </span>
+                  </button>
                 </div>
-              </CardContent>
-            </Card>
+                </div>
+              </div>
             )
           )}
 
           {/* Qualified Section (only when moving from Fresh/Pending to Qualified) */}
           {selectedStatus === "qualified" && lead.lead_status !== "Qualified" && (
-            <div className="space-y-6">
-              {/* Row 1: Model Interest & Variant */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Car className="h-5 w-5 text-green-600" />
-                      <span>Model Interested</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="model" className="text-sm font-medium mb-2 block">Model</Label>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Model Interest Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-green-100/80 rounded-lg backdrop-blur-sm">
+                    <Car className="h-4 w-4 text-green-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Model Interested</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-xs font-medium text-gray-600">Select Toyota Model</Label>
+                      <span className="text-xs text-blue-600 font-medium">Required</span>
+                    </div>
                       <Select onValueChange={(value) => setFormData(prev => ({ ...prev, model_interested: value }))}>
-                        <SelectTrigger>
+                      <SelectTrigger className="h-10 text-sm">
                           <SelectValue placeholder="Select Toyota Model" />
                         </SelectTrigger>
                         <SelectContent>
@@ -897,24 +1283,52 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         </SelectContent>
                       </Select>
                     </div>
-                  </CardContent>
-                </Card>
+                </div>
+              </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Car className="h-5 w-5 text-blue-600" />
-                      <span>Variant</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="variant" className="text-sm font-medium mb-2 block">Variant</Label>
+              {/* Variant Card */}
+              <div className={`relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4 transition-all duration-200 ${
+                !formData.model_interested ? "opacity-60" : ""
+              }`}>
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className={`p-2 rounded-lg backdrop-blur-sm ${
+                    !formData.model_interested 
+                      ? "bg-gray-100/80" 
+                      : "bg-blue-100/80"
+                  }`}>
+                    <Car className={`h-4 w-4 ${
+                      !formData.model_interested 
+                        ? "text-gray-400" 
+                        : "text-blue-600"
+                    }`} />
+                  </div>
+                  <h3 className={`text-sm font-semibold ${
+                    !formData.model_interested 
+                      ? "text-gray-500" 
+                      : "text-gray-800"
+                  }`}>Variant</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-xs font-medium text-gray-600">Select Variant</Label>
+                      {!formData.model_interested && (
+                        <span className="text-xs text-amber-600 italic font-medium">⚠️ Select model to unlock variants</span>
+                      )}
+                    </div>
+                    
+                    {isLoadingVariants ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                        <span className="ml-2 text-xs text-gray-600">Loading variants...</span>
+                      </div>
+                    ) : (
                       <Select 
                         onValueChange={(value) => setFormData(prev => ({ ...prev, variant: value }))}
                         disabled={!formData.model_interested}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="h-10 text-sm">
                           <SelectValue placeholder="Select Variant" />
                         </SelectTrigger>
                         <SelectContent>
@@ -923,326 +1337,475 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                           ))}
                         </SelectContent>
                       </Select>
+                    )}
                     </div>
-                  </CardContent>
-                </Card>
+                </div>
               </div>
 
-              {/* Row 2 removed as per requirement: Branch & Assign PS */}
-
-              {/* Row 3: Customer Details & Purchase Planning */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Users className="h-5 w-5 text-purple-600" />
-                      <span>Customer Details</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="profession" className="text-sm font-medium mb-2 block">Profession</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, profession: value }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Profession" />
-                        </SelectTrigger>
-                        <SelectContent>
+              {/* Customer Details Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-purple-100/80 rounded-lg backdrop-blur-sm">
+                    <Users className="h-4 w-4 text-purple-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Customer Details</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Profession</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Profession options">
                           {professions.map((profession) => (
-                            <SelectItem key={profession} value={profession}>{profession}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <button
+                          key={profession}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.profession === profession}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.profession === profession
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ ...prev, profession }))}
+                        >
+                          {profession}
+                        </button>
+                      ))}
                     </div>
-                  <div className="space-y-3">
-                    <Label htmlFor="customer_location" className="text-sm font-medium mb-2 block">Location</Label>
+                  </div>
+                  <div>
+                    <Label htmlFor="customer_location" className="text-xs font-medium text-gray-600">Location</Label>
                     <Input 
                       placeholder="Enter customer location"
                       value={formData.customer_location}
                       onChange={(e) => setFormData(prev => ({ ...prev, customer_location: e.target.value }))}
+                      className="h-10 text-sm mt-1"
                     />
                   </div>
-                  </CardContent>
-                </Card>
+                </div>
+              </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Clock className="h-5 w-5 text-orange-600" />
-                      <span>Purchase Planning</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="buying_plan" className="text-sm font-medium mb-2 block">Buying Plan</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, buying_plan: value }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Buying Plan" />
-                        </SelectTrigger>
-                        <SelectContent>
+              {/* Purchase Planning Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-orange-100/80 rounded-lg backdrop-blur-sm">
+                    <Clock className="h-4 w-4 text-orange-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Purchase Planning</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Buying Plan</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Buying Plan options">
                           {buyingPlan.map((plan) => (
-                            <SelectItem key={plan} value={plan}>{plan}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <button
+                          key={plan}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.buying_plan === plan}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.buying_plan === plan
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ ...prev, buying_plan: plan }))}
+                        >
+                          {plan}
+                        </button>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               </div>
 
-              {/* Row 4: Finance Options & Test Drive */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <DollarSign className="h-5 w-5 text-green-600" />
-                      <span>Finance Options</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="finance_option" className="text-sm font-medium mb-2 block">Finance Option</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, finance_option: value }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Finance Option" />
-                        </SelectTrigger>
-                        <SelectContent>
+              {/* Finance Options Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-emerald-100/80 rounded-lg backdrop-blur-sm">
+                    <DollarSign className="h-4 w-4 text-emerald-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Finance Options</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Finance Option</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Finance Option options">
                           {financeOptions.map((option) => (
-                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.finance_option === option}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.finance_option === option
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ ...prev, finance_option: option }))}
+                        >
+                          {option}
+                        </button>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Car className="h-5 w-5 text-blue-600" />
-                      <span>Test Drive</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="test_drive_type" className="text-sm font-medium mb-2 block">Test Drive Type</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ 
-                        ...prev, 
-                        test_drive_type: value,
-                        test_drive: value !== "No"
-                      }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Test Drive Type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="No">No</SelectItem>
-                          {testDriveOptions.map((option) => (
-                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               </div>
 
-
-              {/* Row 5: Trade In & Follow Up */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Car className="h-5 w-5 text-purple-600" />
-                      <span>Trade In</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="trade_in" className="text-sm font-medium mb-2 block">Trade In</Label>
-                      <Select onValueChange={(value) => {
-                        setFormData(prev => ({ ...prev, trade_in: value }))
-                        if (value === "Yes") setIsTradeInDialogOpen(true)
-                      }}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Trade In Option" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {tradeInOptions.map((option) => (
-                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+              {/* Test Drive Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-cyan-100/80 rounded-lg backdrop-blur-sm">
+                    <Car className="h-4 w-4 text-cyan-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Test Drive</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Test Drive Type</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Test Drive Type options">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={formData.test_drive_type === "No"}
+                        className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                          formData.test_drive_type === "No"
+                            ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                            : "border-gray-200 bg-white hover:bg-gray-50"
+                        }`}
+                        onClick={() => setFormData(prev => ({ 
+                        ...prev, 
+                          test_drive_type: "No",
+                          test_drive: false
+                        }))}
+                      >
+                        No
+                      </button>
+                          {testDriveOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.test_drive_type === option}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.test_drive_type === option
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ 
+                            ...prev, 
+                            test_drive_type: option,
+                            test_drive: true
+                          }))}
+                        >
+                          {option}
+                        </button>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
+              </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Calendar className="h-5 w-5 text-indigo-600" />
-                      <span>Follow Up</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="follow_up_date" className="text-sm font-medium mb-2 block">Follow Up Date</Label>
+              {/* Trade In Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-violet-100/80 rounded-lg backdrop-blur-sm">
+                    <Car className="h-4 w-4 text-violet-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Trade In</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Trade In</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Trade In options">
+                          {tradeInOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.trade_in === option}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.trade_in === option
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, trade_in: option }))
+                            if (option === "Yes") setIsTradeInDialogOpen(true)
+                          }}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Follow Up Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-indigo-100/80 rounded-lg backdrop-blur-sm">
+                    <Calendar className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Follow Up</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date</Label>
                       <Input 
                         type="date"
                         value={formData.follow_up_date}
                         onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                      className="h-10 text-sm"
                       />
                     </div>
-                  </CardContent>
-                </Card>
+                </div>
               </div>
 
-              {/* Row 6: Lead Category & First Call Remark */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <User className="h-5 w-5 text-orange-600" />
-                      <span>Lead Category</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="lead_category" className="text-sm font-medium mb-2 block">Lead Category</Label>
-                      <Select onValueChange={(value) => setFormData(prev => ({ ...prev, lead_category: value }))}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Category" />
-                        </SelectTrigger>
-                        <SelectContent>
+              {/* Lead Category Card */}
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-amber-100/80 rounded-lg backdrop-blur-sm">
+                    <User className="h-4 w-4 text-amber-600" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-800">Lead Category</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Lead Category</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Lead Category options">
                           {leadCategories.map((category) => (
-                            <SelectItem key={category} value={category}>{category}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <button
+                          key={category}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.lead_category === category}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.lead_category === category
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ ...prev, lead_category: category }))}
+                        >
+                          {category === 'Hot' && <Flame className="h-3 w-3" />}
+                          {category === 'Warm' && <Thermometer className="h-3 w-3" />}
+                          {category === 'Cold' && <Snowflake className="h-3 w-3" />}
+                          {category}
+                        </button>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Calendar className="h-5 w-5 text-gray-600" />
-                      <span>First Call Remark</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-3">
-                      <Label htmlFor="general_remarks" className="text-sm font-medium mb-2 block">First Call Remark</Label>
-                      <Textarea 
-                        placeholder="Add first call remark..."
-                        value={formData.general_remarks}
-                        onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
-                        className="min-h-[80px]"
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               </div>
 
-              {/* Trade In details moved to popup */}
+              {/* History Button Card - Apple Magnus Blue Design */}
+              <div className="relative overflow-hidden bg-gradient-to-br from-blue-50/90 to-indigo-50/70 rounded-xl border border-blue-200/30 shadow-lg backdrop-blur-sm">
+                {/* Apple Magnus glassy effect layers */}
+                <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                <div className="absolute inset-0 backdrop-filter backdrop-blur-[4px]"></div>
+                
+                <div className="relative p-5">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <div className="p-2 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                      <Clock className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <h3 className="text-sm font-semibold text-gray-800">History</h3>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <button
+                        type="button"
+                        className="relative overflow-hidden inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-h-[48px] w-full justify-center transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
+                        onClick={() => {
+                          // Add history functionality here
+                          console.log('History button clicked')
+                        }}
+                      >
+                        {/* Apple Magnus glassy effect layers */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                        <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                        
+                        <span className="relative z-10 flex items-center gap-2">
+                          <div className="p-1 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                            <Clock className="h-4 w-4 text-blue-600" />
+                          </div>
+                          View Call History
+                          <ChevronDown className="h-4 w-4 text-blue-600" />
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Unqualified Section */}
           {selectedStatus === "unqualified" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-red-700">Lead Lost Reason</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <Label htmlFor="lost_reason" className="text-sm font-medium mb-2 block">Reason for Loss</Label>
-                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, lost_reason: value }))}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select Lost Reason" />
-                    </SelectTrigger>
-                    <SelectContent>
+            <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+              <div className="flex items-center space-x-2 mb-4">
+                <div className="p-2 bg-red-100/80 rounded-lg backdrop-blur-sm">
+                  <X className="h-4 w-4 text-red-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-red-800">Lead Lost Reason</h3>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-xs font-medium text-gray-600 mb-2 block">Reason for Loss</Label>
+                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Lost Reason options">
                       {lostReasons.map((reason) => (
-                        <SelectItem key={reason} value={reason}>{reason}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-sm text-red-600 font-medium">
-                    ⚠️ Lead will be marked as lost and moved to won/lost leads section after update.
+                      <button
+                        key={reason}
+                        type="button"
+                        role="radio"
+                        aria-checked={formData.lost_reason === reason}
+                        className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                          formData.lost_reason === reason
+                            ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                            : "border-gray-200 bg-white hover:bg-gray-50"
+                        }`}
+                        onClick={() => setFormData(prev => ({ ...prev, lost_reason: reason }))}
+                      >
+                        {reason}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 p-3 bg-red-50/80 rounded-lg border border-red-200/40">
+                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                  <p className="text-xs text-red-700 font-medium">
+                    Lead will be marked as lost and moved to won/lost leads section after update.
                   </p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
           {/* Pending Section */}
           {selectedStatus === "pending" && (
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-yellow-700">Pending Reason</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <Label htmlFor="pending_reason" className="text-sm font-medium mb-2 block">Pending Status</Label>
-                    <Select onValueChange={(value) => setFormData(prev => ({ ...prev, pending_reason: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Pending Reason" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {pendingReasons.map((reason) => (
-                          <SelectItem key={reason} value={reason}>{reason}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <div className="space-y-4">
+              <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-amber-100/80 rounded-lg backdrop-blur-sm">
+                    <Clock className="h-4 w-4 text-amber-600" />
                   </div>
-                </CardContent>
-              </Card>
+                  <h3 className="text-sm font-semibold text-amber-800">Pending Reason</h3>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Pending Status</Label>
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Pending Reason options">
+                        {pendingReasons.map((reason) => (
+                        <button
+                          key={reason}
+                          type="button"
+                          role="radio"
+                          aria-checked={formData.pending_reason === reason}
+                          className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
+                            formData.pending_reason === reason
+                              ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                          onClick={() => setFormData(prev => ({ ...prev, pending_reason: reason }))}
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                  </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Follow Up Date - Show only when "Call me back" is selected */}
               {formData.pending_reason === "Call me back" && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-blue-700">Follow Up Details</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <Label htmlFor="follow_up_date" className="text-sm font-medium mb-2 block">Follow Up Date</Label>
+                <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <div className="p-2 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                      <Calendar className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <h3 className="text-sm font-semibold text-blue-800">Follow Up Details</h3>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date</Label>
                       <Input 
                         type="date"
                         value={formData.follow_up_date}
                         onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                        className="h-10 text-sm"
                       />
-                      <p className="text-sm text-gray-600">
+                      <p className="text-xs text-gray-600 mt-2">
                         Lead will be moved to fresh leads follow-up section after update.
                       </p>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               )}
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-6 border-t">
-            <Button variant="outline" onClick={onClose}>
-              Close
-            </Button>
-            {!(lead.lead_status === "Won" || lead.lead_status === "Lost") && (
-              <Button 
-                onClick={handleSubmit}
-                disabled={(lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date)}
-                className={
-                  selectedStatus === "unqualified" ? "bg-red-600 hover:bg-red-700" :
-                  selectedStatus === "pending" ? "bg-yellow-600 hover:bg-yellow-700" :
-                  "bg-blue-600 hover:bg-blue-700"
-                }
+          {/* Sticky Action Buttons */}
+          <div className="sticky bottom-0 bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-4 -mx-6 -mb-6">
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={onClose}
+                className="relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] bg-gradient-to-br from-gray-50/90 to-gray-100/70 text-gray-700 border border-gray-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                aria-label="Close modal"
               >
+                <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                <span className="relative z-10">Close</span>
+              </button>
+              
+            {!(lead.lead_status === "Won" || lead.lead_status === "Lost") && (
+                <button
+                onClick={handleSubmit}
+                  disabled={
+                    (lead.lead_status !== "Qualified" && !selectedStatus) || 
+                    (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) ||
+                    (selectedStatus === "qualified" && (!formData.model_interested || !formData.variant))
+                  }
+                  className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] backdrop-blur-[6px] ${
+                    selectedStatus === "unqualified" 
+                      ? "bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-md hover:shadow-lg" 
+                      : selectedStatus === "pending" 
+                      ? "bg-gradient-to-br from-amber-100/90 to-amber-200/70 text-amber-800 border border-amber-300/30 shadow-md hover:shadow-lg"
+                      : "bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-blue-800 border border-blue-300/30 shadow-md hover:shadow-lg"
+                  } ${(lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) ? "opacity-50 cursor-not-allowed" : ""}`}
+                  aria-label={
+                    lead.lead_status === "Qualified" ? "Save Follow-up" :
+                    selectedStatus === "qualified" ? "Qualify Lead" :
+                    selectedStatus === "unqualified" ? "Mark as Lost" :
+                    selectedStatus === "pending" ? "Mark as Pending" :
+                    "Update Lead"
+                  }
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
+                  <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                  <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                  <span className="relative z-10">
                 {lead.lead_status === "Qualified" ? "Save Follow-up" :
                  selectedStatus === "qualified" ? "Qualify Lead" :
                  selectedStatus === "unqualified" ? "Mark as Lost" :
                  selectedStatus === "pending" ? "Mark as Pending" :
                  "Update Lead"}
-              </Button>
+                  </span>
+                </button>
             )}
+            </div>
           </div>
         </div>
       </DialogContent>
@@ -1260,8 +1823,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="space-y-3">
               <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make</Label>
-              <Select 
-                value={formData.trade_in_make} 
+              <SearchableSelect
+                value={formData.trade_in_make}
                 onValueChange={(value) => {
                   setFormData(prev => ({ 
                     ...prev, 
@@ -1269,16 +1832,10 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     trade_in_model: "" // Reset model when make changes
                   }))
                 }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Vehicle Make" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.keys(CAR_DATA).map((make) => (
-                    <SelectItem key={make} value={make}>{make}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Select Vehicle Make"
+                options={Object.keys(CAR_DATA)}
+                searchPlaceholder="Search makes..."
+              />
             </div>
             <div className="space-y-3">
               <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model</Label>

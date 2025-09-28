@@ -1,0 +1,144 @@
+/* Custom Pastel Color Palette for CRM Dashboard */
+
+/* Primary Colors */
+:root {
+  --primary-blue: #3B82F6;
+  --primary-teal: #14B8A6;
+  --primary-purple: #8B5CF6;
+  --primary-green: #10B981;
+  --primary-amber: #F59E0B;
+  --primary-red: #EF4444;
+}
+
+/* Pastel Tints for Row Backgrounds */
+:root {
+  --mint-50: #F0FDF4;
+  --mint-100: #DCFCE7;
+  --mint-200: #BBF7D0;
+  
+  --cream-50: #FFFBEB;
+  --cream-100: #FEF3C7;
+  --cream-200: #FDE68A;
+  
+  --blush-50: #FDF2F8;
+  --blush-100: #FCE7F3;
+  --blush-200: #FBCFE8;
+  
+  --sky-50: #F0F9FF;
+  --sky-100: #E0F2FE;
+  --sky-200: #BAE6FD;
+  
+  --lavender-50: #FAF5FF;
+  --lavender-100: #F3E8FF;
+  --lavender-200: #E9D5FF;
+  
+  --sage-50: #F0FDF4;
+  --sage-100: #DCFCE7;
+  --sage-200: #BBF7D0;
+}
+
+/* Tailwind Custom Colors */
+@layer utilities {
+  .bg-mint-50 { background-color: var(--mint-50); }
+  .bg-mint-100 { background-color: var(--mint-100); }
+  .bg-mint-200 { background-color: var(--mint-200); }
+  
+  .bg-cream-50 { background-color: var(--cream-50); }
+  .bg-cream-100 { background-color: var(--cream-100); }
+  .bg-cream-200 { background-color: var(--cream-200); }
+  
+  .bg-blush-50 { background-color: var(--blush-50); }
+  .bg-blush-100 { background-color: var(--blush-100); }
+  .bg-blush-200 { background-color: var(--blush-200); }
+  
+  .bg-sky-50 { background-color: var(--sky-50); }
+  .bg-sky-100 { background-color: var(--sky-100); }
+  .bg-sky-200 { background-color: var(--sky-200); }
+  
+  .bg-lavender-50 { background-color: var(--lavender-50); }
+  .bg-lavender-100 { background-color: var(--lavender-100); }
+  .bg-lavender-200 { background-color: var(--lavender-200); }
+  
+  .bg-sage-50 { background-color: var(--sage-50); }
+  .bg-sage-100 { background-color: var(--sage-100); }
+  .bg-sage-200 { background-color: var(--sage-200); }
+}
+
+/* Semantic Badge Colors */
+@layer components {
+  .badge-warm {
+    @apply bg-amber-100 text-amber-800 border-amber-200;
+  }
+  
+  .badge-interested {
+    @apply bg-teal-100 text-teal-800 border-teal-200;
+  }
+  
+  .badge-unassigned {
+    @apply bg-gray-100 text-gray-600 border-gray-200;
+  }
+  
+  .badge-hot {
+    @apply bg-red-100 text-red-800 border-red-200;
+  }
+  
+  .badge-cold {
+    @apply bg-blue-100 text-blue-800 border-blue-200;
+  }
+}
+
+/* Responsive Typography */
+@layer utilities {
+  .text-responsive-sm {
+    @apply text-sm md:text-base;
+  }
+  
+  .text-responsive-base {
+    @apply text-base md:text-lg;
+  }
+  
+  .text-responsive-lg {
+    @apply text-lg md:text-xl;
+  }
+  
+  .text-responsive-xl {
+    @apply text-xl md:text-2xl;
+  }
+}
+
+/* Focus States for Accessibility */
+@layer utilities {
+  .focus-visible-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+  
+  .focus-visible-ring-inset {
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset;
+  }
+}
+
+/* Mobile-First Card Layout */
+@layer components {
+  .mobile-card {
+    @apply rounded-xl p-4 mb-3 border border-gray-200/50 shadow-sm hover:shadow-md transition-all duration-200;
+  }
+  
+  .mobile-card-expanded {
+    @apply pt-3 border-t border-gray-200/50 space-y-3;
+  }
+}
+
+/* Table Enhancements */
+@layer components {
+  .table-header-elevated {
+    @apply bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-gray-200;
+  }
+  
+  .table-row-hover {
+    @apply hover:bg-gray-100/50 transition-all duration-200;
+  }
+  
+  .table-cell-padding {
+    @apply p-4;
+  }
+}
