@@ -51,6 +51,7 @@
     "embla-carousel-react": "8.5.1",
     "focus-trap-react": "^11.0.4",
     "geist": "latest",
+    "i": "^0.3.7",
     "input-otp": "1.4.1",
     "jose": "latest",
     "jsonwebtoken": "latest",
