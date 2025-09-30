@@ -3,25 +3,32 @@ name: Meta Leads Sync
 on:
   schedule:
     - cron: '0 */2 * * *'  # Every 2 hours
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      
-      - uses: actions/setup-python@v4
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      
+
+      # Step 3: Install dependencies
       - name: Install dependencies
         run: pip install supabase aiohttp pytz python-dotenv
-      
+
+      # Step 4: Run the script with environment variables
       - name: Run Meta Leads Sync
         env:
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
-          META_PAGE_ID: ${{ vars.META_PAGE_ID }}
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
         run: python meta_leads_sync.py
