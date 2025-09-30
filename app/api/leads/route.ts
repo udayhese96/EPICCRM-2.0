@@ -27,7 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    const nextResponse = NextResponse.json(data)
+    nextResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    nextResponse.headers.set('Pragma', 'no-cache')
+    nextResponse.headers.set('Expires', '0')
+    return nextResponse
   } catch (error) {
     console.error('Error fetching leads:', error)
     return NextResponse.json(

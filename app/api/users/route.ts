@@ -33,7 +33,11 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json()
     const users = Array.isArray(data) ? data : (data?.users ?? [])
-    return NextResponse.json({ users }, { status: 200 })
+    const nextResponse = NextResponse.json({ users }, { status: 200 })
+    nextResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    nextResponse.headers.set('Pragma', 'no-cache')
+    nextResponse.headers.set('Expires', '0')
+    return nextResponse
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }

@@ -11,6 +11,7 @@ export async function PUT(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const lead_uid = searchParams.get('lead_uid')
     const approval_type = searchParams.get('approval_type')
+    const cacheBuster = searchParams.get('_t') || `${Date.now()}`
     
     if (!lead_uid || !approval_type) {
       return NextResponse.json(
@@ -21,11 +22,12 @@ export async function PUT(request: NextRequest) {
 
     const bearer = request.headers.get('Authorization') || (request.cookies.get('access_token') ? `Bearer ${request.cookies.get('access_token')!.value}` : '')
     
-    const response = await fetch(`${FASTAPI_URL}/api/qualified-leads/approve?lead_uid=${lead_uid}&approval_type=${approval_type}`, {
+    const response = await fetch(`${FASTAPI_URL}/api/qualified-leads/approve?lead_uid=${lead_uid}&approval_type=${approval_type}&_t=${cacheBuster}`, {
       method: 'PUT',
       headers: {
         'Authorization': bearer,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     })
 
@@ -38,7 +40,11 @@ export async function PUT(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    const res = NextResponse.json(data)
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.headers.set('Pragma', 'no-cache')
+    res.headers.set('Expires', '0')
+    return res
   } catch (error) {
     console.error('Error approving request:', error)
     return NextResponse.json(

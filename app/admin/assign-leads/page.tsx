@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowRightLeft, Users, Phone, Mail, Calendar, X, Plus } from "lucide-react"
+import { ArrowRightLeft, Users, Phone, Mail, Calendar, X, Plus, RefreshCw } from "lucide-react"
 import { DndContext, DragEndEvent, useDroppable, useDraggable } from "@dnd-kit/core"
 import { SortableContext, useSortable, arrayMove } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
@@ -50,6 +50,8 @@ export default function AssignLeadsPage() {
   const [assignments, setAssignments] = useState<AssignmentData>({})
   const [loading, setLoading] = useState(true)
   const [isAssigning, setIsAssigning] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [showAddLeadModal, setShowAddLeadModal] = useState(false)
   const [addLeadForm, setAddLeadForm] = useState({
     customer_name: "",
@@ -65,12 +67,143 @@ export default function AssignLeadsPage() {
     fetchUnassignedLeads()
   }, [])
 
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isRefreshing && !loading && !isAssigning) {
+        console.log('[assign-leads] Auto-refreshing data...')
+        fetchUnassignedLeads()
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [isRefreshing, loading, isAssigning])
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      await fetchUnassignedLeads()
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const getToken = () => {
+    if (typeof window === 'undefined') return ''
+    
+    // Try multiple possible keys for user data
+    const possibleKeys = ['user', 'supabase_user', 'current_user']
+    let session = null
+    
+    for (const key of possibleKeys) {
+      const data = localStorage.getItem(key)
+      if (data) {
+        try {
+          session = JSON.parse(data)
+          if (session?.access_token) {
+            console.log('[assign-leads] Found token in localStorage key:', key)
+            break
+          }
+        } catch (e) {
+          console.error('[assign-leads] Error parsing localStorage key:', key, e)
+        }
+      }
+    }
+    
+    const token = session?.access_token || ''
+    console.log('[assign-leads] Token retrieved:', token ? 'Token exists' : 'No token')
+    return token
+  }
+
+  const fetchAvailableCREs = async (): Promise<any[]> => {
+    console.log('[assign-leads] Fetching available CREs...')
+    const token = getToken()
+    
+    try {
+      const headers: any = { 
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+      
+      // Add cache-busting timestamp
+      const timestamp = Date.now()
+      const res = await fetch(`/api/cre-users?_t=${timestamp}`, { headers })
+      console.log('[assign-leads] /api/cre-users response:', res.status, res.ok)
+      if (res.ok) {
+        const list = await res.json()
+        console.log('[assign-leads] /api/cre-users data:', list)
+        // CRE users from /api/cre-users already have role='cre' and are active, so no need to filter
+        const result = (Array.isArray(list) ? list : []).map((u: any) => ({ 
+          id: u.id, 
+          name: u.name || u.full_name || u.username, 
+          username: u.username, 
+          role: 'cre', 
+          is_active: u.is_active ?? true 
+        }))
+        console.log('[assign-leads] Mapped CREs from /api/cre-users:', result)
+        if (result.length > 0) return result
+      } else {
+        const errorText = await res.text()
+        console.error('[assign-leads] /api/cre-users error:', res.status, errorText)
+      }
+    } catch (e) {
+      console.error('[assign-leads] Error fetching from /api/cre-users:', e)
+    }
+    // Fallback: unified users table with role filter
+    try {
+      console.log('[assign-leads] Trying fallback /api/users?role=cre...')
+      const headers: any = { 
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+      
+      // Add cache-busting timestamp
+      const timestamp = Date.now()
+      const res2 = await fetch(`/api/users?role=cre&_t=${timestamp}`, { headers })
+      console.log('[assign-leads] /api/users?role=cre response:', res2.status, res2.ok)
+      if (res2.ok) {
+        const list2 = await res2.json()
+        console.log('[assign-leads] /api/users?role=cre data:', list2)
+        // Handle the response structure from /api/users which returns { users: [...] }
+        const users = list2.users || list2
+        const result = (Array.isArray(users) ? users : [])
+          .filter((u: any) => (u.role || '').toLowerCase() === 'cre' && (u.is_active ?? true))
+          .map((u: any) => ({ id: u.id, name: u.full_name || u.name || u.username, username: u.username, role: u.role, is_active: u.is_active }))
+        console.log('[assign-leads] Final CREs result:', result)
+        return result
+      } else {
+        const errorText = await res2.text()
+        console.error('[assign-leads] /api/users?role=cre error:', res2.status, errorText)
+      }
+    } catch (e) {
+      console.error('[assign-leads] Error fetching from /api/users?role=cre:', e)
+    }
+    
+    // Final fallback: return empty array
+    console.log('[assign-leads] All API calls failed, returning empty CRE list')
+    return []
+  }
+
   const fetchUnassignedLeads = async () => {
     try {
-      const response = await fetch('/api/leads/unassigned', {
+      console.log('[assign-leads] Starting fresh data fetch...')
+      // Load CREs first so UI can show them even if unassigned API fails
+      const creList = await fetchAvailableCREs()
+      const timestamp = Date.now()
+      const response = await fetch(`/api/leads/unassigned?_t=${timestamp}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Cache-Control': 'no-store'
+          'Authorization': `Bearer ${getToken()}`,
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       })
       if (response.ok) {
@@ -81,12 +214,19 @@ export default function AssignLeadsPage() {
         const results = await Promise.all(
           sourceList.map(async (src) => {
             try {
-              const r = await fetch(`/api/leads/unassigned/${encodeURIComponent(src)}`, {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Cache-Control': 'no-store' }
+              const r = await fetch(`/api/leads/unassigned/${encodeURIComponent(src)}?_t=${timestamp}&_cb=${Date.now()}`, {
+                headers: { 
+                  'Authorization': `Bearer ${getToken()}`, 
+                  'Cache-Control': 'no-store, no-cache, must-revalidate',
+                  'Pragma': 'no-cache',
+                  'Expires': '0'
+                }
               })
+              console.log(`[assign-leads] ${src} API response status:`, r.status)
               if (!r.ok) return [src, 0] as const
               const list: any[] = await r.json()
               console.log(`[assign-leads] list for ${src}:`, list.length, list)
+              console.log(`[assign-leads] ${src} leads:`, list.map(l => `${l.uid}(${l.assigned})`))
               return [src, list.length] as const
             } catch {
               return [src, 0] as const
@@ -102,14 +242,53 @@ export default function AssignLeadsPage() {
         console.log('[assign-leads] recomputed by_source:', by_source, 'total:', total_unassigned)
         setUnassignedData({
           ...data,
+          available_cres: creList,
           by_source,
           total_unassigned,
         })
+      } else {
+        let err: any = {}
+        try { err = await response.json() } catch { err = { error: await response.text() } }
+        console.error('[assign-leads] Failed to load unassigned leads:', err)
+        alert(`Failed to load unassigned leads: ${err?.detail || err?.error || response.status}`)
+        // Fallback: probe known sources individually to build counts
+        const candidateSources = [
+          'BTL','META','GOOGLE','Car Dekho','Car Wale','Telein','Landing Page'
+        ]
+        const probe = await Promise.all(candidateSources.map(async (src) => {
+          try {
+            const r = await fetch(`/api/leads/unassigned/${encodeURIComponent(src)}?_t=${Date.now()}`, {
+              headers: { 
+                'Authorization': `Bearer ${getToken()}`, 
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+              }
+            })
+            if (!r.ok) return [src, 0] as const
+            const list: any[] = await r.json()
+            return [src, list.length] as const
+          } catch {
+            return [src, 0] as const
+          }
+        }))
+        const by_source: Record<string, number> = {}
+        let total_unassigned = 0
+        for (const [src, cnt] of probe) {
+          if (cnt > 0) by_source[src] = cnt
+          total_unassigned += cnt
+        }
+        console.log('[assign-leads] Setting unassigned data with CREs:', creList)
+        setUnassignedData({ by_source, total_unassigned, available_cres: creList })
       }
     } catch (error) {
       console.error('Error fetching unassigned leads:', error)
+      const creList = await fetchAvailableCREs()
+      console.log('[assign-leads] Error fallback - Setting unassigned data with CREs:', creList)
+      setUnassignedData({ by_source: {}, total_unassigned: 0, available_cres: creList })
     } finally {
       setLoading(false)
+      setLastRefresh(new Date())
     }
   }
 
@@ -143,12 +322,20 @@ export default function AssignLeadsPage() {
   const handleAssignLeads = async () => {
     setIsAssigning(true)
     try {
+      // Track total assigned count for each source
+      const sourceAssignments: { [source: string]: number } = {}
+      
       // Resolve per-source counts to concrete lead IDs and assign per CRE
       for (const [source, creBatches] of Object.entries(bucketAssignments)) {
         if (!creBatches || creBatches.length === 0) continue
+        
+        // Calculate total assigned for this source
+        const totalAssignedForSource = creBatches.reduce((sum, batch) => sum + batch.count, 0)
+        sourceAssignments[source] = totalAssignedForSource
+        
         // Fetch fresh unassigned leads for this source
         const listResp = await fetch(`/api/leads/unassigned/${encodeURIComponent(source)}`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Cache-Control': 'no-store' }
+          headers: { 'Authorization': `Bearer ${getToken()}`, 'Cache-Control': 'no-store' }
         })
         if (!listResp.ok) throw new Error(`Failed to load leads for ${source}`)
         const leads: Lead[] = await listResp.json()
@@ -159,27 +346,78 @@ export default function AssignLeadsPage() {
           const slice = leads.slice(cursor, cursor + batch.count)
           cursor += batch.count
           if (slice.length === 0) continue
-          const response = await fetch('/api/leads/assign', {
+          const assignmentData = {
+            lead_ids: slice.map(l => l.uid),
+            cre_id: batch.creId,
+            cre_name: batch.creName
+          }
+          console.log('[assign-leads] Assignment data:', assignmentData)
+          
+          const response = await fetch(`/api/leads/assign?_t=${Date.now()}`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`,
-              'Content-Type': 'application/json'
+              'Authorization': `Bearer ${getToken()}`,
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store, no-cache, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
             },
-            body: JSON.stringify({
-              lead_ids: slice.map(l => l.uid),
-              cre_id: batch.creId,
-              cre_name: batch.creName
-            })
+            body: JSON.stringify(assignmentData)
           })
+          
+          console.log('[assign-leads] Assignment response status:', response.status)
+          const responseText = await response.text()
+          console.log('[assign-leads] Assignment response:', responseText)
           if (!response.ok) throw new Error(`Failed to assign to ${batch.creName}`)
         }
       }
 
-      // Reset selections and refresh data
+      // Update local state immediately to reflect the assignments
+      setUnassignedData((prev: any) => {
+        if (!prev) return prev
+        
+        const updatedBySource = { ...prev.by_source }
+        let newTotalUnassigned = prev.total_unassigned
+        
+        // Update counts for each source that had assignments
+        for (const [source, assignedCount] of Object.entries(sourceAssignments)) {
+          const currentCount = updatedBySource[source] || 0
+          const newCount = Math.max(0, currentCount - assignedCount)
+          
+          if (newCount === 0) {
+            delete updatedBySource[source]
+          } else {
+            updatedBySource[source] = newCount
+          }
+          
+          newTotalUnassigned -= assignedCount
+        }
+        
+        return {
+          ...prev,
+          by_source: updatedBySource,
+          total_unassigned: Math.max(0, newTotalUnassigned)
+        }
+      })
+
+      // Reset selections and assignments
       setSelectedLeads({})
       setAssignments({})
       setBucketAssignments({})
-      await fetchUnassignedLeads()
+      
+      // Update last refresh time
+      setLastRefresh(new Date())
+      
+      // Add a small delay to ensure database consistency, then refresh from server
+      setTimeout(async () => {
+        console.log('[assign-leads] Refreshing data after assignment to ensure consistency...')
+        try {
+          await fetchUnassignedLeads()
+          console.log('[assign-leads] Data refreshed successfully after assignment')
+        } catch (error) {
+          console.error('[assign-leads] Error refreshing data after assignment:', error)
+        }
+      }, 1500) // 1.5 second delay to ensure database consistency
       
       alert('Leads assigned successfully!')
     } catch (error) {
@@ -217,7 +455,7 @@ export default function AssignLeadsPage() {
       const response = await fetch('/api/admin/leads', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${getToken()}`,
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
         },
@@ -225,6 +463,24 @@ export default function AssignLeadsPage() {
       })
 
       if (response.ok) {
+        // If the lead was assigned to a CRE, it won't affect unassigned counts
+        // If it wasn't assigned, we need to increment the unassigned count for that source
+        if (!addLeadForm.assigned_cre_id && addLeadForm.source) {
+          setUnassignedData((prev: any) => {
+            if (!prev) return prev
+            
+            const updatedBySource = { ...prev.by_source }
+            const currentCount = updatedBySource[addLeadForm.source] || 0
+            updatedBySource[addLeadForm.source] = currentCount + 1
+            
+            return {
+              ...prev,
+              by_source: updatedBySource,
+              total_unassigned: prev.total_unassigned + 1
+            }
+          })
+        }
+        
         setAddLeadForm({
           customer_name: "",
           customer_mobile_number: "",
@@ -234,7 +490,7 @@ export default function AssignLeadsPage() {
           assigned_cre_name: ""
         })
         setShowAddLeadModal(false)
-        await fetchUnassignedLeads() // Refresh data
+        setLastRefresh(new Date())
         alert('Lead added successfully!')
       } else {
         alert('Error adding lead. Please try again.')
@@ -341,8 +597,22 @@ export default function AssignLeadsPage() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">🚀 Smart Dynamic Lead Assignment</h1>
             <p className="text-gray-600 mt-1">Assign unassigned leads to available CREs efficiently</p>
+            {lastRefresh && (
+              <p className="text-sm text-gray-500 mt-1">
+                Last updated: {lastRefresh.toLocaleTimeString()} • Auto-refresh every 30s
+              </p>
+            )}
           </div>
           <div className="flex space-x-3">
+            <Button 
+              onClick={handleManualRefresh} 
+              disabled={isRefreshing || loading}
+              variant="outline"
+              className="flex items-center space-x-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+            </Button>
             <Dialog open={showAddLeadModal} onOpenChange={setShowAddLeadModal}>
               <DialogTrigger asChild>
                 <Button className="bg-green-600 hover:bg-green-700">
@@ -395,11 +665,27 @@ export default function AssignLeadsPage() {
                         <SelectValue placeholder="Select Source" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="BTL">BTL</SelectItem>
-                        <SelectItem value="META">META</SelectItem>
-                        <SelectItem value="GOOGLE">GOOGLE</SelectItem>
-                        <SelectItem value="WEBSITE">WEBSITE</SelectItem>
-                        <SelectItem value="REFERRAL">REFERRAL</SelectItem>
+                        <SelectItem value="Bulkwatsup(Telein)">Bulkwatsup(Telein)</SelectItem>
+                        <SelectItem value="Bulkwatsup(Watco)">Bulkwatsup(Watco)</SelectItem>
+                        <SelectItem value="Car Dekho">Car Dekho</SelectItem>
+                        <SelectItem value="Car Wale">Car Wale</SelectItem>
+                        <SelectItem value="CD B">CD B</SelectItem>
+                        <SelectItem value="CD G">CD G</SelectItem>
+                        <SelectItem value="CWA">CWA</SelectItem>
+                        <SelectItem value="CWB">CWB</SelectItem>
+                        <SelectItem value="CWC">CWC</SelectItem>
+                        <SelectItem value="CWG">CWG</SelectItem>
+                        <SelectItem value="CWH">CWH</SelectItem>
+                        <SelectItem value="CWK">CWK</SelectItem>
+                        <SelectItem value="Dealer CMS">Dealer CMS</SelectItem>
+                        <SelectItem value="Email">Email</SelectItem>
+                        <SelectItem value="GMB (Telein)">GMB (Telein)</SelectItem>
+                        <SelectItem value="Google Telein">Google Telein</SelectItem>
+                        <SelectItem value="Landing Page">Landing Page</SelectItem>
+                        <SelectItem value="Meta">Meta</SelectItem>
+                        <SelectItem value="Tele Out">Tele Out</SelectItem>
+                        <SelectItem value="Telein">Telein</SelectItem>
+                        <SelectItem value="TKM">TKM</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -506,9 +792,18 @@ export default function AssignLeadsPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {unassignedData?.available_cres?.map((cre: CREUser) => (
-                <DraggableCRE key={cre.id} id={`cre-${cre.id}`} name={cre.name} subtitle={cre.username} data={{ cre }} />
-              ))}
+              {console.log('[assign-leads] Rendering CREs:', unassignedData?.available_cres, 'Length:', unassignedData?.available_cres?.length)}
+              {unassignedData?.available_cres && unassignedData.available_cres.length > 0 ? (
+                unassignedData.available_cres.map((cre: CREUser) => (
+                  <DraggableCRE key={cre.id} id={`cre-${cre.id}`} name={cre.name} subtitle={cre.username} data={{ cre }} />
+                ))
+              ) : (
+                <div className="col-span-full text-center text-gray-500 py-8">
+                  <Users className="h-8 w-8 mx-auto mb-2" />
+                  <p>No CREs available</p>
+                  <p className="text-sm">Check console for debugging info</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -673,9 +968,12 @@ function SourceLeadCard({
     
     setLoadingLeads(true)
     try {
+      const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
       const response = await fetch(`/api/leads/unassigned/${encodeURIComponent(source)}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Cache-Control': 'no-store'
         }
       })

@@ -31,7 +31,10 @@ import {
   Briefcase,
   FileText,
   ChevronRight,
-  Edit3
+  Edit3,
+  Settings,
+  DollarSign,
+  MapPin
 } from "lucide-react"
 
 interface PSFollowUp {
@@ -119,6 +122,7 @@ export default function PSDashboard() {
   const [notifications, setNotifications] = useState<Array<{id: string, type: 'approved'|'rejected', leadUid: string, requestType: 'booking'|'retailed', timestamp: Date}>>([])
   const [bookingId, setBookingId] = useState('')
   const [retailedId, setRetailedId] = useState('')
+  const [showMobileRefreshButton, setShowMobileRefreshButton] = useState(true)
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('today')
@@ -160,14 +164,36 @@ export default function PSDashboard() {
   useEffect(() => {
     loadFollowUps()
     loadQualifiedLeads()
-    
+
     // Set up real-time refresh every 30 seconds to catch ICROP ID updates
     const interval = setInterval(() => {
       loadFollowUps()
       loadQualifiedLeads()
     }, 30000) // 30 seconds
-    
+
     return () => clearInterval(interval)
+  }, [])
+
+  // Effect to handle hiding mobile refresh button after KPI cards section
+  useEffect(() => {
+    const handleScroll = () => {
+      // Only apply this logic on mobile screens
+      if (window.innerWidth >= 768) return
+
+      // Get the KPI cards section
+      const kpiSection = document.querySelector('.stats-grid')
+      if (kpiSection) {
+        const kpiSectionBottom = kpiSection.getBoundingClientRect().bottom
+        // Hide refresh button if KPI section has passed the top of the viewport
+        setShowMobileRefreshButton(kpiSectionBottom > 0)
+      }
+    }
+
+    // Add scroll listener only on mobile
+    if (window.innerWidth < 768) {
+      window.addEventListener('scroll', handleScroll)
+      return () => window.removeEventListener('scroll', handleScroll)
+    }
   }, [])
 
   const loadFollowUps = async () => {
@@ -820,16 +846,25 @@ export default function PSDashboard() {
   })()
 
   const StatCard = ({ title, value, description, icon: Icon, color, bgColor }: any) => (
-    <div className={`${bgColor} rounded-2xl p-6 border-l-4 ${color} transition-all hover:shadow-lg hover:scale-105 duration-300`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <div className={`text-3xl font-bold ${color.replace('border-l-', 'text-')} mb-2`}>
+    <div className={`${bgColor} rounded-lg pt-2 px-2 md:px-3 border-l-4 ${color} transition-all hover:shadow-lg hover:scale-105 duration-300 h-28 md:h-32`}>
+      <div className="flex flex-col h-full items-center justify-between">
+        {/* Title at top center - shifted upward */}
+        <div className="flex items-center justify-center mb-0.5 md:mb-1">
+          <Icon className={`h-3 w-3 md:h-4 md:w-4 ${color.replace('border-l-', 'text-')} mr-1`} />
+          <div className="text-gray-800 font-semibold text-xs md:text-sm text-center">{title}</div>
+        </div>
+
+        {/* Main count in center - vertically centered */}
+        <div className="flex items-center justify-center">
+          <div className={`text-xl md:text-2xl font-extrabold ${color.replace('border-l-', 'text-')} text-center`}>
             {value}
           </div>
-          <div className="text-gray-800 font-semibold text-lg mb-1">{title}</div>
-          <div className="text-gray-600 text-sm">{description}</div>
         </div>
-        <Icon className={`w-12 h-12 ${color.replace('border-l-', 'text-')} opacity-20`} />
+
+        {/* Description at bottom - anchored at bottom */}
+        <div className="flex items-center justify-center mb-1">
+          <div className="text-gray-600 text-xs md:text-xs text-center leading-tight">{description}</div>
+        </div>
       </div>
     </div>
   )
@@ -837,16 +872,26 @@ export default function PSDashboard() {
   const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => (
     <button
       onClick={() => onClick(id)}
-      className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
+      className={`relative flex flex-col items-center justify-center gap-1 px-2 py-2 md:px-3 md:py-3 rounded-xl font-medium transition-all duration-300 whitespace-nowrap min-w-0 flex-1 ${
         isActive
-          ? 'bg-white text-blue-600 shadow-md'
-          : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+          ? 'bg-white/80 backdrop-blur-md text-blue-700 shadow-lg border border-white/20'
+          : 'text-gray-600 hover:text-gray-800 hover:bg-white/40 hover:backdrop-blur-sm'
       }`}
+      style={isActive ? {
+        boxShadow: '0 8px 32px rgba(59, 130, 246, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1)',
+        background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%)'
+      } : {}}
     >
-      <Icon className="w-4 h-4" />
-      <span>{label}</span>
-      <span className={`px-2 py-1 rounded-full text-xs ${
-        isActive ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'
+      <Icon className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
+      <span className="text-xs md:text-sm font-semibold leading-tight text-center break-words max-w-full">
+        {label.split(' ').map((word: string, index: number) => (
+          <span key={index} className="block">
+            {word}
+          </span>
+        ))}
+      </span>
+      <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
+        isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
       }`}>
         {count}
       </span>
@@ -887,26 +932,42 @@ export default function PSDashboard() {
         </div>
       )}
       
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-1 md:p-2">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
-              <div>
-              <h1 className="text-4xl font-bold text-gray-800 mb-2">GEM Dashboard</h1>
-              <p className="text-gray-600 text-lg">Manage your assigned leads and follow-ups</p>
-              </div>
-          <Button 
-            onClick={loadFollowUps} 
-            disabled={isLoading}
-              className="mt-4 md:mt-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105 flex items-center gap-2"
-          >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              {isLoading ? 'Loading...' : 'Refresh Data'}
+          <div className="relative mb-2 md:mb-4">
+            {/* Mobile refresh button - positioned absolutely in top right, same line as hamburger */}
+            {showMobileRefreshButton && (
+              <Button
+                onClick={loadFollowUps}
+                disabled={isLoading}
+                className="md:hidden fixed top-2 right-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-2 rounded-lg font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105 flex items-center justify-center z-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </Button>
-        </div>
+            )}
+
+            {/* Header content with proper spacing */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between">
+              <div className="pl-12 pr-12 md:pl-0 md:pr-0 text-center md:text-left">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-1 md:mb-2">GEM Dashboard</h1>
+                <p className="text-gray-600 text-sm md:text-base">Manage your assigned leads and follow-ups</p>
+              </div>
+
+              {/* Desktop refresh button */}
+              <Button
+                onClick={loadFollowUps}
+                disabled={isLoading}
+                className="hidden md:flex bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-xl font-medium hover:shadow-lg transition-all duration-300 hover:scale-105 items-center gap-2 text-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                {isLoading ? 'Loading...' : 'Refresh Data'}
+              </Button>
+            </div>
+          </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="stats-grid grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 mb-3 md:mb-4 px-1 md:px-0">
             <StatCard
               title="Total Assigned"
               value={stats.totalAssigned}
@@ -942,8 +1003,9 @@ export default function PSDashboard() {
                 </div>
 
           {/* Tabs */}
-          <div className="bg-gray-100 p-2 rounded-xl mb-6 overflow-x-auto">
-            <div className="flex gap-2">
+          <div className="relative bg-gradient-to-r from-blue-50/80 via-purple-50/80 to-pink-50/80 backdrop-blur-sm p-2 md:p-2 rounded-2xl mb-3 md:mb-4 mx-1 md:mx-0 border border-white/30 shadow-lg overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-100/20 via-purple-100/20 to-pink-100/20 backdrop-blur-lg"></div>
+            <div className="relative grid grid-cols-3 md:grid-cols-6 gap-1 md:gap-2">
               <TabButton
                 id="fresh"
                 label="Fresh Leads"
@@ -996,75 +1058,89 @@ export default function PSDashboard() {
           </div>
 
           {/* Leads Table */}
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Star className="w-5 h-5" />
-                {activeTab === 'fresh' && 'Fresh Leads'}
-                {activeTab === 'today' && 'Today\'s Follow-ups'}
-                {activeTab === 'pending' && 'Pending Leads'}
-                {activeTab === 'booked' && 'Booked Approval'}
-                {activeTab === 'retailed' && 'Retailed Approval'}
-                {activeTab === 'wonlost' && 'Won/Lost Leads'}
-              </h2>
-              <p className="text-gray-300 text-sm mt-1">
-                {activeTab === 'fresh' && 'Leads newly assigned to you'}
-                {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
-                {activeTab === 'pending' && 'Leads with final status Pending'}
-                {activeTab === 'booked' && 'Booked leads approval status'}
-                {activeTab === 'retailed' && 'Retailed leads approval status'}
-                {activeTab === 'wonlost' && 'Leads that are won or lost'}
-              </p>
+          <div className="relative bg-white/90 backdrop-blur-md rounded-2xl shadow-xl overflow-hidden border border-white/20 mx-1 md:mx-0">
+            <div className="relative bg-gradient-to-r from-blue-500/90 via-indigo-600/90 to-purple-600/90 backdrop-blur-md text-white p-3 md:p-4 border-b border-white/20" style={{
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.95) 0%, rgba(99, 102, 241, 0.95) 50%, rgba(168, 85, 247, 0.95) 100%)',
+              boxShadow: '0 8px 32px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
+            }}>
+              <div className="absolute inset-0 bg-gradient-to-r from-white/10 via-white/5 to-white/10 backdrop-blur-lg"></div>
+              <div className="relative">
+                <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
+                  <Star className="w-4 h-4 text-white/90" />
+                  <span className="text-sm md:text-base text-white/95">
+                    {activeTab === 'fresh' && 'Fresh Leads'}
+                    {activeTab === 'today' && 'Today\'s Follow-ups'}
+                    {activeTab === 'pending' && 'Pending Leads'}
+                    {activeTab === 'booked' && 'Booked Approval'}
+                    {activeTab === 'retailed' && 'Retailed Approval'}
+                    {activeTab === 'wonlost' && 'Won/Lost Leads'}
+                  </span>
+                </h2>
+                <p className="text-white/80 text-xs md:text-sm mt-1 leading-relaxed">
+                  {activeTab === 'fresh' && 'Leads newly assigned to you'}
+                  {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
+                  {activeTab === 'pending' && 'Leads with final status Pending'}
+                  {activeTab === 'booked' && 'Booked leads approval status'}
+                  {activeTab === 'retailed' && 'Retailed leads approval status'}
+                  {activeTab === 'wonlost' && 'Leads that are won or lost'}
+                </p>
+              </div>
               
               {/* Subsection tabs for booked and retailed */}
               {(activeTab === 'booked' || activeTab === 'retailed') && (
-                <div className="flex gap-2 mt-4">
+                <div className="flex flex-wrap gap-2 mt-4">
                   <button
                     onClick={() => setActiveSubTab('requested')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeSubTab === 'requested' 
-                        ? 'bg-blue-600 text-white' 
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                      activeSubTab === 'requested'
+                        ? 'bg-white/25 text-white shadow-lg border-white/40'
+                        : 'bg-white/10 text-white/80 hover:bg-white/20'
                     }`}
                   >
-                    Requested ({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})
+                    <span className="hidden md:inline">Requested</span>
+                    <span className="md:hidden">Req</span>
+                    <span className="ml-1">({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})</span>
           </button>
                   <button
                     onClick={() => setActiveSubTab('approved')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeSubTab === 'approved' 
-                        ? 'bg-green-600 text-white' 
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                      activeSubTab === 'approved'
+                        ? 'bg-green-500/30 text-white shadow-lg border-green-400/40'
+                        : 'bg-white/10 text-white/80 hover:bg-white/20'
                     }`}
                   >
-                    Approved ({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})
+                    <span className="hidden md:inline">Approved</span>
+                    <span className="md:hidden">App</span>
+                    <span className="ml-1">({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})</span>
           </button>
                   <button
                     onClick={() => setActiveSubTab('rejected')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeSubTab === 'rejected' 
-                        ? 'bg-red-600 text-white' 
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                      activeSubTab === 'rejected'
+                        ? 'bg-red-500/30 text-white shadow-lg border-red-400/40'
+                        : 'bg-white/10 text-white/80 hover:bg-white/20'
                     }`}
                   >
-                    Rejected ({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})
+                    <span className="hidden md:inline">Rejected</span>
+                    <span className="md:hidden">Rej</span>
+                    <span className="ml-1">({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})</span>
           </button>
                 </div>
               )}
         </div>
 
         {/* Filters Section */}
-        <div className="bg-gray-50 p-4 border-b">
-          <div className="flex flex-wrap gap-4 items-center">
+        <div className="bg-gray-50/80 backdrop-blur-sm p-3 md:p-4 border-b border-gray-200/50">
+          <div className="flex flex-wrap gap-2 md:gap-4 items-center text-xs md:text-sm">
             {/* Date Range Filters for Today, Won/Lost sections */}
             {(activeTab === 'today' || activeTab === 'wonlost') && (
               <>
-                      <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Filter:</label>
-                  <select 
-                    value={dateFilter} 
+                      <div className="flex items-center gap-1 md:gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Filter:</label>
+                  <select
+                    value={dateFilter}
                     onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
-                    className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                   >
                     <option value="today">Today</option>
                     <option value="all">All Time</option>
@@ -1073,18 +1149,18 @@ export default function PSDashboard() {
                       </div>
 
                 {dateFilter === 'range' && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 md:gap-2">
                     <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                       placeholder="Select Date"
                     />
                     {startDate && (
                       <button
                         onClick={() => setStartDate('')}
-                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors whitespace-nowrap"
                       >
                         Clear
                       </button>
@@ -1098,12 +1174,12 @@ export default function PSDashboard() {
         {activeTab === 'pending' && (
               <>
                 {/* Lead Category Filter */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Lead Category:</label>
-                  <select 
-                    value={pendingFilter} 
+                <div className="flex items-center gap-1 md:gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Category:</label>
+                  <select
+                    value={pendingFilter}
                     onChange={(e) => setPendingFilter(e.target.value as 'all'|'hot'|'warm'|'cold')}
-                    className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                   >
                     <option value="all">All</option>
                     <option value="hot">🔥 Hot</option>
@@ -1113,12 +1189,12 @@ export default function PSDashboard() {
                 </div>
 
                 {/* Final Status Filter */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Final Status:</label>
-                  <select 
-                    value={pendingStatusFilter} 
+                <div className="flex items-center gap-1 md:gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Status:</label>
+                  <select
+                    value={pendingStatusFilter}
                     onChange={(e) => setPendingStatusFilter(e.target.value as 'all'|'pending'|'booked')}
-                    className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                   >
                     <option value="all">All</option>
                     <option value="pending">Pending</option>
@@ -1127,12 +1203,12 @@ export default function PSDashboard() {
                 </div>
 
                 {/* Date Range Filter */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Date Filter:</label>
-                  <select 
-                    value={dateFilter} 
+                <div className="flex items-center gap-1 md:gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Date:</label>
+                  <select
+                    value={dateFilter}
                     onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
-                    className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                   >
                     <option value="today">Today</option>
                     <option value="all">All Time</option>
@@ -1141,18 +1217,18 @@ export default function PSDashboard() {
                 </div>
 
                 {dateFilter === 'range' && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 md:gap-2">
                     <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
                       placeholder="Select Date"
                     />
                     {startDate && (
                       <button
                         onClick={() => setStartDate('')}
-                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors whitespace-nowrap"
                       >
                         Clear
                       </button>
@@ -1163,13 +1239,13 @@ export default function PSDashboard() {
             )}
 
             {/* Show current filter status */}
-            <div className="ml-auto text-sm text-gray-600">
+            <div className="ml-auto text-xs md:text-sm text-gray-600 hidden md:block">
               {activeTab === 'today' && dateFilter === 'range' && startDate && endDate && (
                 <span>Showing: {startDate} to {endDate}</span>
               )}
               {activeTab === 'pending' && (pendingFilter !== 'all' || pendingStatusFilter !== 'all' || dateFilter !== 'today') && (
                 <span>
-                  Showing: 
+                  Showing:
                   {pendingFilter !== 'all' && ` ${pendingFilter === 'hot' ? '🔥 Hot' : pendingFilter === 'warm' ? '🔥 Warm' : '❄️ Cold'} leads`}
                   {pendingStatusFilter !== 'all' && ` ${pendingStatusFilter} status`}
                   {dateFilter === 'range' && startDate && endDate && ` from ${startDate} to ${endDate}`}
@@ -1182,12 +1258,14 @@ export default function PSDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="text-left p-4 font-semibold text-gray-700">Lead Info</th>
-                    <th className="text-left p-4 font-semibold text-gray-700">Vehicle Details</th>
-                    <th className="text-left p-4 font-semibold text-gray-700">Status</th>
-                    <th className="text-left p-4 font-semibold text-gray-700">Next Call</th>
-                    <th className="text-left p-4 font-semibold text-gray-700">Actions</th>
+                  <tr className="bg-gray-50/80 border-b border-gray-200">
+                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Lead Info</th>
+                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm hidden md:table-cell">Vehicle Details</th>
+                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Status</th>
+                    {activeTab !== 'fresh' && (
+                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Next Call</th>
+                    )}
+                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1200,36 +1278,45 @@ export default function PSDashboard() {
                     const assignedDate = isQualifiedLead ? item.created_at : item.ps_assigned_at
                     
                     return (
-                    <tr key={item.id} className="border-b hover:bg-gray-50 transition-colors">
-                      <td className="p-4">
-                        <div className="space-y-1">
-                          <div className="font-semibold text-gray-800">{customerName}</div>
-                          <div className="text-sm text-gray-600 flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {customerMobile}
+                    <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+                      <td className="p-2 md:p-4">
+                        <div className="space-y-0.5 md:space-y-1">
+                          <div className="font-semibold text-gray-800 text-xs md:text-sm leading-tight">{customerName}</div>
+                          <div className="text-xs md:text-sm text-gray-600 flex items-center gap-1">
+                            <Phone className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{customerMobile}</span>
                           </div>
-                          <div className="text-xs text-gray-500">{leadUid}</div>
-                          <div className="text-xs text-gray-500">{formatDate(assignedDate)}</div>
+                          {activeTab !== 'fresh' && (
+                            <>
+                              <div className="text-xs text-gray-500 truncate">{leadUid}</div>
+                              <div className="text-xs text-gray-500">{formatDate(assignedDate)}</div>
+                            </>
+                          )}
                           {isQualifiedLead && item.booking_id && (
-                            <div className="text-xs text-blue-600 font-medium">Booking ID: {item.booking_id}</div>
+                            <div className="text-xs text-blue-600 font-medium truncate">Booking ID: {item.booking_id}</div>
                           )}
                           {isQualifiedLead && item.retailed_id && (
-                            <div className="text-xs text-green-600 font-medium">Retail ID: {item.retailed_id}</div>
+                            <div className="text-xs text-green-600 font-medium truncate">Retail ID: {item.retailed_id}</div>
                           )}
+                          {/* Show vehicle details on mobile */}
+                          <div className="md:hidden mt-1 pt-1 border-t border-gray-100">
+                            <div className="text-xs text-gray-600">{item.model_interested || '—'}</div>
+                            <div className="text-xs text-gray-500">{item.variant || '—'}</div>
+                          </div>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="space-y-1">
-                          <div className="font-medium text-gray-800">{item.model_interested || '—'}</div>
-                          <div className="text-sm text-gray-600">{item.variant || '—'}</div>
+                      <td className="p-2 md:p-4 hidden md:table-cell">
+                        <div className="space-y-0.5 md:space-y-1">
+                          <div className="font-medium text-gray-800 text-xs md:text-sm">{item.model_interested || '—'}</div>
+                          <div className="text-xs md:text-sm text-gray-600">{item.variant || '—'}</div>
                           <div className="text-xs text-gray-500">{item.buying_plan || '—'}</div>
                           <div className="text-xs text-gray-500">{item.finance_option || '—'}</div>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="space-y-2">
+                      <td className="p-2 md:p-4">
+                        <div className="space-y-1 md:space-y-2">
                           {isQualifiedLead ? (
-                            <div className="space-y-1">
+                            <div className="space-y-0.5 md:space-y-1">
                               {item.booking_status && (
                                 <Badge variant={item.booking_status === 'Approved' ? 'default' : item.booking_status === 'Rejected' ? 'destructive' : 'secondary'}>
                                   Booking: {item.booking_status}
@@ -1268,7 +1355,6 @@ export default function PSDashboard() {
                             <>
                               <span className="text-sm font-medium text-gray-700">Call #{getNextCallNumber(item)}</span>
                               <div className="text-xs text-gray-500">{formatDate(item.follow_up_date)}</div>
-                              {/* Overdue badge only shows in today's follow-up section */}
                               {activeTab === 'today' && (() => {
                                 const overdueDays = getOverdueDays(item.follow_up_date)
                                 return overdueDays > 0 && (
@@ -1281,9 +1367,9 @@ export default function PSDashboard() {
                           )}
                       </div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-2 md:p-4">
                         {isQualifiedLead ? (
-                          <div className="text-sm text-gray-500">
+                          <div className="text-xs md:text-sm text-gray-500">
                             {item.booking_status === 'Waiting for Approval' && 'Waiting for SM approval'}
                             {item.retailed_status === 'Waiting for Approval' && 'Waiting for SM approval'}
                             {item.booking_status === 'Approved' && '✅ Booking Approved'}
@@ -1292,15 +1378,16 @@ export default function PSDashboard() {
                             {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
                           </div>
                         ) : (
-                          <div className="flex gap-2">
+                          <div className="flex flex-col md:flex-row gap-1 md:gap-2">
                             <button
                               onClick={() => openUpdateDialog(item)}
-                              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+                              className="bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 px-2 md:px-4 py-1 md:py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105 active:scale-95 border border-gray-200 hover:border-gray-300 whitespace-nowrap flex items-center gap-1"
                             >
+                              <Edit3 className="w-3 h-3" />
                               Update
                             </button>
                             {item.final_status === 'Lost Requested' && (
-                              <div className="text-xs text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded">
+                              <div className="text-xs text-orange-600 font-medium bg-orange-50 px-1 md:px-2 py-1 rounded whitespace-nowrap">
                                 Awaiting CRE Approval
                               </div>
                             )}
@@ -1317,245 +1404,279 @@ export default function PSDashboard() {
 
           {/* Update Modal */}
         <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
-            <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
-              <DialogHeader className="pb-2">
-                <DialogTitle className="text-lg font-semibold text-gray-900">
-                  Update Follow-up - {selectedFollowUp?.lead_uid}
+            <DialogContent className="max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-[12px] shadow-[0_6px_18px_rgba(0,0,0,0.08)] border-t-[3px] border-t-blue-600">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 h-1 rounded-t-[12px] -mt-[1px]"></div>
+
+              <DialogHeader className="pb-4 pt-6 px-6">
+                <DialogTitle className="text-[20px] font-bold text-gray-900">
+                  Update Follow-up
                 </DialogTitle>
-                <DialogDescription>
-                  Update follow-up information and status
-                </DialogDescription>
             </DialogHeader>
 
-              <div className="space-y-3">
-                {/* Lead and Customer Information - Ultra Compact */}
-              {selectedFollowUp && (
-                  <div className="space-y-0.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="font-medium text-gray-600">UID:</span>
-                      <span className="text-gray-900 ml-2">{selectedFollowUp.lead_uid}</span>
-                  </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-gray-600">Customer:</span>
-                      <span className="text-gray-900 ml-2">{selectedFollowUp.customer_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium text-gray-600">Mobile:</span>
-                      <span className="text-gray-900 ml-2">{selectedFollowUp.customer_mobile_number}</span>
-                    </div>
-                    {selectedFollowUp.model_interested && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Model:</span>
-                        <span className="text-gray-900 text-xs ml-2">{selectedFollowUp.model_interested}</span>
+              <div className="space-y-6">
+                {/* Lead Information Grid */}
+                {selectedFollowUp && (
+                  <div className="px-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-xl md:max-w-2xl">
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                          <User className="w-3 h-3" />
+                          Customer Name
+                        </label>
+                        <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_name}</div>
                       </div>
-                    )}
-                    {selectedFollowUp.variant && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Variant:</span>
-                        <span className="text-gray-900 ml-2">{selectedFollowUp.variant}</span>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                          <Phone className="w-3 h-3" />
+                          Mobile
+                        </label>
+                        <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_mobile_number}</div>
                       </div>
-                    )}
-                    {selectedFollowUp.buying_plan && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Plan:</span>
-                        <span className="text-gray-900 ml-2">{selectedFollowUp.buying_plan}</span>
+
+                      {selectedFollowUp.model_interested && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <Car className="w-3 h-3" />
+                            Model
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.model_interested}</div>
+                        </div>
+                      )}
+
+                      {selectedFollowUp.variant && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <Settings className="w-3 h-3" />
+                            Variant
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.variant}</div>
+                        </div>
+                      )}
+
+                      {selectedFollowUp.buying_plan && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            Buying Plan
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.buying_plan}</div>
+                        </div>
+                      )}
+
+                      {selectedFollowUp.finance_option && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <CreditCard className="w-3 h-3" />
+                            Finance
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.finance_option}</div>
+                        </div>
+                      )}
+
+                      {extraLeadInfo?.profession && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <Briefcase className="w-3 h-3" />
+                            Profession
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{extraLeadInfo.profession}</div>
+                        </div>
+                      )}
+
+                      {extraLeadInfo?.test_drive_type && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            Test Drive
+                          </label>
+                          <div className="text-sm font-medium text-gray-900">{extraLeadInfo.test_drive_type}</div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3" />
+                          Trade-in
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">{(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string || 'No'}</span>
+                          {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setTradeInLoading(true)
+                                setTradeInOpen(true)
+                                fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
+                                  .then(res => res.json())
+                                  .then(data => {
+                                    const tradeInInfo = data.trade_in_details || {}
+                                    const combinedData = {
+                                      ...tradeInInfo,
+                                      customer_name: data.lead_master?.customer_name,
+                                      customer_mobile_number: data.lead_master?.customer_mobile_number,
+                                      trade_in: data.trade_in,
+                                      profession: data.profession,
+                                      test_drive_type: data.test_drive_type
+                                    }
+                                    setTradeInData(combinedData)
+                                    setTradeInLoading(false)
+                                  })
+                                  .catch(err => {
+                                    console.error('Error fetching trade-in details:', err)
+                                    setTradeInLoading(false)
+                                  })
+                              }}
+                              className="text-xs h-6 px-2 text-blue-600 border-blue-300 hover:bg-blue-50 rounded-md"
+                            >
+                              <span className="text-blue-600 text-sm mr-1">👁</span>
+                              View
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    {selectedFollowUp.finance_option && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Finance:</span>
-                        <span className="text-gray-900 ml-2">{selectedFollowUp.finance_option}</span>
-                      </div>
-                    )}
-                    {selectedFollowUp.icrop_id && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">ICROP:</span>
-                        <span className="text-gray-900 ml-2">{selectedFollowUp.icrop_id}</span>
-                      </div>
-                    )}
-                    {extraLeadInfo?.profession && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Profession:</span>
-                        <span className="text-gray-900 ml-2">{extraLeadInfo.profession}</span>
-                      </div>
-                    )}
-                    {extraLeadInfo?.test_drive_type && (
-                      <div className="flex justify-between">
-                        <span className="font-medium text-gray-600">Test Drive:</span>
-                        <span className="text-gray-900 ml-2">{extraLeadInfo.test_drive_type}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium text-gray-600">Trade-in:</span>
-                      <div className="flex items-center space-x-1">
-                        <span className="text-gray-900 ml-2">{(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string || 'No'}</span>
-                        {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes' && (
-                      <Button
-                        variant="outline"
-                            size="sm"
-                            onClick={() => {
-                            setTradeInLoading(true)
-                            setTradeInOpen(true)
-                              fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
-                                .then(res => res.json())
-                                .then(data => {
-                                  const tradeInInfo = data.trade_in_details || {}
-                                  const combinedData = {
-                                    ...tradeInInfo,
-                                    customer_name: data.lead_master?.customer_name,
-                                    customer_mobile_number: data.lead_master?.customer_mobile_number,
-                                    trade_in: data.trade_in,
-                                    profession: data.profession,
-                                    test_drive_type: data.test_drive_type
-                                  }
-                                  setTradeInData(combinedData)
-                            setTradeInLoading(false)
-                                })
-                                .catch(err => {
-                                  console.error('Error fetching trade-in details:', err)
-                                  setTradeInLoading(false)
-                                })
-                            }}
-                            className="text-xs h-4 px-1 bg-gray-100 hover:bg-gray-200"
-                          >
-                            View
-                      </Button>
-                        )}
-                              </div>
                     </div>
                   </div>
                 )}
 
-                {/* Previous Calls - Ultra Compact */}
+                {/* Previous Calls */}
                 {selectedFollowUp && (
-                  <div className="space-y-1 text-xs">
-                    <div className="font-medium text-gray-700 mb-1">Previous Calls:</div>
-                    <div className="space-y-0.5 text-gray-600">
-                      {selectedFollowUp.first_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 1:</span>
-                          <span>{(selectedFollowUp.first_call_date || '').slice(0,10)} · {selectedFollowUp.first_call_remark}</span>
+                  <div className="px-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <Phone className="h-5 w-5 text-blue-600" />
+                      Previous Calls
+                    </h3>
+                    <div className="bg-[#fafafa] rounded-[8px] p-3 border border-gray-100">
+                      {[
+                        {remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status, num: 1},
+                        {remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status, num: 2},
+                        {remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status, num: 3},
+                        {remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status, num: 4},
+                        {remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status, num: 5},
+                        {remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status, num: 6},
+                        {remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status, num: 7},
+                        {remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status, num: 8},
+                        {remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status, num: 9},
+                        {remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status, num: 10}
+                      ].filter(call => call.remark).length > 0 ?
+                        [
+                          {remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status, num: 1},
+                          {remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status, num: 2},
+                          {remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status, num: 3},
+                          {remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status, num: 4},
+                          {remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status, num: 5},
+                          {remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status, num: 6},
+                          {remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status, num: 7},
+                          {remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status, num: 8},
+                          {remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status, num: 9},
+                          {remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status, num: 10}
+                        ].filter(call => call.remark).map((call, index) => (
+                          <div key={index} className="text-sm py-2 border-b border-gray-200 last:border-b-0 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                            <div className="flex items-center gap-3 text-gray-600 min-w-0">
+                              <span className="font-medium text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">#{call.num}</span>
+                              <span className="text-xs">{call.date ? new Date(call.date).toLocaleDateString('en-IN') : ''}</span>
+                              <span className="text-xs font-medium text-gray-800 bg-gray-100 px-2 py-1 rounded">{call.status}</span>
+                            </div>
+                            <span className="text-gray-700 text-sm leading-relaxed">{call.remark && call.remark.length > 50 ? call.remark.substring(0, 50) + '...' : call.remark}</span>
                           </div>
-                      )}
-                      {selectedFollowUp.second_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 2:</span>
-                          <span>{(selectedFollowUp.second_call_date || '').slice(0,10)} · {selectedFollowUp.second_call_remark}</span>
+                        )) : (
+                          <div className="text-sm text-gray-500 italic py-3 text-center">No previous calls recorded</div>
+                        )
+                      }
                     </div>
-                  )}
-                      {selectedFollowUp.third_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 3:</span>
-                          <span>{(selectedFollowUp.third_call_date || '').slice(0,10)} · {selectedFollowUp.third_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.fourth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 4:</span>
-                          <span>{(selectedFollowUp.fourth_call_date || '').slice(0,10)} · {selectedFollowUp.fourth_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.fifth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 5:</span>
-                          <span>{(selectedFollowUp.fifth_call_date || '').slice(0,10)} · {selectedFollowUp.fifth_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.sixth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 6:</span>
-                          <span>{(selectedFollowUp.sixth_call_date || '').slice(0,10)} · {selectedFollowUp.sixth_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.seventh_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 7:</span>
-                          <span>{(selectedFollowUp.seventh_call_date || '').slice(0,10)} · {selectedFollowUp.seventh_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.eighth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 8:</span>
-                          <span>{(selectedFollowUp.eighth_call_date || '').slice(0,10)} · {selectedFollowUp.eighth_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.ninth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 9:</span>
-                          <span>{(selectedFollowUp.ninth_call_date || '').slice(0,10)} · {selectedFollowUp.ninth_call_remark}</span>
-                        </div>
-                      )}
-                      {selectedFollowUp.tenth_call_remark && (
-                        <div className="flex justify-between">
-                          <span>Call 10:</span>
-                          <span>{(selectedFollowUp.tenth_call_date || '').slice(0,10)} · {selectedFollowUp.tenth_call_remark}</span>
-                        </div>
-                      )}
+                  </div>
+                )}
+
+                {/* Current Call Form */}
+                <div className="px-6 space-y-5">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-blue-600" />
+                    Current Call
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Call Number */}
+                    <div className="space-y-2">
+                      <label htmlFor="call-number" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Call Number</label>
+                      <Input
+                        id="call-number"
+                        placeholder={`Call #${getNextCallNumber(selectedFollowUp)}`}
+                        value={`Call #${getNextCallNumber(selectedFollowUp)}`}
+                        disabled
+                        className="h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] bg-gray-50 text-sm font-medium text-gray-700 focus:outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                      />
                     </div>
-                </div>
-              )}
-              
-                {/* Follow-up Entry Section - Ultra Compact */}
-                <div className="space-y-2">
-                  {/* Call Number */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-700">Call Number</Label>
-                    <Input 
-                      value={`Call #${getNextCallNumber(selectedFollowUp)}`}
-                      disabled
-                      className="bg-gray-50 h-7 text-xs"
-                    />
-          </div>
+
+                    {/* Final Status */}
+                    <div className="space-y-2">
+                      <label htmlFor="final-status" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        Final Status
+                        {isFinalStatusLocked(callOutcome) && (
+                          <span className="text-red-500 ml-1">🔒</span>
+                        )}
+                      </label>
+                      <Select
+                        value={finalStatus}
+                        onValueChange={setFinalStatus}
+                        disabled={isFinalStatusLocked(callOutcome)}
+                      >
+                        <SelectTrigger className={`h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${isFinalStatusLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}>
+                          <SelectValue placeholder="Select status" className="text-gray-400" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Pending">Pending</SelectItem>
+                          <SelectItem value="Waiting for Approval">Waiting for Approval</SelectItem>
+                          <SelectItem value="Won">Won</SelectItem>
+                          <SelectItem value="Lost">Lost</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
 
                   {/* Lead Status / Outcome */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-700">Lead Status / Outcome</Label>
-                    <div className="flex gap-2">
-                <Select value={callOutcome} onValueChange={setCallOutcome}>
-                        <SelectTrigger className="h-7 text-xs">
-                    <SelectValue placeholder="Select Lead Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[
-                      'Call not Connected',
-                      'Retailed',
-                      'Discount Issue',
-                      'Delayed',
-                      'Booked',
-                      'Booked with another number',
-                      'Test Drive',
-                      'Planning in Next Month',
-                      'Interested',
-                      'Lost to Competition',
-                      'Finance Rejected',
-                      'Dropped',
-                      'Lost to codealer',
-                      'Busy on another call',
-                      'RNR',
-                      'Call me Back',
-                      'Not Interested'
-                    ].map((option) => (
-                      <SelectItem key={option} value={option}>{option}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                      
+                  <div className="space-y-2">
+                    <label htmlFor="lead-status" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Lead Status / Outcome</label>
+                    <div className="flex flex-wrap gap-3">
+                      <Select value={callOutcome} onValueChange={setCallOutcome}>
+                        <SelectTrigger className="h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] flex-1 min-w-[200px]">
+                          <SelectValue placeholder="Select Lead Status" className="text-gray-400" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            'Call not Connected',
+                            'Retailed',
+                            'Discount Issue',
+                            'Delayed',
+                            'Booked',
+                            'Booked with another number',
+                            'Test Drive',
+                            'Planning in Next Month',
+                            'Interested',
+                            'Lost to Competition',
+                            'Finance Rejected',
+                            'Dropped',
+                            'Lost to codealer',
+                            'Busy on another call',
+                            'RNR',
+                            'Call me Back',
+                            'Not Interested'
+                          ].map((option) => (
+                            <SelectItem key={option} value={option}>{option}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
                       {/* Order No. (Booking ID) - Show only for Booked status */}
                       {callOutcome === 'Booked' && (
-                        <Input 
+                        <Input
                           value={bookingId}
                           onChange={(e) => {
                             let value = e.target.value.toUpperCase()
-                            
-                            // Remove any non-alphanumeric characters except ORD
                             value = value.replace(/[^A-Z0-9]/g, '')
-                            
-                            // Ensure it starts with ORD
                             if (value && !value.startsWith('ORD')) {
                               value = 'ORD' + value.replace(/^ORD/, '')
                             }
-                            
-                            // Limit to ORD + exactly 9 digits
                             if (value.startsWith('ORD')) {
                               const digits = value.substring(3).replace(/\D/g, '')
                               if (digits.length <= 9) {
@@ -1564,31 +1685,24 @@ export default function PSDashboard() {
                                 value = 'ORD' + digits.substring(0, 9)
                               }
                             }
-                            
                             setBookingId(value)
                           }}
                           placeholder="ORD123456789"
-                          className={`h-7 text-xs w-32 ${bookingId && bookingId.length !== 12 ? 'border-red-500' : ''}`}
+                          className={`h-[44px] px-3 rounded-[8px] border text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] w-40 ${bookingId && bookingId.length !== 12 ? 'border-red-500' : 'border-[#e6e9ee]'}`}
                           required
                         />
                       )}
-                      
+
                       {/* DN No. (Retailed ID) - Show only for Retailed status */}
                       {callOutcome === 'Retailed' && (
-                        <Input 
+                        <Input
                           value={retailedId}
                           onChange={(e) => {
                             let value = e.target.value.toUpperCase()
-                            
-                            // Remove any non-alphanumeric characters except DNN
                             value = value.replace(/[^A-Z0-9]/g, '')
-                            
-                            // Ensure it starts with DNN
                             if (value && !value.startsWith('DNN')) {
                               value = 'DNN' + value.replace(/^DNN/, '')
                             }
-                            
-                            // Limit to DNN + exactly 9 digits
                             if (value.startsWith('DNN')) {
                               const digits = value.substring(3).replace(/\D/g, '')
                               if (digits.length <= 9) {
@@ -1597,87 +1711,66 @@ export default function PSDashboard() {
                                 value = 'DNN' + digits.substring(0, 9)
                               }
                             }
-                            
                             setRetailedId(value)
                           }}
                           placeholder="DNN123456789"
-                          className={`h-7 text-xs w-32 ${retailedId && retailedId.length !== 12 ? 'border-red-500' : ''}`}
+                          className={`h-[44px] px-3 rounded-[8px] border text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] w-40 ${retailedId && retailedId.length !== 12 ? 'border-red-500' : 'border-[#e6e9ee]'}`}
                           required
                         />
                       )}
                     </div>
-              </div>
+                  </div>
 
                   {/* Call Remark */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-700">Call Remark</Label>
-                <Textarea
-                      placeholder="Enter call details..."
-                  value={callRemark}
-                  onChange={(e) => setCallRemark(e.target.value)}
-                      rows={2}
-                      className="text-xs resize-none"
-                />
-          </div>
+                  <div className="space-y-2">
+                    <label htmlFor="call-remark" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Call Remark</label>
+                    <Textarea
+                      id="call-remark"
+                      placeholder="Provide detailed information about the call outcome"
+                      value={callRemark}
+                      onChange={(e) => setCallRemark(e.target.value)}
+                      rows={3}
+                      className="px-3 py-2 rounded-[8px] border border-[#e6e9ee] text-sm resize-none focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] placeholder:text-gray-400"
+                    />
+                  </div>
 
                   {/* Next Follow-up Date */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-700">
+                  <div className="space-y-2">
+                    <label htmlFor="follow-up-date" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       Next Follow-up Date
                       {isFollowUpDateLocked(callOutcome) && (
                         <span className="text-red-500 ml-1">🔒</span>
                       )}
-                    </Label>
-                  <Input 
-                  type="datetime-local"
-                  value={followUpDate}
-                  onChange={(e) => setFollowUpDate(e.target.value)}
-                      className={`h-7 text-xs ${isFollowUpDateLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}
-                      disabled={isFollowUpDateLocked(callOutcome)}
-                />
-              </div>
-
-
-                  {/* Final Status */}
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-700">
-                      Final Status
-                      {isFinalStatusLocked(callOutcome) && (
-                        <span className="text-red-500 ml-1">🔒</span>
-                      )}
-                    </Label>
-                    <Select 
-                      value={finalStatus} 
-                      onValueChange={setFinalStatus}
-                      disabled={isFinalStatusLocked(callOutcome)}
-                    >
-                      <SelectTrigger className={`h-7 text-xs ${isFinalStatusLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                        <SelectItem value="Waiting for Approval">Waiting for Approval</SelectItem>
-                    <SelectItem value="Won">Won</SelectItem>
-                    <SelectItem value="Lost">Lost</SelectItem>
-                  </SelectContent>
-                </Select>
+                    </label>
+                    <div className="relative w-40 md:w-56">
+                      <Input
+                        id="follow-up-date"
+                        type="datetime-local"
+                        value={followUpDate}
+                        onChange={(e) => setFollowUpDate(e.target.value)}
+                        className={`h-[44px] px-3 pr-10 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${isFollowUpDateLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}
+                        disabled={isFollowUpDateLocked(callOutcome)}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-[18px] w-[18px] text-blue-600 pointer-events-none" />
+                    </div>
                   </div>
-              </div>
+                </div>
 
-                {/* Action Buttons - Ultra Compact */}
-                <div className="flex justify-end space-x-2 pt-2 border-t">
-                  <Button 
-                    variant="outline" 
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-3 pt-6 px-6 border-t border-gray-100">
+                  <Button
+                    variant="ghost"
                     onClick={() => setUpdateDialog(false)}
-                    className="h-7 px-3 text-xs"
+                    className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200"
                   >
-                  Cancel
-                </Button>
-                  <Button 
+                    Cancel
+                  </Button>
+                  <Button
                     onClick={handleUpdateFollowUp}
-                    className="bg-gray-900 hover:bg-black text-white h-7 px-3 text-xs"
+                    className="px-6 py-2 rounded-[6px] bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 text-sm font-medium shadow-sm hover:shadow-lg transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 transform hover:scale-105 active:scale-95 border border-gray-200 hover:border-gray-300 flex items-center gap-2"
                   >
-                    Update
+                    <Edit3 className="w-4 h-4" />
+                    Update Follow-up
                   </Button>
                 </div>
               </div>

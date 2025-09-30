@@ -1190,12 +1190,12 @@ async def create_lead(lead_data: LeadCreate, current_user=Depends(can_manage_lea
             "customer_name": lead_data.name,
             "customer_mobile_number": lead_data.phone,
             "source": lead_data.source,
-            "lead_category": "Fresh",
+            "lead_category": "Warm",  # Default category
             "model_interested": lead_data.notes,
             "branch": current_user.branch_id if hasattr(current_user, 'branch_id') else 1,
             "assigned": "Yes" if lead_data.assigned_to else "No",
             "cre_name": lead_data.assigned_to,
-            "lead_status": "New",
+            "lead_status": None,  # Fresh leads start with null/empty lead_status
             "final_status": "Pending"
         }
         
@@ -1232,7 +1232,7 @@ class CRELeadCreate(BaseModel):
     cre_name: str
     cre_id: str
     assigned: str = "Yes"
-    lead_status: str = "Fresh"
+    lead_status: Optional[str] = None  # Fresh leads start with null/empty lead_status
     final_status: str = "Pending"
     lead_category: str = "Warm"
     remarks: Optional[str] = None
@@ -1256,8 +1256,8 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
             "source": lead_data.source,
             "sub_source": lead_data.sub_source,
             "date": now_ist_iso(),
-            "lead_category": "Fresh",
-            "lead_status": "New",
+            "lead_category": "Warm",  # Default category
+            "lead_status": None,  # Fresh leads start with null/empty lead_status
             "final_status": "Pending",
             "created_at": now_ist_iso(),
             "updated_at": now_ist_iso()
@@ -1360,7 +1360,7 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["customer_name"] = lead_data.name
         if lead_data.phone:
             update_data["customer_mobile_number"] = lead_data.phone
-        if lead_data.status:
+        if lead_data.status is not None:
             update_data["lead_status"] = lead_data.status
         # First call remark mapping
         if lead_data.first_remark is not None:
@@ -1498,7 +1498,7 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["customer_name"] = lead_data.name
         if lead_data.phone:
             update_data["customer_mobile_number"] = lead_data.phone
-        if lead_data.status:
+        if lead_data.status is not None:
             update_data["lead_status"] = lead_data.status
 
         if lead_data.first_remark is not None:
@@ -3218,21 +3218,41 @@ async def reject_qualified_lead(
 
 @app.get("/api/qualified-leads/pending-approvals")
 async def get_pending_approvals(current_user=Depends(get_current_user)):
-    """Get all pending booking and retail approvals for Sales Manager"""
+    """Get booking and retail approvals for Sales Manager across statuses.
+
+    Returns requests with request_status in ['pending','approved','rejected'] so the UI can
+    render Pending/Approved/Rejected sections and move items between them automatically.
+    """
     try:
         if current_user.role != 'sales_manager':
             raise HTTPException(status_code=403, detail="Access denied - Sales Manager role required")
-        
-        # Get qualified leads with pending approvals
-        response = supabase.table('qualified_leads').select('*').or_(
-            'booking_status.eq.Waiting for Approval,retailed_status.eq.Waiting for Approval'
-        ).execute()
-        
-        # Transform data to match frontend expectations
+
+        # Fetch any rows that have booking/retailed status in the tracked set
+        tracked_statuses = ["Waiting for Approval", "Approved", "Rejected"]
+        or_clauses = [
+            "booking_status.eq." + status for status in tracked_statuses
+        ] + [
+            "retailed_status.eq." + status for status in tracked_statuses
+        ]
+
+        response = supabase.table('qualified_leads').select('*').or_(",".join(or_clauses)).execute()
+
+        def map_status(raw: Optional[str]) -> Optional[str]:
+            if not raw:
+                return None
+            if raw == "Waiting for Approval":
+                return "pending"
+            if raw == "Approved":
+                return "approved"
+            if raw == "Rejected":
+                return "rejected"
+            return None
+
         approval_requests = []
         for lead in response.data or []:
-            # Handle booking requests
-            if lead.get('booking_status') == 'Waiting for Approval':
+            # Booking facet
+            bs = map_status(lead.get('booking_status'))
+            if bs:
                 approval_requests.append({
                     'id': f"booking_{lead['lead_uid']}",
                     'lead_uid': lead['lead_uid'],
@@ -3244,13 +3264,14 @@ async def get_pending_approvals(current_user=Depends(get_current_user)):
                     'customer_name': lead.get('customer_name', 'Unknown'),
                     'customer_mobile_number': lead.get('customer_mobile_number', 'Unknown'),
                     'model_interested': lead.get('model_interested', 'Unknown'),
-                    'request_status': 'pending',
+                    'request_status': bs,
                     'requested_at': lead.get('booking_requested_at', lead.get('created_at', now_ist_iso())),
                     'created_at': lead.get('created_at', now_ist_iso())
                 })
-            
-            # Handle retail requests
-            if lead.get('retailed_status') == 'Waiting for Approval':
+
+            # Retail facet
+            rs = map_status(lead.get('retailed_status'))
+            if rs:
                 approval_requests.append({
                     'id': f"retailed_{lead['lead_uid']}",
                     'lead_uid': lead['lead_uid'],
@@ -3262,13 +3283,13 @@ async def get_pending_approvals(current_user=Depends(get_current_user)):
                     'customer_name': lead.get('customer_name', 'Unknown'),
                     'customer_mobile_number': lead.get('customer_mobile_number', 'Unknown'),
                     'model_interested': lead.get('model_interested', 'Unknown'),
-                    'request_status': 'pending',
+                    'request_status': rs,
                     'requested_at': lead.get('retailed_requested_at', lead.get('created_at', now_ist_iso())),
                     'created_at': lead.get('created_at', now_ist_iso())
                 })
-        
+
         return approval_requests
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

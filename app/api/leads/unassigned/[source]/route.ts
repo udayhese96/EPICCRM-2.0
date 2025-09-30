@@ -15,16 +15,30 @@ export async function GET(
     const headerAuth = request.headers.get('authorization')
     const cookieToken = request.cookies.get('access_token')?.value
     const auth = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
+    
+    // Add cache-busting timestamp
+    const timestamp = Date.now()
 
-    let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned/${encodeURIComponent(source)}`, {
+    let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned/${encodeURIComponent(source)}?_t=${timestamp}`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Authorization: auth },
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        Authorization: auth 
+      },
     })
 
     if (response.status === 401 || response.status === 403) {
-      response = await fetch(`${FASTAPI_URL}/api/public/unassigned/${encodeURIComponent(source)}`, {
+      response = await fetch(`${FASTAPI_URL}/api/public/unassigned/${encodeURIComponent(source)}?_t=${timestamp}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
       })
     }
 
@@ -36,7 +50,11 @@ export async function GET(
     }
 
     const data = await response.json()
-    return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
+    const nextResponse = NextResponse.json(data)
+    nextResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    nextResponse.headers.set('Pragma', 'no-cache')
+    nextResponse.headers.set('Expires', '0')
+    return nextResponse
   } catch (error) {
     console.error('Error fetching leads for source:', error)
     return NextResponse.json(
