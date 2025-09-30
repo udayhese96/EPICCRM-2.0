@@ -251,19 +251,32 @@ export default function AddLeadPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="source">Source</Label>
-                    <Select onValueChange={(value) => handleInputChange("source", value)} defaultValue="website">
+                    <Select onValueChange={(value) => handleInputChange("source", value)} defaultValue="Bulkwatsup(Telein)">
                       <SelectTrigger>
                         <SelectValue placeholder="Select source" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="website">Website</SelectItem>
-                        <SelectItem value="referral">Referral</SelectItem>
-                        <SelectItem value="social_media">Social Media</SelectItem>
-                        <SelectItem value="advertisement">Advertisement</SelectItem>
-                        <SelectItem value="cold_call">Cold Call</SelectItem>
-                        <SelectItem value="email_campaign">Email Campaign</SelectItem>
-                        <SelectItem value="trade_show">Trade Show</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="Bulkwatsup(Telein)">Bulkwatsup(Telein)</SelectItem>
+                        <SelectItem value="Bulkwatsup(Watco)">Bulkwatsup(Watco)</SelectItem>
+                        <SelectItem value="Car Dekho">Car Dekho</SelectItem>
+                        <SelectItem value="Car Wale">Car Wale</SelectItem>
+                        <SelectItem value="CD B">CD B</SelectItem>
+                        <SelectItem value="CD G">CD G</SelectItem>
+                        <SelectItem value="CWA">CWA</SelectItem>
+                        <SelectItem value="CWB">CWB</SelectItem>
+                        <SelectItem value="CWC">CWC</SelectItem>
+                        <SelectItem value="CWG">CWG</SelectItem>
+                        <SelectItem value="CWH">CWH</SelectItem>
+                        <SelectItem value="CWK">CWK</SelectItem>
+                        <SelectItem value="Dealer CMS">Dealer CMS</SelectItem>
+                        <SelectItem value="Email">Email</SelectItem>
+                        <SelectItem value="GMB (Telein)">GMB (Telein)</SelectItem>
+                        <SelectItem value="Google Telein">Google Telein</SelectItem>
+                        <SelectItem value="Landing Page">Landing Page</SelectItem>
+                        <SelectItem value="Meta">Meta</SelectItem>
+                        <SelectItem value="Tele Out">Tele Out</SelectItem>
+                        <SelectItem value="Telein">Telein</SelectItem>
+                        <SelectItem value="TKM">TKM</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

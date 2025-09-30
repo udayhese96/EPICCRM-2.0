@@ -38,7 +38,7 @@ export const logout = () => {
 
 // API login function
 export const login = async (credentials: LoginData): Promise<User> => {
-  const response = await fetch('http://localhost:8000/api/auth/login', {
+  const response = await fetch('/api/auth/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

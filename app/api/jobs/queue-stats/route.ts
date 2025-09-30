@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET() {
   try {
-    const response = await fetch('http://localhost:8000/api/jobs/queue-stats', {
+    const response = await fetch(`${process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')}/api/jobs/queue-stats`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

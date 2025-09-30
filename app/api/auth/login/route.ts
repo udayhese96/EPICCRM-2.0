@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000"
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? "http://localhost:8000" : "https://epic-crm-backend.onrender.com")
 
 // Proxy login to FastAPI so roles/users are verified server-side (no hashes on client)
 export async function POST(request: NextRequest) {

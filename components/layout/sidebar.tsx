@@ -138,7 +138,7 @@ const getNavigationForRole = (role: string) => {
         },
         {
           name: "Analytics",
-          href: "/analytics",
+          href: "/ps/analytics",
           icon: BarChart3,
         },
       ]

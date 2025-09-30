@@ -46,6 +46,7 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       ],
       ps: [
         { icon: Home, label: 'PS Dashboard', href: '/ps/dashboard' },
+        { icon: BarChart3, label: 'Analytics', href: '/ps/analytics' },
       ],
       cre_team_leader: [
         { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },

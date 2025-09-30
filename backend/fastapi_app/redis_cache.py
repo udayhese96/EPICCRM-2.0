@@ -3,6 +3,7 @@ EPIC CRM 2.0 - Redis Caching System
 Ultra-fast caching layer for all database operations
 """
 
+import os
 import redis
 import json
 import hashlib
@@ -16,10 +17,9 @@ class RedisCache:
     def __init__(self, host='localhost', port=6379, db=0, decode_responses=True):
         """Initialize Redis cache with connection pooling"""
         try:
-            self.redis_client = redis.Redis(
-                host=host, 
-                port=port, 
-                db=db, 
+            redis_url = os.environ.get('REDIS_URL', f'redis://{host}:{port}/{db}')
+            self.redis_client = redis.from_url(
+                redis_url,
                 decode_responses=decode_responses,
                 socket_connect_timeout=5,
                 socket_timeout=5,
@@ -142,7 +142,7 @@ class RedisCache:
         return total_deleted
 
 # Global cache instance
-cache = RedisCache()
+cache = RedisCache()  # Will use REDIS_URL from environment
 
 # Cache decorators for automatic caching
 def cache_result(prefix: str, ttl: int = 300):

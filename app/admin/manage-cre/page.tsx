@@ -55,7 +55,7 @@ export default function ManageCREPage() {
       const token = parsed?.access_token || ''
 
       // Call FastAPI backend directly with unified users API
-      const response = await fetch('http://localhost:8000/api/users?role=cre', {
+      const response = await fetch('/api/users?role=cre', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -80,7 +80,7 @@ export default function ManageCREPage() {
     
     try {
       const url = editingUser ? `/api/cre-users/${editingUser.id}` : '/api/cre-users'
-      const fastApiUrl = editingUser ? `http://localhost:8000/api/cre-users/${editingUser.id}` : 'http://localhost:8000/api/cre-users'
+      const fastApiUrl = editingUser ? `/api/cre-users/${editingUser.id}` : `/api/cre-users`
       const method = editingUser ? 'PUT' : 'POST'
       
       // Try Next.js API first

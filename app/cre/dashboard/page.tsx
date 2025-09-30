@@ -41,6 +41,22 @@ interface User {
   role: string
 }
 
+// Snapshot helpers to detect meaningful UI changes after a fetch
+const normalizeStatus = (s?: string) => (s || "").trim().toLowerCase()
+const computeCountsSnapshot = (leads: any[]) => {
+  const isFinalizedWon = (l: any) => {
+    const fs = (l.final_status || '').toLowerCase()
+    return fs === 'booked' || fs === 'retailed'
+  }
+  const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+  const fresh = leads.filter(l => (normalizeStatus(l.lead_status) === '' && (l.final_status || '').toLowerCase() === 'pending') && !isFinalizedWon(l)).length
+  const called = leads.filter(l => calledSet.has(normalizeStatus(l.lead_status)) && !isFinalizedWon(l)).length
+  const followUp = leads.filter(l => normalizeStatus(l.lead_status) === 'call me back' && !isFinalizedWon(l)).length
+  const qualified = leads.filter(l => (l.lead_status === 'Qualified') && ((l.final_status || '').toLowerCase() === 'pending') && !isFinalizedWon(l)).length
+  const pending = leads.filter(l => ((l.final_status || '').toLowerCase() === 'pending') && !!(l.first_call_date) && !isFinalizedWon(l)).length
+  return { total: leads.length, fresh, called, followUp, qualified, pending }
+}
+
 interface Lead {
   id: string
   uid: string
@@ -99,6 +115,21 @@ export default function CREDashboard() {
     }
     fetchAssignedLeads()
     fetchLostRequests()
+
+    // Listen for immediate refresh events after modal submits
+    const immediateRefresh = async () => {
+      setIsRefreshing(true)
+      const result = await fetchAssignedLeads(true)
+      fetchLostRequests()
+      // If counts didn't change yet, retry once after 1s to cover propagation lag
+      try {
+        if (result && JSON.stringify(result.before) === JSON.stringify(result.after)) {
+          setTimeout(() => { fetchAssignedLeads(true) }, 1000)
+        }
+      } catch {}
+      setTimeout(() => setIsRefreshing(false), 900)
+    }
+    window.addEventListener('lead-master-updated', immediateRefresh as any)
     checkRedisWorkerStatus()
     
     // Set up real-time subscriptions instead of polling
@@ -132,6 +163,7 @@ export default function CREDashboard() {
       if (cleanup) {
         cleanup()
       }
+      window.removeEventListener('lead-master-updated', immediateRefresh as any)
       // Cleanup polling intervals
       clearInterval(primaryPolling)
       clearInterval(countPolling)
@@ -148,21 +180,27 @@ export default function CREDashboard() {
     try {
       const supabase = createClient()
     
-    // Subscribe to lead_master changes for this CRE user
+    // Subscribe to lead_master changes (no server-side filter to avoid case-sensitivity issues)
     const leadSubscription = supabase
       .channel(`lead_master_changes_${user.username}`)
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'lead_master',
-          filter: `cre_name=eq.${user.username}`
-        }, 
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'lead_master'
+        },
         (payload) => {
+          const newCre = ((payload.new as any)?.cre_name || '').toLowerCase()
+          const oldCre = ((payload.old as any)?.cre_name || '').toLowerCase()
+          const usernameLower = user.username.toLowerCase()
+
+          // Only react if this change is relevant to the logged-in CRE (case-insensitive)
+          if (newCre !== usernameLower && oldCre !== usernameLower) {
+            return
+          }
+
           console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
-          
-          // Always refresh on any change to lead_master for this CRE user
-          // This ensures the dashboard stays up-to-date with all lead changes
           console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
           setCountsUpdating(true)
           fetchAssignedLeads()
@@ -178,17 +216,25 @@ export default function CREDashboard() {
         }
       })
     
-    // Subscribe to qualified_leads changes for this CRE user
+    // Subscribe to qualified_leads changes (no server-side filter to avoid case-sensitivity issues)
     const qualifiedSubscription = supabase
       .channel(`qualified_leads_changes_${user.username}`)
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'qualified_leads',
-          filter: `cre_name=eq.${user.username}`
-        }, 
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'qualified_leads'
+        },
         (payload) => {
+          const newCre = ((payload.new as any)?.cre_name || '').toLowerCase()
+          const oldCre = ((payload.old as any)?.cre_name || '').toLowerCase()
+          const usernameLower = user.username.toLowerCase()
+
+          if (newCre !== usernameLower && oldCre !== usernameLower) {
+            return
+          }
+
           // Qualified leads changes always affect counts, so refresh immediately
           console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
           console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
@@ -283,8 +329,8 @@ export default function CREDashboard() {
     }
   }
 
-  const fetchAssignedLeads = async () => {
-    setIsLoading(true)
+  const fetchAssignedLeads = async (skipSpinner: boolean = false) => {
+    if (!skipSpinner) setIsLoading(true)
     try {
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
@@ -292,11 +338,17 @@ export default function CREDashboard() {
       const fullName = parsed?.full_name || parsed?.name || ''
       const qs = new URLSearchParams({ username })
       if (fullName) qs.append('name', fullName)
+      // Cache-busting to avoid any intermediate caching layers
+      const cacheBuster = Date.now().toString()
+      qs.append('_t', cacheBuster)
       
-      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
+      console.debug('[CRE fetch] requesting /api/cre-assigned with _t=', cacheBuster)
+      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
       
       if (response.ok) {
         const data = await response.json()
+        const before = computeCountsSnapshot(leads)
+        console.debug('[CRE fetch] received', (data || []).length, 'leads. Prev counts:', before)
         
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
@@ -331,13 +383,18 @@ export default function CREDashboard() {
         }))
         
         setLeads(mapped)
+        const after = computeCountsSnapshot(mapped)
+        console.debug('[CRE fetch] new counts:', after)
+        return { before, after }
       } else {
         console.error('API Error:', response.status, response.statusText)
+        return null
       }
     } catch (e) {
       console.error('Failed to fetch assigned leads', e)
+      return null
     } finally {
-      setIsLoading(false)
+      if (!skipSpinner) setIsLoading(false)
     }
   }
 
@@ -505,8 +562,8 @@ export default function CREDashboard() {
     // Filter by tab
     switch (activeTab) {
       case "fresh":
-        // Fresh view base is all leads; sub-filters below handle subsets
-        filteredLeads = leads.filter(l => !isFinalizedWon(l))
+        // Fresh should exclude qualified and won leads
+        filteredLeads = leads.filter(l => !isFinalizedWon(l) && (l.lead_status ?? "").toLowerCase() !== "qualified")
         break
       case "followup":
         {

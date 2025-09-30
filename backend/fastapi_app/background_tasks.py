@@ -3,6 +3,7 @@ EPIC CRM 2.0 - Background Task Processing
 Handles all database operations in background for ultra-fast UI
 """
 
+import os
 import redis
 from rq import Queue
 from rq.job import Job
@@ -19,10 +20,9 @@ class BackgroundProcessor:
         try:
             # Try Redis connection with proper configuration
             try:
-                self.redis_conn = redis.Redis(
-                    host='localhost', 
-                    port=6379, 
-                    db=0, 
+                redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+                self.redis_conn = redis.from_url(
+                    redis_url,
                     decode_responses=False,  # Don't decode responses to avoid encoding issues
                     encoding='utf-8',
                     encoding_errors='ignore',  # Ignore encoding errors

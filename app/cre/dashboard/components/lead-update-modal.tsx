@@ -452,19 +452,27 @@ const tradeInOptions = ["Yes", "Additional", "Buying for first time"]
 
 const leadCategories = ["Hot", "Warm", "Cold"]
 
+const chennaiLocations = [
+  "MOUNT ROAD", "CHINTHADRIPET", "EGMORE", "PUDHUPET", "CHETPET", "CHOOLAIMEDU", "NUNGAMBAKKAM", "KODAMBAKKAM", "VADAPALANI", "ANNASALAI", "ARUMBAKKAM", "ADYAR", "THIRUVANMIYUR", "VELACHERRY", "MEDAVAKKAM", "KILKATTALAI", "PERAMBAKKAM", "SHOLINGANALLUR", "PERUNGUDI", "NEELANGARAI", "SAIDAPET", "ST THOMAS MOUNT", "PAZHAVANTHANGAL", "PALLAVARAM", "MMDA COLONY", "MYLAPORE", "TRIPLICANE", "THOUSAND LIGHTS", "GREAMS ROAD", "ORMES ROAD", "ROYAPETTAH", "T NAGAR", "TEYNAMPET", "GUINDY", "MENAMBAKKAM", "TIRUSULAM", "ALWARPET", "R A PURAM", "AMINJIKARAI", "WEST MAMBALAM", "K K NAGAR", "ASHOK NAGAR", "EKKATUTHANGAL", "NANDANAM", "IIT", "KOTTURPURAM", "CHROMEPET", "SANITORIUM", "KELAMBAKKAM", "SELAIYUR", "KOVILAMBAKKAM", "SUNNAMBU KOLATHUR", "ASTHINAPURAM", "ANKAPUTTUR", "PAMMAL", "POZHICHALUR", "CHITLAPAKKAM", "VENGAIVASAL", "CHINMAYANAGAR", "VALASARAWALKAM", "VIRUGAMBAKKAM", "NESAPAKKAM", "MGR NAGAR", "JAFFERKHANPET", "FLOWERS ROAD", "GOPALAPURAM", "ALWARTHIRUNAGAR", "KOLAPAKKAM", "ADAMBAKKAM", "NANDAMBAKKAM", "MOULIVAKKAM", "RAMAPURAM", "MADIPAKKAM", "SALIGRAMAM", "KANDHANCHAVADI", "THARAMANI", "GOWRIVAKKAM", "TRUSTPURAM", "CIT NAGAR", "RANGARAJAPURAM", "ICE HOUSE", "JAM BAZAAR", "CENATOPH ROAD", "MRC NAGAR", "SANTHOME", "OKKIYAM", "NAVALUR", "THORAIPAKKAM", "GREENWAYS ROAD", "RAJAJI SALAI", "ECR", "OMR", "ABIRAMAPURAM", "MANDAVELI", "MUDICHUR", "IRUMBULIYUR", "PERUNGALATHUR", "VANDALUR", "URAPAKKAM", "KILAMBAKKAM", "GUDUVANCHERY", "MARAIMALAI NAGAR", "SP KOIL", "CHENGALPATTU", "VYSARPADI", "PURASAIWALKAM", "PERAMBUR", "CHOOLAI", "ANNANAGAR", "SHANTHI COLONY", "SHENOY NAGAR", "THIRUMANGALAM", "MUGAPPAIR", "NOLAMBUR", "AYANAVARAM", "VILLIVAKKAM", "PADI", "KORATTUR", "KOLATHUR", "MADHAVARAM", "KELLYS", "KILPAUK", "CENTRAL", "NERKUNDRAM", "MADURAVOYAL", "VELAPANCHAVADI", "IYYAPANTHANGAL", "POONAMALLEE", "THIRUMAZHISAI", "SRIPERUMBUTHUR", "PARRYS", "KANCHEEPURAM", "MANGADU", "SUNGUVARCHATIRAM", "REDHILLS", "CHOZHAVARAM", "KARANODAI", "PERIYAPALAYAM", "AMBATTUR", "THIRUMULLAIVOYAL", "AVADI", "PATTABIRAM", "THIRUNINRAVUR", "VEPPAMPATTU", "TIRUVALLUR", "ARAKONAM", "TIRUTHANI", "TIRUPATHI", "MINT", "WASHERMENPET", "TONDIARPET", "THIRUVOTRIYUR", "ENNORE", "PERAMBUR", "MOOLAKADAI", "ERUKANCHERY", "VYSARPADI", "MANALI", "GOOMIDIPOONDI", "PADAPPAI", "ORAGADAM", "KUNDRATHUR", "PORUR", "PARK TOWN", "VANAGARAM", "THIRUVERKADU", "MUGALIVAKKAM", "KATTUPAKKAM", "GERUGAMBAKKAM", "MADHURANTHANGAM", "MELMARUVATHUR", "AYAPAKKAM"
+]
+
 const lostReasons = [
-  "Not interested", "Did not enquire", "Lost to co-dealer", "Lost to competition",
-  "Low Budget", "Out of Territory", "Not Eligible", "Job Enquiry"
+  "Invalid Number", "Wrong Number", "Just enquired", "Service", "Insurance", "Internal",
+  "Used car", "No Response", "Mock Call", "Plan Dropped", "Plan Postponed", "DSA Enq",
+  "BH Registration", "Existing Enq", "Duplicate Lead", "Not interested", "Did not enquire",
+  "Lost to co-dealer", "Lost to competition", "Low Budget", "Out of Territory", "Not Eligible", "Job Enquiry"
 ]
 
 const pendingReasons = [
-  "RNR", "DND", "Not Reachable", "Switched Off", "Busy", 
-  "Disconnecting the call", "Temporary out of Service", "Call me back"
+  "RNR", "DND", "Not Reachable", "Switched Off", "Busy",
+  "Disconnecting the call", "Temporary out of Service", "Call me back",
+  "Incoming call facility not available", "Out of Network"
 ]
 
 export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateModalProps) {
   const [selectedStatus, setSelectedStatus] = useState<"qualified" | "unqualified" | "pending" | null>(null)
   const today = new Date().toISOString().slice(0,10)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     model_interested: "",
     variant: "",
@@ -676,7 +684,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           // Lead status mapping per business rules
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
                        selectedStatus === "unqualified" ? "Lost" : 
-                       selectedStatus === "pending" ? pendingExactStatus : "Fresh",
+                       selectedStatus === "pending" ? (formData.pending_reason === "Call me back" ? "Call me back" : formData.pending_reason || "Called") : null,
           // Final status mapping - when qualified, final_status should be Pending
           final_status: selectedStatus === "qualified" ? "Pending" :
                        selectedStatus === "unqualified" ? "Lost" : 
@@ -718,10 +726,6 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       }
     }
     
-    // Close form immediately for ultra-fast UI
-    onUpdate(updateData)
-    onClose()
-    
     // Get authentication token
     const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
     const parsed = session ? JSON.parse(session) : null
@@ -729,7 +733,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     
     // Direct API call to lead_master - this will trigger background worker for other tables
     console.log('🚀 [Direct API] Lead update started - updating lead_master directly (no worker)!')
-    console.log('⚡ [Fast Response] Form closed after direct update; background queue only for qualified/trade-in...')
+    // Keep modal open and show loading until lead_master update succeeds
+    setIsSubmitting(true)
     
     fetch(`/api/leads/${lead?.uid}`, {
       method: 'PUT',
@@ -792,6 +797,15 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       
       console.log('✅ [Direct API] Lead master updated successfully!')
 
+      // Proactively notify dashboard to refresh immediately
+      try {
+        window.dispatchEvent(new CustomEvent('lead-master-updated', { detail: { uid: lead?.uid } }))
+      } catch {}
+
+      // Now update UI and close modal
+      onUpdate(updateData)
+      onClose()
+
       // Queue background processing for qualified_leads and trade-in only after successful direct update
       if (selectedStatus === 'qualified') {
         try {
@@ -840,7 +854,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     })
     .catch(e => {
       console.error('❌ [Direct API] Failed to update lead:', e)
+      alert('Failed to update lead. Please try again.')
     })
+    .finally(() => setIsSubmitting(false))
   }
 
   if (!lead) return null
@@ -1167,27 +1183,66 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     <div>
                       <Label className="text-xs font-medium text-gray-600 mb-2 block">Follow-up Date (Today)</Label>
                       <Input type="date" value={today} readOnly className="h-10 text-sm" />
-                  </div>
+                    </div>
                     <div>
                       <Label className="text-xs font-medium text-gray-600 mb-2 block">Call Outcome</Label>
-                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Call Outcome options">
-                        {["Connected", "Not Reachable", "Call Me Back", "Not Interested"].map((outcome) => (
-                          <button
-                            key={outcome}
-                            type="button"
-                            role="radio"
-                            aria-checked={formData.call_status === outcome}
-                            className={`rounded-full px-3 py-2 text-sm border min-h-[44px] inline-flex items-center gap-2 transition-all duration-150 focus:ring-2 focus:ring-offset-1 focus:ring-blue-300 ${
-                              formData.call_status === outcome
-                                ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
-                                : "border-gray-200 bg-white hover:bg-gray-50"
-                            }`}
-                            onClick={() => setFormData(prev => ({ ...prev, call_status: outcome }))}
-                          >
-                            {outcome}
-                          </button>
-                        ))}
-                  </div>
+                      <div className="space-y-2">
+                        <Select value={formData.call_status} onValueChange={(value) => setFormData(prev => ({ ...prev, call_status: value }))}>
+                           <SelectTrigger>
+                             <SelectValue placeholder="Select outcome" />
+                           </SelectTrigger>
+                           <SelectContent>
+                             <SelectItem value="Lead Status">Lead Status</SelectItem>
+                             <SelectItem value="DND">DND</SelectItem>
+                             <SelectItem value="Booked">Booked</SelectItem>
+                             <SelectItem value="Duplicate Lead">Duplicate Lead</SelectItem>
+                             <SelectItem value="Existing Enquiry">Existing Enquiry</SelectItem>
+                             <SelectItem value="Invalid Number">Invalid Number</SelectItem>
+                             <SelectItem value="Lost to Co-Dealer">Lost to Co-Dealer</SelectItem>
+                             <SelectItem value="Lost to competitor">Lost to competitor</SelectItem>
+                             <SelectItem value="RNR">RNR</SelectItem>
+                             <SelectItem value="Not Enquired">Not Enquired</SelectItem>
+                             <SelectItem value="Not Interested">Not Interested</SelectItem>
+                             <SelectItem value="Plan Postponed">Plan Postponed</SelectItem>
+                             <SelectItem value="Interested">Interested</SelectItem>
+                             <SelectItem value="Call me back">Call me back</SelectItem>
+                             <SelectItem value="Not reachable">Not reachable</SelectItem>
+                             <SelectItem value="Switched off">Switched off</SelectItem>
+                             <SelectItem value="Busy">Busy</SelectItem>
+                             <SelectItem value="Disconnecting the call">Disconnecting the call</SelectItem>
+                             <SelectItem value="No Response">No Response</SelectItem>
+                             <SelectItem value="Low Budget">Low Budget</SelectItem>
+                             <SelectItem value="Out of Territory">Out of Territory</SelectItem>
+                             <SelectItem value="Number does not exist">Number does not exist</SelectItem>
+                             <SelectItem value="DSA">DSA</SelectItem>
+                             <SelectItem value="Just enquired">Just enquired</SelectItem>
+                             <SelectItem value="Not Eligible">Not Eligible</SelectItem>
+                             <SelectItem value="Out of Network">Out of Network</SelectItem>
+                             <SelectItem value="Used Car">Used Car</SelectItem>
+                             <SelectItem value="Incoming call not available">Incoming call not available</SelectItem>
+                             <SelectItem value="Plan Dropped">Plan Dropped</SelectItem>
+                             <SelectItem value="Temporary out of Service">Temporary out of Service</SelectItem>
+                             <SelectItem value="Service">Service</SelectItem>
+                             <SelectItem value="Internal call">Internal call</SelectItem>
+                             <SelectItem value="Wrong number">Wrong number</SelectItem>
+                             <SelectItem value="Insurance">Insurance</SelectItem>
+                             <SelectItem value="Warranty">Warranty</SelectItem>
+                             <SelectItem value="Marketing">Marketing</SelectItem>
+                             <SelectItem value="Yard">Yard</SelectItem>
+                             <SelectItem value="Job Enq">Job Enq</SelectItem>
+                           </SelectContent>
+                         </Select>
+                       </div>
+                       <div className="mt-3">
+                         <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                         <Textarea
+                           placeholder="Add call remarks"
+                           value={formData.general_remarks}
+                           onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
+                           rows={3}
+                           className="text-sm"
+                         />
+                       </div>
                     </div>
                     <div>
                       <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date</Label>
@@ -1373,13 +1428,23 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                       ))}
                     </div>
                   </div>
-                  <div>
+                  <div className="space-y-3">
                     <Label htmlFor="customer_location" className="text-xs font-medium text-gray-600">Location</Label>
+                    <Select value={formData.customer_location} onValueChange={(value) => setFormData(prev => ({ ...prev, customer_location: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chennaiLocations.map((location) => (
+                          <SelectItem key={location} value={location}>{location}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Input 
-                      placeholder="Enter customer location"
+                      placeholder="Or type a location"
                       value={formData.customer_location}
                       onChange={(e) => setFormData(prev => ({ ...prev, customer_location: e.target.value }))}
-                      className="h-10 text-sm mt-1"
+                      className="h-10 text-sm"
                     />
                   </div>
                 </div>
@@ -1557,13 +1622,23 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date</Label>
-                      <Input 
-                        type="date"
-                        value={formData.follow_up_date}
-                        onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                    <Input 
+                      type="date"
+                      value={formData.follow_up_date}
+                      onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
                       className="h-10 text-sm"
-                      />
-                    </div>
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                    <Textarea
+                      placeholder="Add qualification/notes"
+                      value={formData.general_remarks}
+                      onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
+                      rows={3}
+                      className="text-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1681,6 +1756,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     ))}
                   </div>
                 </div>
+                <div>
+                  <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                  <Textarea
+                    placeholder="Add reason/remark for loss"
+                    value={formData.general_remarks}
+                    onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
+                    rows={3}
+                    className="text-sm"
+                  />
+                </div>
                 <div className="flex items-center space-x-2 p-3 bg-red-50/80 rounded-lg border border-red-200/40">
                   <AlertTriangle className="h-4 w-4 text-red-600" />
                   <p className="text-xs text-red-700 font-medium">
@@ -1724,6 +1809,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                       ))}
                   </div>
                   </div>
+                  <div>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                    <Textarea
+                      placeholder="Add pending reason/remark"
+                      value={formData.general_remarks}
+                      onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
+                      rows={3}
+                      className="text-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1761,7 +1856,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
             <div className="flex justify-end space-x-3">
               <button
                 onClick={onClose}
-                className="relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] bg-gradient-to-br from-gray-50/90 to-gray-100/70 text-gray-700 border border-gray-200/30 hover:shadow-sm backdrop-blur-[6px]"
+                disabled={isSubmitting}
+                className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] bg-gradient-to-br from-gray-50/90 to-gray-100/70 text-gray-700 border border-gray-200/30 backdrop-blur-[6px] ${isSubmitting ? 'opacity-60 cursor-not-allowed' : 'hover:shadow-sm'}`}
                 aria-label="Close modal"
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
@@ -1774,17 +1870,18 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 <button
                 onClick={handleSubmit}
                   disabled={
+                    isSubmitting ||
                     (lead.lead_status !== "Qualified" && !selectedStatus) || 
                     (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) ||
                     (selectedStatus === "qualified" && (!formData.model_interested || !formData.variant))
                   }
                   className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] backdrop-blur-[6px] ${
                     selectedStatus === "unqualified" 
-                      ? "bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-md hover:shadow-lg" 
+                      ? "bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-md" 
                       : selectedStatus === "pending" 
-                      ? "bg-gradient-to-br from-amber-100/90 to-amber-200/70 text-amber-800 border border-amber-300/30 shadow-md hover:shadow-lg"
-                      : "bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-blue-800 border border-blue-300/30 shadow-md hover:shadow-lg"
-                  } ${(lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) ? "opacity-50 cursor-not-allowed" : ""}`}
+                      ? "bg-gradient-to-br from-amber-100/90 to-amber-200/70 text-amber-800 border border-amber-300/30 shadow-md"
+                      : "bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-blue-800 border border-blue-300/30 shadow-md"
+                  } ${isSubmitting ? 'opacity-70 cursor-wait' : 'hover:shadow-lg'}`}
                   aria-label={
                     lead.lead_status === "Qualified" ? "Save Follow-up" :
                     selectedStatus === "qualified" ? "Qualify Lead" :
@@ -1796,12 +1893,19 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent"></div>
                   <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
                   <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
-                  <span className="relative z-10">
-                {lead.lead_status === "Qualified" ? "Save Follow-up" :
-                 selectedStatus === "qualified" ? "Qualify Lead" :
-                 selectedStatus === "unqualified" ? "Mark as Lost" :
-                 selectedStatus === "pending" ? "Mark as Pending" :
-                 "Update Lead"}
+                  <span className="relative z-10 flex items-center gap-2">
+                    {isSubmitting && (
+                      <span className="inline-block h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                    )}
+                    {isSubmitting
+                      ? (selectedStatus === 'qualified' ? 'Qualifying...' :
+                         selectedStatus === 'unqualified' ? 'Saving...' :
+                         selectedStatus === 'pending' ? 'Saving...' : 'Saving...')
+                      : (lead.lead_status === 'Qualified' ? 'Save Follow-up' :
+                         selectedStatus === 'qualified' ? 'Qualify Lead' :
+                         selectedStatus === 'unqualified' ? 'Mark as Lost' :
+                         selectedStatus === 'pending' ? 'Mark as Pending' :
+                         'Update Lead')}
                   </span>
                 </button>
             )}

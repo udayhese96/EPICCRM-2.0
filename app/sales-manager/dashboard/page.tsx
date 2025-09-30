@@ -75,10 +75,11 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('http://localhost:8000/api/qualified-leads/pending-approvals', {
+      const response = await fetch(`/api/qualified-leads/pending-approvals?_t=${Date.now()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate'
         }
       })
 
@@ -107,7 +108,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`http://localhost:8000/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
+      const response = await fetch(`/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -117,10 +118,17 @@ const SalesManagerDashboard = () => {
 
       if (response.ok) {
         console.log('✅ Request approved successfully')
+        // Optimistically update local state so the item disappears immediately from Pending
+        setApprovalRequests(prev => prev.map(r => 
+          (r.lead_uid === selectedRequest.lead_uid && r.request_type === selectedRequest.request_type)
+            ? { ...r, request_status: 'approved' }
+            : r
+        ))
         setApprovalDialog(false)
         setApprovalNotes('')
         setSelectedRequest(null)
-        loadApprovalRequests()
+        // Safety refresh after short delay to ensure backend propagation
+        setTimeout(() => loadApprovalRequests(), 800)
       } else {
         console.error('❌ Failed to approve request')
       }
@@ -141,7 +149,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`http://localhost:8000/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}`, {
+      const response = await fetch(`/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -151,10 +159,16 @@ const SalesManagerDashboard = () => {
 
       if (response.ok) {
         console.log('✅ Request rejected successfully')
+        // Optimistic local update
+        setApprovalRequests(prev => prev.map(r => 
+          (r.lead_uid === selectedRequest.lead_uid && r.request_type === selectedRequest.request_type)
+            ? { ...r, request_status: 'rejected' }
+            : r
+        ))
         setRejectionDialog(false)
         setRejectionReason('')
         setSelectedRequest(null)
-        loadApprovalRequests()
+        setTimeout(() => loadApprovalRequests(), 800)
       } else {
         console.error('❌ Failed to reject request')
       }

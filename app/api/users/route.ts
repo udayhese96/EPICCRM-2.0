@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const API_BASE_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const API_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
 
 export async function GET(request: NextRequest) {
   const headerAuth = request.headers.get('Authorization')
@@ -29,7 +33,11 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json()
     const users = Array.isArray(data) ? data : (data?.users ?? [])
-    return NextResponse.json({ users }, { status: 200 })
+    const nextResponse = NextResponse.json({ users }, { status: 200 })
+    nextResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    nextResponse.headers.set('Pragma', 'no-cache')
+    nextResponse.headers.set('Expires', '0')
+    return nextResponse
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
