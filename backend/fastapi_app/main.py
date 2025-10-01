@@ -3422,20 +3422,26 @@ async def get_trade_in_details(lead_uid: str, current_user=Depends(get_current_u
     try:
         # Fetch subset from lead_master
         lm_resp = supabase.table('lead_master').select(
-            'uid, profession, test_drive_type, trade_in'
+            'uid, customer_name, customer_mobile_number, profession, test_drive_type, trade_in'
         ).eq('uid', lead_uid).limit(1).execute()
         lead_master_row = lm_resp.data[0] if lm_resp.data else {}
 
         # Fetch latest trade-in details if any
-        ti_resp = supabase.table('trade_in_master').select('*').eq('lead_uid', lead_uid) \
+        ti_resp = supabase.table('trade_in_master').select('lead_uid, customer_name, customer_mobile_number, trade_in_make, trade_in_model, trade_in_year, trade_in_km, trade_in_ownership').eq('lead_uid', lead_uid) \
             .order('created_at', desc=True).limit(1).execute()
         trade_in_row = ti_resp.data[0] if ti_resp.data else None
+
+        # Prefer customer fields from trade-in details, fallback to lead_master
+        customer_name = (trade_in_row.get('customer_name') if trade_in_row else None) or (lead_master_row.get('customer_name') if lead_master_row else None)
+        customer_mobile_number = (trade_in_row.get('customer_mobile_number') if trade_in_row else None) or (lead_master_row.get('customer_mobile_number') if lead_master_row else None)
 
         result = {
             'lead_uid': lead_uid,
             'trade_in': (lead_master_row.get('trade_in') if lead_master_row else '') or '',
             'profession': lead_master_row.get('profession') if lead_master_row else None,
             'test_drive_type': lead_master_row.get('test_drive_type') if lead_master_row else None,
+            'customer_name': customer_name,
+            'customer_mobile_number': customer_mobile_number,
             'lead_master': lead_master_row or {},
             'trade_in_details': trade_in_row
         }

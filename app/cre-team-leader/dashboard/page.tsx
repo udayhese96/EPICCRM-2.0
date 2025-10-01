@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
-import { RefreshCw, Users, CheckCircle, XCircle, AlertCircle, UserCheck, UserX, Building2, MapPin, Calendar, Phone, Mail, Car, FileText, TrendingUp, BarChart3, Filter, Search, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { RefreshCw, Users, CheckCircle, XCircle, AlertCircle, UserCheck, UserX, Building2, MapPin, Calendar, Phone, Mail, Car, FileText, TrendingUp, BarChart3, Filter, Search, ChevronDown, ChevronUp, Loader2, Zap } from 'lucide-react'
 
 interface QualifiedLead {
   id: string
@@ -127,11 +127,30 @@ export default function CRETeamLeaderDashboard() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      // Load all data in parallel for maximum speed
+      // Load all data in parallel for maximum speed with cache-busting
+      const timestamp = Date.now()
       const [leadsResponse, gemResponse, branchesResponse] = await Promise.all([
-        fetch('/api/cre-team-leader/qualified-leads'),
-        fetch('/api/ps-users'),
-        fetch('/api/branches')
+        fetch(`/api/cre-team-leader/qualified-leads?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        }),
+        fetch(`/api/ps-users?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        }),
+        fetch(`/api/branches?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        })
       ])
 
       // Process responses in parallel
@@ -399,182 +418,261 @@ export default function CRETeamLeaderDashboard() {
 
   const getStatusBadge = (lead: QualifiedLead) => {
     if (lead.ps_name) {
-      return <Badge variant="secondary">Assigned to {lead.ps_name}</Badge>
+      return (
+        <Badge className="bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 border-0 font-medium px-3 py-1">
+          <UserCheck className="w-3 h-3 mr-1" />
+          Assigned to {lead.ps_name}
+        </Badge>
+      )
     }
-    return <Badge variant="outline">Unassigned</Badge>
+    return (
+      <Badge className="bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700 border-0 font-medium px-3 py-1">
+        <AlertCircle className="w-3 h-3 mr-1" />
+        Unassigned
+      </Badge>
+    )
   }
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
-        <div className="space-y-6">
-          {/* Header Section */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  CRE Team Leader Dashboard
-                </h1>
-                <p className="text-gray-600 mt-2">Manage and assign qualified leads to GEM teams</p>
-              </div>
-              <div className="flex gap-3">
-                <Button 
-                  onClick={loadData} 
-                  disabled={isLoading}
-                  className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg"
-                >
-                  {isLoading ? 'Loading...' : 'Refresh'}
-                </Button>
-                <Dialog open={assignmentDialog} onOpenChange={(open) => {
-                  setAssignmentDialog(open)
-                  if (open) {
-                    console.log('🎯 Assignment dialog opened with selected leads:', selectedLeads)
-                  }
-                }}>
-                  <DialogTrigger asChild>
-                    <Button 
-                      disabled={selectedLeads.length === 0}
-                      className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-lg"
-                    >
-                      Assign Selected ({selectedLeads.length})
-                    </Button>
-                  </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Assign Leads to GEM</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="branch">Branch</Label>
-                    <Select value={selectedBranch} onValueChange={handleBranchChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {branches.length > 0 ? (
-                          branches.map((branch) => (
-                            <SelectItem key={branch.id} value={branch.name}>
-                              {branch.name}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="no-branches" disabled>
-                            No branches available
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="gem">GEM User</Label>
-                    <Select value={selectedGem} onValueChange={setSelectedGem}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select GEM user" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredGemUsers.length > 0 ? (
-                          filteredGemUsers.map((gem) => (
-                            <SelectItem key={gem.id} value={gem.id}>
-                              {gem.name} ({gem.username})
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="no-gem" disabled>
-                            {selectedBranch ? 'No GEM users for this branch' : 'Select a branch first'}
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setAssignmentDialog(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleBulkAssignment}>
-                      Assign {selectedLeads.length} Leads
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
+      {/* Modern Background */}
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100/20 relative overflow-hidden">
+        {/* Decorative Elements */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-20 left-10 w-32 h-32 bg-gradient-to-br from-orange-200/20 to-orange-300/20 rounded-full blur-xl"></div>
+          <div className="absolute top-40 right-20 w-48 h-48 bg-gradient-to-br from-orange-100/30 to-orange-200/30 rounded-full blur-2xl"></div>
+          <div className="absolute bottom-20 left-1/4 w-24 h-24 bg-gradient-to-br from-orange-200/25 to-orange-300/25 rounded-full blur-lg"></div>
         </div>
 
-          {/* Stats Cards */}
+        <div className="relative z-10 p-6 space-y-8">
+          {/* Modern Header Section */}
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl rounded-2xl overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-8 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                    <Zap className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl font-bold text-white tracking-tight">
+                      CRE Team Leader Dashboard
+                    </h1>
+                    <p className="text-orange-100 mt-1 font-medium">
+                      Manage and assign qualified leads to GEM teams
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <Button 
+                    onClick={loadData} 
+                    disabled={isLoading}
+                    className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-6 py-2 rounded-xl transition-all duration-300"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Refresh
+                      </>
+                    )}
+                  </Button>
+                  <Dialog open={assignmentDialog} onOpenChange={(open) => {
+                    setAssignmentDialog(open)
+                    if (open) {
+                      console.log('🎯 Assignment dialog opened with selected leads:', selectedLeads)
+                    }
+                  }}>
+                    <DialogTrigger asChild>
+                      <Button 
+                        disabled={selectedLeads.length === 0}
+                        className="bg-white text-orange-600 hover:bg-orange-50 font-semibold px-6 py-2 rounded-xl shadow-lg transition-all duration-300 disabled:opacity-50"
+                      >
+                        <Users className="w-4 h-4 mr-2" />
+                        Assign Selected ({selectedLeads.length})
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md bg-white rounded-2xl border-0 shadow-2xl">
+                      <DialogHeader className="pb-6">
+                        <DialogTitle className="text-2xl font-bold text-gray-800 flex items-center">
+                          <UserCheck className="w-6 h-6 mr-3 text-orange-500" />
+                          Assign Leads to GEM
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-6">
+                        <div>
+                          <Label htmlFor="branch" className="text-sm font-semibold text-gray-700 mb-2 block">
+                            Select Branch
+                          </Label>
+                          <Select value={selectedBranch} onValueChange={handleBranchChange}>
+                            <SelectTrigger className="w-full rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20">
+                              <SelectValue placeholder="Choose a branch" />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-xl border-0 shadow-lg">
+                              {branches.length > 0 ? (
+                                branches.map((branch) => (
+                                  <SelectItem key={branch.id} value={branch.name} className="rounded-lg">
+                                    <div className="flex items-center">
+                                      <Building2 className="w-4 h-4 mr-2 text-gray-500" />
+                                      {branch.name}
+                                    </div>
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <SelectItem value="no-branches" disabled>
+                                  No branches available
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="gem" className="text-sm font-semibold text-gray-700 mb-2 block">
+                            Select GEM User
+                          </Label>
+                          <Select value={selectedGem} onValueChange={setSelectedGem}>
+                            <SelectTrigger className="w-full rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20">
+                              <SelectValue placeholder="Choose a GEM user" />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-xl border-0 shadow-lg">
+                              {filteredGemUsers.length > 0 ? (
+                                filteredGemUsers.map((gem) => (
+                                  <SelectItem key={gem.id} value={gem.id} className="rounded-lg">
+                                    <div className="flex items-center">
+                                      <Users className="w-4 h-4 mr-2 text-gray-500" />
+                                      {gem.name} ({gem.username})
+                                    </div>
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <SelectItem value="no-gem" disabled>
+                                  {selectedBranch ? 'No GEM users for this branch' : 'Select a branch first'}
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-4">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setAssignmentDialog(false)}
+                            className="px-6 py-2 rounded-xl border-gray-200 hover:bg-gray-50 font-medium"
+                          >
+                            Cancel
+                          </Button>
+                          <Button 
+                            onClick={handleBulkAssignment}
+                            className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg"
+                          >
+                            <UserCheck className="w-4 h-4 mr-2" />
+                            Assign {selectedLeads.length} Leads
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Modern Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-xl border-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-blue-100">Total Assigned Leads</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{qualifiedLeads.length}</div>
-                <p className="text-blue-100 text-sm">All assigned leads</p>
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 group">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Total Leads</p>
+                    <p className="text-3xl font-bold text-gray-900">{qualifiedLeads.length}</p>
+                    <p className="text-xs text-gray-500 mt-1">All qualified leads</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <BarChart3 className="w-6 h-6 text-blue-600" />
+                  </div>
+                </div>
               </CardContent>
             </Card>
-            <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-xl border-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-orange-100">Unassigned Leads</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">
-                  {qualifiedLeads.filter(lead => !lead.ps_name).length}
+
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 group">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Unassigned</p>
+                    <p className="text-3xl font-bold text-orange-600">
+                      {qualifiedLeads.filter(lead => !lead.ps_name).length}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Need assignment</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-orange-200 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <AlertCircle className="w-6 h-6 text-orange-600" />
+                  </div>
                 </div>
-                <p className="text-orange-100 text-sm">Need assignment</p>
               </CardContent>
             </Card>
-            <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white shadow-xl border-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-green-100">Assigned Leads</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">
-                  {qualifiedLeads.filter(lead => lead.ps_name).length}
+
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 group">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Assigned</p>
+                    <p className="text-3xl font-bold text-green-600">
+                      {qualifiedLeads.filter(lead => lead.ps_name).length}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">In progress</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-green-100 to-green-200 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  </div>
                 </div>
-                <p className="text-green-100 text-sm">In progress</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Search and Filters */}
-          <div className="mb-6">
-            {/* Search Bar */}
-            <Card className="shadow-lg mb-4">
-              <CardContent className="p-6">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search by customer name, phone, lead UID, PS name..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Date Range Filter */}
-            <Card className="shadow-lg">
-              <CardContent className="p-6">
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Filter className="h-4 w-4 text-gray-400" />
-                    <Label className="text-sm font-medium">Date Range</Label>
+          {/* Modern Search and Filters */}
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl">
+            <CardContent className="p-6">
+              <div className="space-y-6">
+                {/* Search Bar */}
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700 mb-3 block flex items-center">
+                    <Search className="w-4 h-4 mr-2" />
+                    Search Leads
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                    <Input
+                      placeholder="Search by customer name, phone, lead UID, PS name..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-12 h-12 rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20 text-gray-700 bg-white/50"
+                    />
                   </div>
+                </div>
+
+                {/* Date Range Filter */}
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700 mb-3 block flex items-center">
+                    <Calendar className="w-4 h-4 mr-2" />
+                    Date Range Filter
+                  </Label>
                   <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-3">
                       <Input
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
-                        className="text-sm"
+                        className="rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20 bg-white/50"
                         placeholder="From"
                       />
-                      <span className="text-gray-400">to</span>
+                      <span className="text-gray-400 font-medium">to</span>
                       <Input
                         type="date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
-                        className="text-sm"
+                        className="rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20 bg-white/50"
                         placeholder="To"
                       />
                     </div>
@@ -586,39 +684,81 @@ export default function CRETeamLeaderDashboard() {
                           setStartDate('')
                           setEndDate('')
                         }}
-                        className="text-gray-400 hover:text-gray-600"
+                        className="rounded-xl border-gray-200 hover:bg-gray-50 text-gray-600 font-medium px-4"
                       >
+                        <XCircle className="w-4 h-4 mr-2" />
                         Clear Filters
                       </Button>
                     )}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {/* Qualified Leads Table */}
-          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm rounded-xl">
-            <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-t-xl">
-              <CardTitle className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                Assigned Leads
+          {/* Modern Leads Table */}
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-gray-50/80 to-gray-100/80 backdrop-blur-sm px-6 py-4">
+              <CardTitle className="text-xl font-bold text-gray-800 flex items-center">
+                <div className="w-2 h-2 bg-orange-500 rounded-full mr-3"></div>
+                Lead Management
+                <Badge className="ml-3 bg-orange-100 text-orange-700 border-0">
+                  {filteredLeads.length} leads
+                </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-gradient-to-r from-blue-50 to-indigo-50">
-                      <TableHead className="w-12 text-center">Select</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Location</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Customer Name</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Mobile</TableHead>
+                    <TableRow className="bg-gradient-to-r from-orange-50/50 to-orange-100/50 hover:bg-orange-50/70">
+                      <TableHead className="w-12 text-center font-semibold text-gray-700">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const unassignedIds = filteredLeads.filter(lead => !lead.ps_name).map(lead => lead.id)
+                              setSelectedLeads(unassignedIds)
+                            } else {
+                              setSelectedLeads([])
+                            }
+                          }}
+                          className="w-4 h-4 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2"
+                        />
+                      </TableHead>
+                      <TableHead className="font-semibold text-gray-700">
+                        <div className="flex items-center">
+                          <MapPin className="w-4 h-4 mr-2" />
+                          Location
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-semibold text-gray-700">
+                        <div className="flex items-center">
+                          <Users className="w-4 h-4 mr-2" />
+                          Customer
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-semibold text-gray-700">
+                        <div className="flex items-center">
+                          <Phone className="w-4 h-4 mr-2" />
+                          Mobile
+                        </div>
+                      </TableHead>
                       <TableHead className="font-semibold text-gray-700">Source</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Model Interested</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Branch</TableHead>
-                      <TableHead className="font-semibold text-gray-700">GEM</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Action</TableHead>
+                      <TableHead className="font-semibold text-gray-700">
+                        <div className="flex items-center">
+                          <Car className="w-4 h-4 mr-2" />
+                          Model
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-semibold text-gray-700">
+                        <div className="flex items-center">
+                          <Building2 className="w-4 h-4 mr-2" />
+                          Branch
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-semibold text-gray-700">GEM User</TableHead>
+                      <TableHead className="font-semibold text-gray-700">Actions</TableHead>
                       <TableHead className="font-semibold text-gray-700">Status</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -633,8 +773,8 @@ export default function CRETeamLeaderDashboard() {
                       .map((lead, index) => (
                       <TableRow 
                         key={lead.id} 
-                        className={`hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-200 ${
-                          index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                        className={`hover:bg-orange-50/30 transition-all duration-200 border-0 ${
+                          index % 2 === 0 ? 'bg-white/50' : 'bg-gray-50/30'
                         }`}
                       >
                         <TableCell className="text-center">
@@ -643,51 +783,69 @@ export default function CRETeamLeaderDashboard() {
                             checked={selectedLeads.includes(lead.id)}
                             onChange={(e) => handleLeadSelection(lead.id, e.target.checked)}
                             disabled={!!lead.ps_name}
-                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                            className="w-4 h-4 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2"
                           />
                         </TableCell>
-                        <TableCell className="font-medium text-blue-600">{lead.customer_location || '—'}</TableCell>
-                        <TableCell className="font-medium text-gray-800">{lead.customer_name}</TableCell>
-                        <TableCell className="text-gray-600">{lead.customer_mobile_number}</TableCell>
+                        <TableCell className="font-medium text-gray-700">
+                          {lead.customer_location || (
+                            <span className="text-gray-400 italic">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-semibold text-gray-800">
+                          {lead.customer_name}
+                        </TableCell>
+                        <TableCell className="text-gray-600 font-medium">
+                          {lead.customer_mobile_number}
+                        </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200">
+                          <Badge className="bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 border-0 font-medium px-3 py-1">
                             {lead.source}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-gray-700">{lead.model_interested || '—'}</TableCell>
-                        <TableCell className="text-gray-700">
+                        <TableCell className="text-gray-700 font-medium">
+                          {lead.model_interested || (
+                            <span className="text-gray-400 italic">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Select 
                             value={lead.branch || ''} 
                             onValueChange={(branch) => handleBranchAssignment(lead.id, branch)}
                             disabled={!!lead.ps_name}
                           >
-                            <SelectTrigger className="w-32 h-8">
+                            <SelectTrigger className="w-36 h-9 rounded-lg border-gray-200 focus:border-orange-500 focus:ring-orange-500/20">
                               <SelectValue placeholder="Select Branch" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="rounded-xl border-0 shadow-lg">
                               {branches.map((branch) => (
-                                <SelectItem key={branch.id} value={branch.name}>
-                                  {branch.name}
+                                <SelectItem key={branch.id} value={branch.name} className="rounded-lg">
+                                  <div className="flex items-center">
+                                    <Building2 className="w-3 h-3 mr-2 text-gray-500" />
+                                    {branch.name}
+                                  </div>
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                         </TableCell>
-                        <TableCell className="text-gray-700">
+                        <TableCell>
                           <Select 
                             value={selectedGems[lead.id] || ''} 
                             onValueChange={(gemName) => handleGemSelection(lead.id, gemName)}
                             disabled={!!lead.ps_name}
                           >
-                            <SelectTrigger className="w-32 h-8">
+                            <SelectTrigger className="w-36 h-9 rounded-lg border-gray-200 focus:border-orange-500 focus:ring-orange-500/20">
                               <SelectValue placeholder="Select GEM" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="rounded-xl border-0 shadow-lg">
                               {gemUsers
                                 .filter(gem => !lead.branch || gem.branch === lead.branch)
                                 .map((gem) => (
-                                <SelectItem key={gem.id} value={gem.name}>
-                                  {gem.name}
+                                <SelectItem key={gem.id} value={gem.name} className="rounded-lg">
+                                  <div className="flex items-center">
+                                    <Users className="w-3 h-3 mr-2 text-gray-500" />
+                                    {gem.name}
+                                  </div>
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -700,16 +858,18 @@ export default function CRETeamLeaderDashboard() {
                                 size="sm"
                                 onClick={() => handleIndividualAssignment(lead.id)}
                                 disabled={!lead.branch || !selectedGems[lead.id]}
-                                className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-xs px-3 py-1"
+                                className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white text-xs px-4 py-2 rounded-lg font-medium shadow-sm disabled:opacity-50"
                               >
+                                <UserCheck className="w-3 h-3 mr-1" />
                                 Assign
                               </Button>
                             ) : (
                               <Button
                                 size="sm"
                                 onClick={() => handleDeassignment(lead.id)}
-                                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-xs px-3 py-1"
+                                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-xs px-4 py-2 rounded-lg font-medium shadow-sm"
                               >
+                                <UserX className="w-3 h-3 mr-1" />
                                 Deassign
                               </Button>
                             )}
@@ -720,13 +880,20 @@ export default function CRETeamLeaderDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                {filteredLeads.length === 0 && (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Search className="w-6 h-6 text-gray-400" />
+                    </div>
+                    <p className="text-gray-500 text-lg font-medium">No leads found</p>
+                    <p className="text-gray-400 text-sm mt-1">Try adjusting your search filters</p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
-      </div>
     </DashboardLayout>
   )
 }
-

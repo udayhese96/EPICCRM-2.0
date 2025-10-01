@@ -11,12 +11,18 @@ export async function GET(request: NextRequest) {
     // Get token from cookies if not in headers
     const token = request.cookies.get('access_token')?.value || request.headers.get('Authorization')
     
-    const response = await fetch(`${FASTAPI_URL}/api/cre-team-leader/qualified-leads`, {
+    // Add cache-busting timestamp
+    const timestamp = Date.now()
+    
+    const response = await fetch(`${FASTAPI_URL}/api/cre-team-leader/qualified-leads?_t=${timestamp}`, {
       method: 'GET',
       headers: {
         'Authorization': token ? `Bearer ${token}` : '',
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
       },
+      cache: 'no-store'
     })
 
     if (!response.ok) {
@@ -27,7 +33,15 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    
+    // Return response with cache-busting headers
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    })
   } catch (error) {
     console.error('Error fetching qualified leads:', error)
     return NextResponse.json(

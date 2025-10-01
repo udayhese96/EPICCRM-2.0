@@ -34,7 +34,9 @@ import {
   Edit3,
   Settings,
   DollarSign,
-  MapPin
+  MapPin,
+  Zap,
+  Loader2
 } from "lucide-react"
 
 interface PSFollowUp {
@@ -129,6 +131,7 @@ export default function PSDashboard() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [pendingFilter, setPendingFilter] = useState<'all'|'hot'|'warm'|'cold'>('all')
+  const [todaySearch, setTodaySearch] = useState('')
   const [pendingStatusFilter, setPendingStatusFilter] = useState<'all'|'pending'|'booked'>('all')
 
   // Reset filters when switching tabs
@@ -137,8 +140,13 @@ export default function PSDashboard() {
     setActiveSubTab('requested') // Reset sub-tab to 'requested' when switching main tabs
     
     // Reset filters based on tab
-    if (tab === 'today' || tab === 'booked' || tab === 'retailed' || tab === 'wonlost') {
+    if (tab === 'today') {
       setDateFilter('today')
+      setStartDate('')
+      setEndDate('')
+      setTodaySearch('')
+    } else if (tab === 'wonlost') {
+      setDateFilter('all')
       setStartDate('')
       setEndDate('')
     } else if (tab === 'pending') {
@@ -490,9 +498,32 @@ export default function PSDashboard() {
     // Load extra info (profession, test_drive_type, trade-in) from backend
     ;(async () => {
       try {
-        const res = await fetch(`/api/trade-in/${encodeURIComponent(followUp.lead_uid)}`)
+        const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+        const parsed = session ? JSON.parse(session) : null
+        const token = parsed?.access_token || ''
+        const timestamp = Date.now()
+        const res = await fetch(`/api/trade-in/${encodeURIComponent(followUp.lead_uid)}?_t=${timestamp}`, {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Cache-Control': 'no-store'
+          }
+        })
         const data = await res.json()
         if (res.ok) {
+          const ti = (data?.trade_in_details || {}) as any
+          const normalized = {
+            make: ti.make || ti.trade_in_make || ti.tradeMake || '',
+            model: ti.model || ti.trade_in_model || ti.tradeModel || '',
+            year: ti.year || ti.trade_in_year || ti.tradeYear || '',
+            kms_driven: ti.kms_driven || ti.km || ti.trade_in_km || ti.kms || '',
+            ownership: ti.ownership || ti.trade_in_ownership || ''
+          }
+          setTradeInData((prev: any) => ({
+            ...(prev || {}),
+            ...normalized,
+            customer_name: data.customer_name || data.lead_master?.customer_name || (ti?.customer_name || ''),
+            customer_mobile_number: data.customer_mobile_number || data.lead_master?.customer_mobile_number || (ti?.customer_mobile_number || '')
+          }))
           setExtraLeadInfo({
             profession: data?.profession || undefined,
             test_drive_type: data?.test_drive_type || undefined,
@@ -507,36 +538,78 @@ export default function PSDashboard() {
     })()
   }
 
+  // Open Trade-in modal and fetch details for a given lead UID
+  const openTradeInModal = (leadUid: string) => {
+    setTradeInLoading(true)
+    setTradeInOpen(true)
+    const timestamp = Date.now()
+    const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+    const parsed = session ? JSON.parse(session) : null
+    const token = parsed?.access_token || ''
+    fetch(`/api/trade-in/${encodeURIComponent(leadUid)}?_t=${timestamp}`, {
+      headers: { 
+        'Cache-Control': 'no-store',
+        'Authorization': token ? `Bearer ${token}` : ''
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        const ti = (data.trade_in_details || {}) as any
+        const normalized = {
+          make: ti.make || ti.trade_in_make || ti.tradeMake || '',
+          model: ti.model || ti.trade_in_model || ti.tradeModel || '',
+          year: ti.year || ti.trade_in_year || ti.tradeYear || '',
+          kms_driven: ti.kms_driven || ti.km || ti.trade_in_km || ti.kms || '',
+          ownership: ti.ownership || ti.trade_in_ownership || ''
+        }
+        const combinedData = {
+          ...normalized,
+          customer_name: data.customer_name || data.lead_master?.customer_name,
+          customer_mobile_number: data.customer_mobile_number || data.lead_master?.customer_mobile_number,
+          trade_in: data.trade_in,
+          profession: data.profession,
+          test_drive_type: data.test_drive_type
+        }
+        setTradeInData(combinedData)
+        setTradeInLoading(false)
+      })
+      .catch(err => {
+        console.error('Error fetching trade-in data:', err)
+        setTradeInLoading(false)
+        toast.error('Failed to fetch trade-in data')
+      })
+  }
+
   const getStatusBadge = (status: string, followUp?: PSFollowUp) => {
     switch (status?.toLowerCase()) {
       case 'won':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Won</Badge>
+        return <Badge className="bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 border-0 font-medium px-3 py-1"><CheckCircle className="w-3 h-3 mr-1" />Won</Badge>
       case 'lost':
-        return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Lost</Badge>
+        return <Badge className="bg-gradient-to-r from-red-100 to-red-200 text-red-700 border-0 font-medium px-3 py-1"><XCircle className="w-3 h-3 mr-1" />Lost</Badge>
       case 'lost requested':
-        return <Badge className="bg-orange-100 text-orange-800"><Clock className="w-3 h-3 mr-1" />Lost Requested</Badge>
+        return <Badge className="bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />Lost Requested</Badge>
       case 'qualified':
-        return <Badge className="bg-blue-100 text-blue-800"><Star className="w-3 h-3 mr-1" />Qualified</Badge>
+        return <Badge className="bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 border-0 font-medium px-3 py-1"><Star className="w-3 h-3 mr-1" />Qualified</Badge>
       case 'pending':
         // Show temperature indicator for pending leads in pending tab
         if (activeTab === 'pending' && followUp) {
           const temperature = getPendingTemperature(followUp)
           switch (temperature) {
             case 'hot':
-              return <Badge className="bg-red-100 text-red-800"><Clock className="w-3 h-3 mr-1" />🔥 Hot</Badge>
+              return <Badge className="bg-gradient-to-r from-red-100 to-red-200 text-red-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />🔥 Hot</Badge>
             case 'warm':
-              return <Badge className="bg-orange-100 text-orange-800"><Clock className="w-3 h-3 mr-1" />🔥 Warm</Badge>
+              return <Badge className="bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />🔥 Warm</Badge>
             case 'cold':
-              return <Badge className="bg-blue-100 text-blue-800"><Clock className="w-3 h-3 mr-1" />❄️ Cold</Badge>
+              return <Badge className="bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />❄️ Cold</Badge>
           }
         }
-        return <Badge className="bg-yellow-100 text-yellow-800"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
+        return <Badge className="bg-gradient-to-r from-yellow-100 to-yellow-200 text-yellow-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
       case 'hot':
-        return <Badge className="bg-orange-100 text-orange-800">Hot</Badge>
+        return <Badge className="bg-gradient-to-r from-orange-100 to-orange-200 text-orange-700 border-0 font-medium px-3 py-1">Hot</Badge>
       case 'warm':
-        return <Badge className="bg-yellow-100 text-yellow-800">Warm</Badge>
+        return <Badge className="bg-gradient-to-r from-yellow-100 to-yellow-200 text-yellow-700 border-0 font-medium px-3 py-1">Warm</Badge>
       default:
-        return <Badge variant="secondary">{status || 'Pending'}</Badge>
+        return <Badge className="bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 border-0 font-medium px-3 py-1">{status || 'Pending'}</Badge>
     }
   }
 
@@ -729,11 +802,22 @@ export default function PSDashboard() {
   console.log('Fresh leads sample:', freshList.slice(0, 2))
   
   // Today's follow-ups: Leads with follow-up dates for today or overdue
-  const todayList = applyDateFilter(followUps.filter(f => 
+  // Today list should ignore global dateFilter and always be today + overdue
+  const todayBaseList = followUps.filter(f => 
     !['won','lost'].includes((f.final_status || '').toLowerCase()) && 
     (isToday(f.follow_up_date) || isOverdue(f.follow_up_date))
-  ))
-  const todayCount = todayList.length
+  )
+  // Apply search for today's list
+  const todayListSearched = todayBaseList.filter(f => {
+    if (!todaySearch.trim()) return true
+    const q = todaySearch.toLowerCase()
+    return (
+      f.customer_name?.toLowerCase().includes(q) ||
+      f.customer_mobile_number?.toLowerCase().includes(q) ||
+      f.lead_uid?.toLowerCase().includes(q)
+    )
+  })
+  const todayCount = todayBaseList.length
   
   // Pending leads: Leads with final_status = 'pending' or 'booked' (excluding fresh leads and won/lost)
   const pendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(followUps.filter(f => 
@@ -824,7 +908,7 @@ export default function PSDashboard() {
   const filteredFollowUps = (() => {
     switch(activeTab){
       case 'fresh': return freshList
-      case 'today': return todayList
+      case 'today': return todayListSearched
       case 'pending': return pendingList
       case 'booked': 
         switch(activeSubTab) {
@@ -846,27 +930,20 @@ export default function PSDashboard() {
   })()
 
   const StatCard = ({ title, value, description, icon: Icon, color, bgColor }: any) => (
-    <div className={`${bgColor} rounded-lg pt-2 px-2 md:px-3 border-l-4 ${color} transition-all hover:shadow-lg hover:scale-105 duration-300 h-28 md:h-32`}>
-      <div className="flex flex-col h-full items-center justify-between">
-        {/* Title at top center - shifted upward */}
-        <div className="flex items-center justify-center mb-0.5 md:mb-1">
-          <Icon className={`h-3 w-3 md:h-4 md:w-4 ${color.replace('border-l-', 'text-')} mr-1`} />
-          <div className="text-gray-800 font-semibold text-xs md:text-sm text-center">{title}</div>
-        </div>
-
-        {/* Main count in center - vertically centered */}
-        <div className="flex items-center justify-center">
-          <div className={`text-xl md:text-2xl font-extrabold ${color.replace('border-l-', 'text-')} text-center`}>
-            {value}
+    <Card className={`${bgColor} border-0 shadow-lg rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 group`}>
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
+            <p className={`text-3xl font-bold ${color.replace('border-l-', 'text-')}`}>{value}</p>
+            <p className="text-xs text-gray-500 mt-1">{description}</p>
+          </div>
+          <div className={`w-12 h-12 bg-gradient-to-br ${color.replace('border-l-', 'from-').replace('-500', '-100')} ${color.replace('border-l-', 'to-').replace('-500', '-200')} rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform`}>
+            <Icon className={`w-6 h-6 ${color.replace('border-l-', 'text-')}`} />
           </div>
         </div>
-
-        {/* Description at bottom - anchored at bottom */}
-        <div className="flex items-center justify-center mb-1">
-          <div className="text-gray-600 text-xs md:text-xs text-center leading-tight">{description}</div>
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 
   const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => (
@@ -874,11 +951,11 @@ export default function PSDashboard() {
       onClick={() => onClick(id)}
       className={`relative flex flex-col items-center justify-center gap-1 px-2 py-2 md:px-3 md:py-3 rounded-xl font-medium transition-all duration-300 whitespace-nowrap min-w-0 flex-1 ${
         isActive
-          ? 'bg-white/80 backdrop-blur-md text-blue-700 shadow-lg border border-white/20'
+          ? 'bg-white/80 backdrop-blur-md text-orange-700 shadow-lg border border-white/20'
           : 'text-gray-600 hover:text-gray-800 hover:bg-white/40 hover:backdrop-blur-sm'
       }`}
       style={isActive ? {
-        boxShadow: '0 8px 32px rgba(59, 130, 246, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1)',
+        boxShadow: '0 8px 32px rgba(234, 88, 12, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1)',
         background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%)'
       } : {}}
     >
@@ -891,7 +968,7 @@ export default function PSDashboard() {
         ))}
       </span>
       <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
-        isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+        isActive ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
       }`}>
         {count}
       </span>
@@ -900,979 +977,951 @@ export default function PSDashboard() {
 
   return (
     <DashboardLayout>
-      {/* Notifications */}
-      {notifications.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 space-y-2">
-          {notifications.map(notification => (
-            <div
-              key={notification.id}
-              className={`p-4 rounded-lg shadow-lg border-l-4 ${
-                notification.type === 'approved' 
-                  ? 'bg-green-50 border-green-500 text-green-800' 
-                  : 'bg-red-50 border-red-500 text-red-800'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {notification.type === 'approved' ? (
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                ) : (
-                  <XCircle className="w-5 h-5 text-red-600" />
-                )}
-              <div>
-                  <div className="font-medium">
-                    {notification.type === 'approved' ? 'Request Approved!' : 'Request Rejected'}
-                  </div>
-                  <div className="text-sm">
-                    {notification.requestType === 'booking' ? 'Booking' : 'Retail'} request for {notification.leadUid}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+      {/* Modern Background */}
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100/20 relative overflow-hidden">
+        {/* Decorative Elements */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-20 left-10 w-32 h-32 bg-gradient-to-br from-orange-200/20 to-orange-300/20 rounded-full blur-xl"></div>
+          <div className="absolute top-40 right-20 w-48 h-48 bg-gradient-to-br from-orange-100/30 to-orange-200/30 rounded-full blur-2xl"></div>
+          <div className="absolute bottom-20 left-1/4 w-24 h-24 bg-gradient-to-br from-orange-200/25 to-orange-300/25 rounded-full blur-lg"></div>
         </div>
-      )}
-      
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-1 md:p-2">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="relative mb-2 md:mb-4">
-            {/* Mobile refresh button - positioned absolutely in top right, same line as hamburger */}
-            {showMobileRefreshButton && (
-              <Button
-                onClick={loadFollowUps}
-                disabled={isLoading}
-                className="md:hidden fixed top-2 right-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-2 rounded-lg font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105 flex items-center justify-center z-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              </Button>
-            )}
 
-            {/* Header content with proper spacing */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between">
-              <div className="pl-12 pr-12 md:pl-0 md:pr-0 text-center md:text-left">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-1 md:mb-2">GEM Dashboard</h1>
-                <p className="text-gray-600 text-sm md:text-base">Manage your assigned leads and follow-ups</p>
+        <div className="relative z-10 p-1 md:p-2">
+          <div className="max-w-7xl mx-auto">
+            {/* Notifications */}
+            {notifications.length > 0 && (
+              <div className="fixed top-4 right-4 z-50 space-y-2">
+                {notifications.map(notification => (
+                  <div
+                    key={notification.id}
+                    className={`p-4 rounded-2xl shadow-xl border-l-4 backdrop-blur-sm ${
+                      notification.type === 'approved' 
+                        ? 'bg-green-50/90 border-green-500 text-green-800' 
+                        : 'bg-red-50/90 border-red-500 text-red-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {notification.type === 'approved' ? (
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-red-600" />
+                      )}
+                    <div>
+                        <div className="font-medium">
+                          {notification.type === 'approved' ? 'Request Approved!' : 'Request Rejected'}
+                        </div>
+                        <div className="text-sm">
+                          {notification.requestType === 'booking' ? 'Booking' : 'Retail'} request for {notification.leadUid}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-
-              {/* Desktop refresh button */}
-              <Button
-                onClick={loadFollowUps}
-                disabled={isLoading}
-                className="hidden md:flex bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-xl font-medium hover:shadow-lg transition-all duration-300 hover:scale-105 items-center gap-2 text-sm"
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                {isLoading ? 'Loading...' : 'Refresh Data'}
-              </Button>
-            </div>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="stats-grid grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 mb-3 md:mb-4 px-1 md:px-0">
-            <StatCard
-              title="Total Assigned"
-              value={stats.totalAssigned}
-              description="All leads assigned to you"
-              icon={User}
-              color="border-l-blue-500"
-              bgColor="bg-blue-50"
-            />
-            <StatCard
-              title="Pending"
-              value={stats.pending}
-              description="Awaiting follow-up"
-              icon={Clock}
-              color="border-l-amber-500"
-              bgColor="bg-amber-50"
-            />
-            <StatCard
-              title="Won"
-              value={stats.won}
-              description="Successful conversions"
-              icon={Trophy}
-              color="border-l-green-500"
-              bgColor="bg-green-50"
-            />
-            <StatCard
-              title="Lost"
-              value={stats.lost}
-              description="Unsuccessful leads"
-              icon={AlertCircle}
-              color="border-l-red-500"
-              bgColor="bg-red-50"
-            />
+            )}
+            
+            {/* Modern Header */}
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl rounded-2xl overflow-hidden mb-6">
+              <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-8 py-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                      <Zap className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold text-white tracking-tight">
+                        GEM Dashboard
+                      </h1>
+                      <p className="text-orange-100 mt-1 font-medium">
+                        Manage your assigned leads and follow-ups
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={loadFollowUps}
+                    disabled={isLoading}
+                    className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-6 py-2 rounded-xl transition-all duration-300"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Refresh Data
+                      </>
+                    )}
+                  </Button>
                 </div>
+              </div>
+            </Card>
 
-          {/* Tabs */}
-          <div className="relative bg-gradient-to-r from-blue-50/80 via-purple-50/80 to-pink-50/80 backdrop-blur-sm p-2 md:p-2 rounded-2xl mb-3 md:mb-4 mx-1 md:mx-0 border border-white/30 shadow-lg overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-100/20 via-purple-100/20 to-pink-100/20 backdrop-blur-lg"></div>
-            <div className="relative grid grid-cols-3 md:grid-cols-6 gap-1 md:gap-2">
-              <TabButton
-                id="fresh"
-                label="Fresh Leads"
-                count={freshCount}
-                icon={Star}
-                isActive={activeTab === 'fresh'}
-                onClick={handleTabChange}
+            {/* Modern Stats Grid */}
+            <div className="stats-grid grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <StatCard
+                title="Total Assigned"
+                value={stats.totalAssigned}
+                description="All leads assigned to you"
+                icon={User}
+                color="border-l-blue-500"
+                bgColor="bg-blue-50/80"
               />
-              <TabButton
-                id="today"
-                label="Today's Follow-ups"
-                count={todayCount}
-                icon={Calendar}
-                isActive={activeTab === 'today'}
-                onClick={handleTabChange}
-              />
-              <TabButton
-                id="pending"
-                label="Pending Leads"
-                count={pendingCount}
+              <StatCard
+                title="Pending"
+                value={stats.pending}
+                description="Awaiting follow-up"
                 icon={Clock}
-                isActive={activeTab === 'pending'}
-                onClick={handleTabChange}
+                color="border-l-amber-500"
+                bgColor="bg-amber-50/80"
               />
-              <TabButton
-                id="booked"
-                label="Booked Approval"
-                count={bookedCount}
-                icon={CheckCircle}
-                isActive={activeTab === 'booked'}
-                onClick={handleTabChange}
-              />
-              <TabButton
-                id="retailed"
-                label="Retailed Approval"
-                count={retailedCount}
-                icon={CheckCircle}
-                isActive={activeTab === 'retailed'}
-                onClick={handleTabChange}
-              />
-              <TabButton
-                id="wonlost"
-                label="Won/Lost Leads"
-                count={wonLostCount}
+              <StatCard
+                title="Won"
+                value={stats.won}
+                description="Successful conversions"
                 icon={Trophy}
-                isActive={activeTab === 'wonlost'}
-                onClick={handleTabChange}
+                color="border-l-green-500"
+                bgColor="bg-green-50/80"
               />
+              <StatCard
+                title="Lost"
+                value={stats.lost}
+                description="Unsuccessful leads"
+                icon={AlertCircle}
+                color="border-l-red-500"
+                bgColor="bg-red-50/80"
+              />
+            </div>
+
+            {/* Modern Tabs */}
+            <div className="relative bg-gradient-to-r from-orange-50/80 via-orange-100/80 to-orange-200/80 backdrop-blur-sm p-2 md:p-2 rounded-2xl mb-6 border border-white/30 shadow-lg overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-r from-orange-100/20 via-orange-200/20 to-orange-300/20 backdrop-blur-lg"></div>
+              <div className="relative grid grid-cols-3 md:grid-cols-6 gap-1 md:gap-2">
+                <TabButton
+                  id="fresh"
+                  label="Fresh Leads"
+                  count={freshCount}
+                  icon={Star}
+                  isActive={activeTab === 'fresh'}
+                  onClick={handleTabChange}
+                />
+                <TabButton
+                  id="today"
+                  label="Today's Follow-ups"
+                  count={todayCount}
+                  icon={Calendar}
+                  isActive={activeTab === 'today'}
+                  onClick={handleTabChange}
+                />
+                <TabButton
+                  id="pending"
+                  label="Pending Leads"
+                  count={pendingCount}
+                  icon={Clock}
+                  isActive={activeTab === 'pending'}
+                  onClick={handleTabChange}
+                />
+                <TabButton
+                  id="booked"
+                  label="Booked Approval"
+                  count={bookedCount}
+                  icon={CheckCircle}
+                  isActive={activeTab === 'booked'}
+                  onClick={handleTabChange}
+                />
+                <TabButton
+                  id="retailed"
+                  label="Retailed Approval"
+                  count={retailedCount}
+                  icon={CheckCircle}
+                  isActive={activeTab === 'retailed'}
+                  onClick={handleTabChange}
+                />
+                <TabButton
+                  id="wonlost"
+                  label="Won/Lost Leads"
+                  count={wonLostCount}
+                  icon={Trophy}
+                  isActive={activeTab === 'wonlost'}
+                  onClick={handleTabChange}
+                />
+              </div>
+            </div>
+
+            {/* Modern Leads Table */}
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl rounded-2xl overflow-hidden">
+              <div className="relative bg-gradient-to-r from-orange-500/90 via-orange-600/90 to-orange-700/90 backdrop-blur-md text-white p-3 md:p-4 border-b border-white/20" style={{
+                background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.95) 0%, rgba(251, 146, 60, 0.95) 50%, rgba(254, 215, 170, 0.95) 100%)',
+                boxShadow: '0 8px 32px rgba(234, 88, 12, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
+              }}>
+                <div className="absolute inset-0 bg-gradient-to-r from-white/10 via-white/5 to-white/10 backdrop-blur-lg"></div>
+                <div className="relative">
+                  <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
+                    <Star className="w-4 h-4 text-white/90" />
+                    <span className="text-sm md:text-base text-white/95">
+                      {activeTab === 'fresh' && 'Fresh Leads'}
+                      {activeTab === 'today' && 'Today\'s Follow-ups'}
+                      {activeTab === 'pending' && 'Pending Leads'}
+                      {activeTab === 'booked' && 'Booked Approval'}
+                      {activeTab === 'retailed' && 'Retailed Approval'}
+                      {activeTab === 'wonlost' && 'Won/Lost Leads'}
+                    </span>
+                  </h2>
+                  <p className="text-white/80 text-xs md:text-sm mt-1 leading-relaxed">
+                    {activeTab === 'fresh' && 'Leads newly assigned to you'}
+                    {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
+                    {activeTab === 'pending' && 'Leads with final status Pending'}
+                    {activeTab === 'booked' && 'Booked leads approval status'}
+                    {activeTab === 'retailed' && 'Retailed leads approval status'}
+                    {activeTab === 'wonlost' && 'Leads that are won or lost'}
+                  </p>
                 </div>
+                
+                {/* Subsection tabs for booked and retailed */}
+                {(activeTab === 'booked' || activeTab === 'retailed') && (
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <button
+                      onClick={() => setActiveSubTab('requested')}
+                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                        activeSubTab === 'requested'
+                          ? 'bg-white/25 text-white shadow-lg border-white/40'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      <span className="hidden md:inline">Requested</span>
+                      <span className="md:hidden">Req</span>
+                      <span className="ml-1">({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})</span>
+            </button>
+                    <button
+                      onClick={() => setActiveSubTab('approved')}
+                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                        activeSubTab === 'approved'
+                          ? 'bg-green-500/30 text-white shadow-lg border-green-400/40'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      <span className="hidden md:inline">Approved</span>
+                      <span className="md:hidden">App</span>
+                      <span className="ml-1">({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})</span>
+            </button>
+                    <button
+                      onClick={() => setActiveSubTab('rejected')}
+                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                        activeSubTab === 'rejected'
+                          ? 'bg-red-500/30 text-white shadow-lg border-red-400/40'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      <span className="hidden md:inline">Rejected</span>
+                      <span className="md:hidden">Rej</span>
+                      <span className="ml-1">({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})</span>
+            </button>
+                  </div>
+                )}
           </div>
 
-          {/* Leads Table */}
-          <div className="relative bg-white/90 backdrop-blur-md rounded-2xl shadow-xl overflow-hidden border border-white/20 mx-1 md:mx-0">
-            <div className="relative bg-gradient-to-r from-blue-500/90 via-indigo-600/90 to-purple-600/90 backdrop-blur-md text-white p-3 md:p-4 border-b border-white/20" style={{
-              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.95) 0%, rgba(99, 102, 241, 0.95) 50%, rgba(168, 85, 247, 0.95) 100%)',
-              boxShadow: '0 8px 32px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-            }}>
-              <div className="absolute inset-0 bg-gradient-to-r from-white/10 via-white/5 to-white/10 backdrop-blur-lg"></div>
-              <div className="relative">
-                <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
-                  <Star className="w-4 h-4 text-white/90" />
-                  <span className="text-sm md:text-base text-white/95">
-                    {activeTab === 'fresh' && 'Fresh Leads'}
-                    {activeTab === 'today' && 'Today\'s Follow-ups'}
-                    {activeTab === 'pending' && 'Pending Leads'}
-                    {activeTab === 'booked' && 'Booked Approval'}
-                    {activeTab === 'retailed' && 'Retailed Approval'}
-                    {activeTab === 'wonlost' && 'Won/Lost Leads'}
-                  </span>
-                </h2>
-                <p className="text-white/80 text-xs md:text-sm mt-1 leading-relaxed">
-                  {activeTab === 'fresh' && 'Leads newly assigned to you'}
-                  {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
-                  {activeTab === 'pending' && 'Leads with final status Pending'}
-                  {activeTab === 'booked' && 'Booked leads approval status'}
-                  {activeTab === 'retailed' && 'Retailed leads approval status'}
-                  {activeTab === 'wonlost' && 'Leads that are won or lost'}
-                </p>
-              </div>
-              
-              {/* Subsection tabs for booked and retailed */}
-              {(activeTab === 'booked' || activeTab === 'retailed') && (
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button
-                    onClick={() => setActiveSubTab('requested')}
-                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                      activeSubTab === 'requested'
-                        ? 'bg-white/25 text-white shadow-lg border-white/40'
-                        : 'bg-white/10 text-white/80 hover:bg-white/20'
-                    }`}
-                  >
-                    <span className="hidden md:inline">Requested</span>
-                    <span className="md:hidden">Req</span>
-                    <span className="ml-1">({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})</span>
-          </button>
-                  <button
-                    onClick={() => setActiveSubTab('approved')}
-                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                      activeSubTab === 'approved'
-                        ? 'bg-green-500/30 text-white shadow-lg border-green-400/40'
-                        : 'bg-white/10 text-white/80 hover:bg-white/20'
-                    }`}
-                  >
-                    <span className="hidden md:inline">Approved</span>
-                    <span className="md:hidden">App</span>
-                    <span className="ml-1">({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})</span>
-          </button>
-                  <button
-                    onClick={() => setActiveSubTab('rejected')}
-                    className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                      activeSubTab === 'rejected'
-                        ? 'bg-red-500/30 text-white shadow-lg border-red-400/40'
-                        : 'bg-white/10 text-white/80 hover:bg-white/20'
-                    }`}
-                  >
-                    <span className="hidden md:inline">Rejected</span>
-                    <span className="md:hidden">Rej</span>
-                    <span className="ml-1">({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})</span>
-          </button>
+          {/* Filters Section */}
+          <div className="bg-gray-50/80 backdrop-blur-sm p-3 md:p-4 border-b border-gray-200/50">
+            <div className="flex flex-wrap gap-2 md:gap-4 items-center text-xs md:text-sm">
+              {/* Date Range Filters for Today, Won/Lost sections */}
+              {(activeTab === 'wonlost') && (
+                <>
+                        <div className="flex items-center gap-1 md:gap-2">
+                    <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Filter:</label>
+                    <select
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
+                      className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                    >
+                      <option value="today">Today</option>
+                      <option value="all">All Time</option>
+                      <option value="range">Date Range</option>
+                    </select>
+                        </div>
+
+                  {dateFilter === 'range' && (
+                        <div className="flex items-center gap-1 md:gap-2">
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                        placeholder="Select Date"
+                      />
+                      {startDate && (
+                        <button
+                          onClick={() => setStartDate('')}
+                          className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors whitespace-nowrap"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeTab === 'today' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Search:</label>
+                  <input
+                    type="text"
+                    value={todaySearch}
+                    onChange={(e) => setTodaySearch(e.target.value)}
+                    placeholder="Name, mobile or UID"
+                    className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-[200px]"
+                  />
                 </div>
               )}
-        </div>
 
-        {/* Filters Section */}
-        <div className="bg-gray-50/80 backdrop-blur-sm p-3 md:p-4 border-b border-gray-200/50">
-          <div className="flex flex-wrap gap-2 md:gap-4 items-center text-xs md:text-sm">
-            {/* Date Range Filters for Today, Won/Lost sections */}
-            {(activeTab === 'today' || activeTab === 'wonlost') && (
-              <>
-                      <div className="flex items-center gap-1 md:gap-2">
-                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Filter:</label>
-                  <select
-                    value={dateFilter}
-                    onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                  >
-                    <option value="today">Today</option>
-                    <option value="all">All Time</option>
-                    <option value="range">Date Range</option>
-                  </select>
-                      </div>
-
-                {dateFilter === 'range' && (
-                      <div className="flex items-center gap-1 md:gap-2">
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                      placeholder="Select Date"
-                    />
-                    {startDate && (
-                      <button
-                        onClick={() => setStartDate('')}
-                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors whitespace-nowrap"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Filters for Pending Leads */}
-        {activeTab === 'pending' && (
-              <>
-                {/* Lead Category Filter */}
-                <div className="flex items-center gap-1 md:gap-2">
-                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Category:</label>
-                  <select
-                    value={pendingFilter}
-                    onChange={(e) => setPendingFilter(e.target.value as 'all'|'hot'|'warm'|'cold')}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                  >
-                    <option value="all">All</option>
-                    <option value="hot">🔥 Hot</option>
-                    <option value="warm">🔥 Warm</option>
-                    <option value="cold">❄️ Cold</option>
-                  </select>
-                </div>
-
-                {/* Final Status Filter */}
-                <div className="flex items-center gap-1 md:gap-2">
-                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Status:</label>
-                  <select
-                    value={pendingStatusFilter}
-                    onChange={(e) => setPendingStatusFilter(e.target.value as 'all'|'pending'|'booked')}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                  >
-                    <option value="all">All</option>
-                    <option value="pending">Pending</option>
-                    <option value="booked">Booked</option>
-                  </select>
-                </div>
-
-                {/* Date Range Filter */}
-                <div className="flex items-center gap-1 md:gap-2">
-                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Date:</label>
-                  <select
-                    value={dateFilter}
-                    onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                  >
-                    <option value="today">Today</option>
-                    <option value="all">All Time</option>
-                    <option value="range">Date Range</option>
-                  </select>
-                </div>
-
-                {dateFilter === 'range' && (
+              {/* Filters for Pending Leads */}
+          {activeTab === 'pending' && (
+                <>
+                  {/* Lead Category Filter */}
                   <div className="flex items-center gap-1 md:gap-2">
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="px-2 py-1 border border-gray-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-0"
-                      placeholder="Select Date"
-                    />
-                    {startDate && (
-                      <button
-                        onClick={() => setStartDate('')}
-                        className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors whitespace-nowrap"
-                      >
-                        Clear
-                      </button>
-                    )}
+                    <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Category:</label>
+                    <select
+                      value={pendingFilter}
+                      onChange={(e) => setPendingFilter(e.target.value as 'all'|'hot'|'warm'|'cold')}
+                      className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                    >
+                      <option value="all">All</option>
+                      <option value="hot">🔥 Hot</option>
+                      <option value="warm">🔥 Warm</option>
+                      <option value="cold">❄️ Cold</option>
+                    </select>
                   </div>
-                )}
-              </>
-            )}
 
-            {/* Show current filter status */}
-            <div className="ml-auto text-xs md:text-sm text-gray-600 hidden md:block">
-              {activeTab === 'today' && dateFilter === 'range' && startDate && endDate && (
-                <span>Showing: {startDate} to {endDate}</span>
+                  {/* Final Status Filter */}
+                  <div className="flex items-center gap-1 md:gap-2">
+                    <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Status:</label>
+                    <select
+                      value={pendingStatusFilter}
+                      onChange={(e) => setPendingStatusFilter(e.target.value as 'all'|'pending'|'booked')}
+                      className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                    >
+                      <option value="all">All</option>
+                      <option value="pending">Pending</option>
+                      <option value="booked">Booked</option>
+                    </select>
+                  </div>
+
+                  {/* Date Range Filter */}
+                  <div className="flex items-center gap-1 md:gap-2">
+                    <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Date:</label>
+                    <select
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value as 'today'|'all'|'range')}
+                      className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                    >
+                      <option value="today">Today</option>
+                      <option value="all">All Time</option>
+                      <option value="range">Date Range</option>
+                    </select>
+                  </div>
+
+                  {dateFilter === 'range' && (
+                    <div className="flex items-center gap-1 md:gap-2">
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-0"
+                        placeholder="Select Date"
+                      />
+                      {startDate && (
+                        <button
+                          onClick={() => setStartDate('')}
+                          className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors whitespace-nowrap"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
-              {activeTab === 'pending' && (pendingFilter !== 'all' || pendingStatusFilter !== 'all' || dateFilter !== 'today') && (
-                <span>
-                  Showing:
-                  {pendingFilter !== 'all' && ` ${pendingFilter === 'hot' ? '🔥 Hot' : pendingFilter === 'warm' ? '🔥 Warm' : '❄️ Cold'} leads`}
-                  {pendingStatusFilter !== 'all' && ` ${pendingStatusFilter} status`}
-                  {dateFilter === 'range' && startDate && endDate && ` from ${startDate} to ${endDate}`}
-                </span>
-              )}
+
+              {/* Show current filter status */}
+              <div className="ml-auto text-xs md:text-sm text-gray-600 hidden md:block">
+                {activeTab === 'today' && dateFilter === 'range' && startDate && endDate && (
+                  <span>Showing: {startDate} to {endDate}</span>
+                )}
+                {activeTab === 'pending' && (pendingFilter !== 'all' || pendingStatusFilter !== 'all' || dateFilter !== 'today') && (
+                  <span>
+                    Showing:
+                    {pendingFilter !== 'all' && ` ${pendingFilter === 'hot' ? '🔥 Hot' : pendingFilter === 'warm' ? '🔥 Warm' : '❄️ Cold'} leads`}
+                    {pendingStatusFilter !== 'all' && ` ${pendingStatusFilter} status`}
+                    {dateFilter === 'range' && startDate && endDate && ` from ${startDate} to ${endDate}`}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50/80 border-b border-gray-200">
-                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Lead Info</th>
-                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm hidden md:table-cell">Vehicle Details</th>
-                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Status</th>
-                    {activeTab !== 'fresh' && (
-                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Next Call</th>
-                    )}
-                    <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredFollowUps.map((item, index) => {
-                    // Handle both qualified leads and follow-ups
-                    const isQualifiedLead = item.booking_id || item.retailed_id
-                    const customerName = isQualifiedLead ? item.customer_name : item.customer_name
-                    const customerMobile = isQualifiedLead ? item.customer_mobile_number : item.customer_mobile_number
-                    const leadUid = isQualifiedLead ? item.lead_uid : item.lead_uid
-                    const assignedDate = isQualifiedLead ? item.created_at : item.ps_assigned_at
-                    
-                    return (
-                    <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
-                      <td className="p-2 md:p-4">
-                        <div className="space-y-0.5 md:space-y-1">
-                          <div className="font-semibold text-gray-800 text-xs md:text-sm leading-tight">{customerName}</div>
-                          <div className="text-xs md:text-sm text-gray-600 flex items-center gap-1">
-                            <Phone className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{customerMobile}</span>
+          <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-50/80 border-b border-gray-200">
+                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Lead Info</th>
+                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm hidden md:table-cell">Vehicle Details</th>
+                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Status</th>
+                      {activeTab !== 'fresh' && (
+                        <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Next Call</th>
+                      )}
+                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFollowUps.map((item, index) => {
+                      // Handle both qualified leads and follow-ups
+                      const isQualifiedLead = item.booking_id || item.retailed_id
+                      const customerName = isQualifiedLead ? item.customer_name : item.customer_name
+                      const customerMobile = isQualifiedLead ? item.customer_mobile_number : item.customer_mobile_number
+                      const leadUid = isQualifiedLead ? item.lead_uid : item.lead_uid
+                      const assignedDate = isQualifiedLead ? item.created_at : item.ps_assigned_at
+                      
+                      return (
+                      <tr key={item.id} className="border-b border-gray-100 hover:bg-orange-50/30 transition-colors">
+                        <td className="p-2 md:p-4">
+                          <div className="space-y-0.5 md:space-y-1">
+                            <div className="font-semibold text-gray-800 text-xs md:text-sm leading-tight">{customerName}</div>
+                            <div className="text-xs md:text-sm text-gray-600 flex items-center gap-1">
+                              <Phone className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate">{customerMobile}</span>
+                            </div>
+                            {activeTab !== 'fresh' && (
+                              <>
+                                <div className="text-xs text-gray-500 truncate">{leadUid}</div>
+                                <div className="text-xs text-gray-500">{formatDate(assignedDate)}</div>
+                              </>
+                            )}
+                            {isQualifiedLead && item.booking_id && (
+                              <div className="text-xs text-blue-600 font-medium truncate">Booking ID: {item.booking_id}</div>
+                            )}
+                            {isQualifiedLead && item.retailed_id && (
+                              <div className="text-xs text-green-600 font-medium truncate">Retail ID: {item.retailed_id}</div>
+                            )}
+                            {/* Show vehicle details on mobile */}
+                            <div className="md:hidden mt-1 pt-1 border-t border-gray-100">
+                              <div className="text-xs text-gray-600">{item.model_interested || '—'}</div>
+                              <div className="text-xs text-gray-500">{item.variant || '—'}</div>
+                            </div>
                           </div>
-                          {activeTab !== 'fresh' && (
-                            <>
-                              <div className="text-xs text-gray-500 truncate">{leadUid}</div>
-                              <div className="text-xs text-gray-500">{formatDate(assignedDate)}</div>
-                            </>
-                          )}
-                          {isQualifiedLead && item.booking_id && (
-                            <div className="text-xs text-blue-600 font-medium truncate">Booking ID: {item.booking_id}</div>
-                          )}
-                          {isQualifiedLead && item.retailed_id && (
-                            <div className="text-xs text-green-600 font-medium truncate">Retail ID: {item.retailed_id}</div>
-                          )}
-                          {/* Show vehicle details on mobile */}
-                          <div className="md:hidden mt-1 pt-1 border-t border-gray-100">
-                            <div className="text-xs text-gray-600">{item.model_interested || '—'}</div>
-                            <div className="text-xs text-gray-500">{item.variant || '—'}</div>
+                        </td>
+                        <td className="p-2 md:p-4 hidden md:table-cell">
+                          <div className="space-y-0.5 md:space-y-1">
+                            <div className="font-medium text-gray-800 text-xs md:text-sm">{item.model_interested || '—'}</div>
+                            <div className="text-xs md:text-sm text-gray-600">{item.variant || '—'}</div>
+                            <div className="text-xs text-gray-500">{item.buying_plan || '—'}</div>
+                            <div className="text-xs text-gray-500">{item.finance_option || '—'}</div>
                           </div>
+                        </td>
+                        <td className="p-2 md:p-4">
+                          <div className="space-y-1 md:space-y-2">
+                            {isQualifiedLead ? (
+                              <div className="space-y-0.5 md:space-y-1">
+                                {item.booking_status && (
+                                  <Badge className={`${item.booking_status === 'Approved' ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700' : item.booking_status === 'Rejected' ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-700' : 'bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700'} border-0 font-medium px-3 py-1`}>
+                                    Booking: {item.booking_status}
+                        </Badge>
+                                )}
+                                {item.retailed_status && (
+                                  <Badge className={`${item.retailed_status === 'Approved' ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700' : item.retailed_status === 'Rejected' ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-700' : 'bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700'} border-0 font-medium px-3 py-1`}>
+                                    Retail: {item.retailed_status}
+                                  </Badge>
+                                )}
                         </div>
-                      </td>
-                      <td className="p-2 md:p-4 hidden md:table-cell">
-                        <div className="space-y-0.5 md:space-y-1">
-                          <div className="font-medium text-gray-800 text-xs md:text-sm">{item.model_interested || '—'}</div>
-                          <div className="text-xs md:text-sm text-gray-600">{item.variant || '—'}</div>
-                          <div className="text-xs text-gray-500">{item.buying_plan || '—'}</div>
-                          <div className="text-xs text-gray-500">{item.finance_option || '—'}</div>
+                            ) : (
+                              <>
+                                {getStatusBadge(item.final_status, item)}
+                                {item.icrop_id && (
+                                  <Badge className="bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 border-0 font-medium px-3 py-1">
+                                    {item.icrop_id}
+                        </Badge>
+                                )}
+                              </>
+                            )}
                         </div>
-                      </td>
-                      <td className="p-2 md:p-4">
-                        <div className="space-y-1 md:space-y-2">
+                        </td>
+                        <td className="p-4">
+                          <div className="space-y-1">
+                            {isQualifiedLead ? (
+                              <div className="text-sm text-gray-500">
+                                {item.booking_requested_at && (
+                                  <div>Booking: {formatDate(item.booking_requested_at)}</div>
+                                )}
+                                {item.retailed_requested_at && (
+                                  <div>Retail: {formatDate(item.retailed_requested_at)}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-sm font-medium text-gray-700">Call #{getNextCallNumber(item)}</span>
+                                <div className="text-xs text-gray-500">{formatDate(item.follow_up_date)}</div>
+                                {activeTab === 'today' && (() => {
+                                  const overdueDays = getOverdueDays(item.follow_up_date)
+                                  return overdueDays > 0 && (
+                                    <Badge className="bg-gradient-to-r from-red-500 to-red-600 text-white border-0 font-medium text-xs px-2 py-1">
+                                      Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}
+                                    </Badge>
+                                  )
+                                })()}
+                              </>
+                            )}
+                        </div>
+                        </td>
+                        <td className="p-2 md:p-4">
                           {isQualifiedLead ? (
-                            <div className="space-y-0.5 md:space-y-1">
-                              {item.booking_status && (
-                                <Badge variant={item.booking_status === 'Approved' ? 'default' : item.booking_status === 'Rejected' ? 'destructive' : 'secondary'}>
-                                  Booking: {item.booking_status}
-                      </Badge>
-                              )}
-                              {item.retailed_status && (
-                                <Badge variant={item.retailed_status === 'Approved' ? 'default' : item.retailed_status === 'Rejected' ? 'destructive' : 'secondary'}>
-                                  Retail: {item.retailed_status}
-                                </Badge>
-                              )}
-                      </div>
-                          ) : (
-                            <>
-                              {getStatusBadge(item.final_status, item)}
-                              {item.icrop_id && (
-                                <Badge variant="outline" className="bg-purple-100 text-purple-800">
-                                  {item.icrop_id}
-                      </Badge>
-                              )}
-                            </>
-                          )}
-                      </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="space-y-1">
-                          {isQualifiedLead ? (
-                            <div className="text-sm text-gray-500">
-                              {item.booking_requested_at && (
-                                <div>Booking: {formatDate(item.booking_requested_at)}</div>
-                              )}
-                              {item.retailed_requested_at && (
-                                <div>Retail: {formatDate(item.retailed_requested_at)}</div>
-                              )}
+                            <div className="text-xs md:text-sm text-gray-500">
+                              {item.booking_status === 'Waiting for Approval' && 'Waiting for SM approval'}
+                              {item.retailed_status === 'Waiting for Approval' && 'Waiting for SM approval'}
+                              {item.booking_status === 'Approved' && '✅ Booking Approved'}
+                              {item.retailed_status === 'Approved' && '✅ Retail Approved'}
+                              {item.booking_status === 'Rejected' && '❌ Booking Rejected'}
+                              {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
                             </div>
                           ) : (
-                            <>
-                              <span className="text-sm font-medium text-gray-700">Call #{getNextCallNumber(item)}</span>
-                              <div className="text-xs text-gray-500">{formatDate(item.follow_up_date)}</div>
-                              {activeTab === 'today' && (() => {
-                                const overdueDays = getOverdueDays(item.follow_up_date)
-                                return overdueDays > 0 && (
-                                  <Badge variant="secondary" className="bg-red-600 text-white text-xs">
-                                    Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}
-                                  </Badge>
-                                )
-                              })()}
-                            </>
+                            <div className="flex flex-col md:flex-row gap-1 md:gap-2">
+                              <button
+                                onClick={() => openUpdateDialog(item)}
+                                className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-3 md:px-4 py-1 md:py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105 active:scale-95 whitespace-nowrap flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                Update
+                              </button>
+                              {item.final_status === 'Lost Requested' && (
+                                <div className="text-xs text-orange-600 font-medium bg-orange-50 px-1 md:px-2 py-1 rounded-lg whitespace-nowrap">
+                                  Awaiting CRE Approval
+                                </div>
+                              )}
+                            </div>
                           )}
-                      </div>
-                      </td>
-                      <td className="p-2 md:p-4">
-                        {isQualifiedLead ? (
-                          <div className="text-xs md:text-sm text-gray-500">
-                            {item.booking_status === 'Waiting for Approval' && 'Waiting for SM approval'}
-                            {item.retailed_status === 'Waiting for Approval' && 'Waiting for SM approval'}
-                            {item.booking_status === 'Approved' && '✅ Booking Approved'}
-                            {item.retailed_status === 'Approved' && '✅ Retail Approved'}
-                            {item.booking_status === 'Rejected' && '❌ Booking Rejected'}
-                            {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
-                          </div>
-                        ) : (
-                          <div className="flex flex-col md:flex-row gap-1 md:gap-2">
-                            <button
-                              onClick={() => openUpdateDialog(item)}
-                              className="bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 px-2 md:px-4 py-1 md:py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105 active:scale-95 border border-gray-200 hover:border-gray-300 whitespace-nowrap flex items-center gap-1"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                              Update
-                            </button>
-                            {item.final_status === 'Lost Requested' && (
-                              <div className="text-xs text-orange-600 font-medium bg-orange-50 px-1 md:px-2 py-1 rounded whitespace-nowrap">
-                                Awaiting CRE Approval
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-        </div>
+                        </td>
+                      </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {filteredFollowUps.length === 0 && (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Star className="w-6 h-6 text-orange-400" />
+                    </div>
+                    <p className="text-gray-500 text-lg font-medium">No leads found</p>
+                    <p className="text-gray-400 text-sm mt-1">Try adjusting your filters or refresh the data</p>
+                  </div>
+                )}
+              </div>
+          </Card>
 
           {/* Update Modal */}
-        <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
-            <DialogContent className="max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-[12px] shadow-[0_6px_18px_rgba(0,0,0,0.08)] border-t-[3px] border-t-blue-600">
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 h-1 rounded-t-[12px] -mt-[1px]"></div>
+          <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
+              <DialogContent className="max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border-0">
+                <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-1 rounded-t-2xl -mt-[1px]"></div>
 
-              <DialogHeader className="pb-4 pt-6 px-6">
-                <DialogTitle className="text-[20px] font-bold text-gray-900">
-                  Update Follow-up
-                </DialogTitle>
-            </DialogHeader>
+                <DialogHeader className="pb-4 pt-6 px-6">
+                  <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
+                    <Edit3 className="w-6 h-6 mr-3 text-orange-500" />
+                    Update Follow-up
+                  </DialogTitle>
+              </DialogHeader>
 
               <div className="space-y-6">
-                {/* Lead Information Grid */}
-                {selectedFollowUp && (
-                  <div className="px-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-xl md:max-w-2xl">
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                          <User className="w-3 h-3" />
-                          Customer Name
-                        </label>
-                        <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_name}</div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          Mobile
-                        </label>
-                        <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_mobile_number}</div>
-                      </div>
-
-                      {selectedFollowUp.model_interested && (
+                  {/* Lead Information Grid */}
+                  {selectedFollowUp && (
+                    <div className="px-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-xl md:max-w-2xl">
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <Car className="w-3 h-3" />
-                            Model
+                            <User className="w-3 h-3" />
+                            Customer Name
                           </label>
-                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.model_interested}</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_name}</div>
                         </div>
-                      )}
 
-                      {selectedFollowUp.variant && (
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <Settings className="w-3 h-3" />
-                            Variant
+                            <Phone className="w-3 h-3" />
+                            Mobile
                           </label>
-                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.variant}</div>
+                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.customer_mobile_number}</div>
                         </div>
-                      )}
 
-                      {selectedFollowUp.buying_plan && (
+                        {selectedFollowUp.model_interested && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <Car className="w-3 h-3" />
+                              Model
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{selectedFollowUp.model_interested}</div>
+                          </div>
+                        )}
+
+                        {selectedFollowUp.variant && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <Settings className="w-3 h-3" />
+                              Variant
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{selectedFollowUp.variant}</div>
+                          </div>
+                        )}
+
+                        {selectedFollowUp.buying_plan && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              Buying Plan
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{selectedFollowUp.buying_plan}</div>
+                          </div>
+                        )}
+
+                        {selectedFollowUp.finance_option && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <CreditCard className="w-3 h-3" />
+                              Finance
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{selectedFollowUp.finance_option}</div>
+                          </div>
+                        )}
+
+                        {extraLeadInfo?.profession && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <Briefcase className="w-3 h-3" />
+                              Profession
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{extraLeadInfo.profession}</div>
+                          </div>
+                        )}
+
+                        {extraLeadInfo?.test_drive_type && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              Test Drive
+                            </label>
+                            <div className="text-sm font-medium text-gray-900">{extraLeadInfo.test_drive_type}</div>
+                          </div>
+                        )}
+
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            Buying Plan
+                            <RefreshCw className="w-3 h-3" />
+                            Trade-in
                           </label>
-                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.buying_plan}</div>
-                        </div>
-                      )}
-
-                      {selectedFollowUp.finance_option && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <CreditCard className="w-3 h-3" />
-                            Finance
-                          </label>
-                          <div className="text-sm font-medium text-gray-900">{selectedFollowUp.finance_option}</div>
-                        </div>
-                      )}
-
-                      {extraLeadInfo?.profession && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <Briefcase className="w-3 h-3" />
-                            Profession
-                          </label>
-                          <div className="text-sm font-medium text-gray-900">{extraLeadInfo.profession}</div>
-                        </div>
-                      )}
-
-                      {extraLeadInfo?.test_drive_type && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            Test Drive
-                          </label>
-                          <div className="text-sm font-medium text-gray-900">{extraLeadInfo.test_drive_type}</div>
-                        </div>
-                      )}
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
-                          <RefreshCw className="w-3 h-3" />
-                          Trade-in
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-900">{(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string || 'No'}</span>
-                          {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-gray-900 underline decoration-dotted underline-offset-4 hover:text-orange-600"
                               onClick={() => {
-                                setTradeInLoading(true)
-                                setTradeInOpen(true)
-                                fetch(`/api/trade-in/${encodeURIComponent(selectedFollowUp.lead_uid)}`)
-                                  .then(res => res.json())
-                                  .then(data => {
-                                    const tradeInInfo = data.trade_in_details || {}
-                                    const combinedData = {
-                                      ...tradeInInfo,
-                                      customer_name: data.lead_master?.customer_name,
-                                      customer_mobile_number: data.lead_master?.customer_mobile_number,
-                                      trade_in: data.trade_in,
-                                      profession: data.profession,
-                                      test_drive_type: data.test_drive_type
-                                    }
-                                    setTradeInData(combinedData)
-                                    setTradeInLoading(false)
-                                  })
-                                  .catch(err => {
-                                    console.error('Error fetching trade-in details:', err)
-                                    setTradeInLoading(false)
-                                  })
+                                if ((extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes') {
+                                  openTradeInModal(selectedFollowUp.lead_uid)
+                                }
                               }}
-                              className="text-xs h-6 px-2 text-blue-600 border-blue-300 hover:bg-blue-50 rounded-md"
                             >
-                              <span className="text-blue-600 text-sm mr-1">👁</span>
-                              View
-                            </Button>
+                              {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) as string || 'No'}
+                            </button>
+                            {(extraLeadInfo?.trade_in || selectedFollowUp.trade_in) === 'Yes' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openTradeInModal(selectedFollowUp.lead_uid)}
+                                className="text-xs px-2 py-1 rounded-lg border-orange-200 text-orange-600 hover:bg-orange-50"
+                              >
+                                <Car className="w-3 h-3 mr-1" />
+                                View Details
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Call History Section */}
+                      <div className="mt-6">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                          <MessageSquare className="w-4 h-4 mr-2 text-orange-500" />
+                          Call History
+                        </h3>
+                        <div className="space-y-2 max-h-32 overflow-y-auto bg-gray-50/50 rounded-xl p-3">
+                          {[
+                            { remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status },
+                            { remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status },
+                            { remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status },
+                            { remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status },
+                            { remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status },
+                            { remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status },
+                            { remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status },
+                            { remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status },
+                            { remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status },
+                            { remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status }
+                          ]
+                            .filter(call => call.remark)
+                            .map((call, index) => (
+                              <div key={index} className="text-xs bg-white rounded-lg p-2 border border-gray-200/50">
+                                <div className="flex justify-between items-start mb-1">
+                                  <span className="font-semibold text-gray-700">Call #{index + 1}</span>
+                                  <span className="text-gray-500">{call.date ? formatDate(call.date) : ''}</span>
+                                </div>
+                                <div className="text-gray-600 mb-1">{call.remark}</div>
+                                {call.status && (
+                                  <Badge className="bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 border-0 font-medium text-xs px-2 py-0.5">
+                                    {call.status}
+                                  </Badge>
+                                )}
+                              </div>
+                            ))}
+                          {![
+                            selectedFollowUp.first_call_remark,
+                            selectedFollowUp.second_call_remark,
+                            selectedFollowUp.third_call_remark,
+                            selectedFollowUp.fourth_call_remark,
+                            selectedFollowUp.fifth_call_remark,
+                            selectedFollowUp.sixth_call_remark,
+                            selectedFollowUp.seventh_call_remark,
+                            selectedFollowUp.eighth_call_remark,
+                            selectedFollowUp.ninth_call_remark,
+                            selectedFollowUp.tenth_call_remark
+                          ].some(remark => remark) && (
+                            <div className="text-center text-xs text-gray-500 py-2">
+                              No call history available
+                            </div>
                           )}
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Previous Calls */}
-                {selectedFollowUp && (
-                  <div className="px-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                      <Phone className="h-5 w-5 text-blue-600" />
-                      Previous Calls
-                    </h3>
-                    <div className="bg-[#fafafa] rounded-[8px] p-3 border border-gray-100">
-                      {[
-                        {remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status, num: 1},
-                        {remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status, num: 2},
-                        {remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status, num: 3},
-                        {remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status, num: 4},
-                        {remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status, num: 5},
-                        {remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status, num: 6},
-                        {remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status, num: 7},
-                        {remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status, num: 8},
-                        {remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status, num: 9},
-                        {remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status, num: 10}
-                      ].filter(call => call.remark).length > 0 ?
-                        [
-                          {remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status, num: 1},
-                          {remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status, num: 2},
-                          {remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status, num: 3},
-                          {remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status, num: 4},
-                          {remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status, num: 5},
-                          {remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status, num: 6},
-                          {remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status, num: 7},
-                          {remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status, num: 8},
-                          {remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status, num: 9},
-                          {remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status, num: 10}
-                        ].filter(call => call.remark).map((call, index) => (
-                          <div key={index} className="text-sm py-2 border-b border-gray-200 last:border-b-0 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-                            <div className="flex items-center gap-3 text-gray-600 min-w-0">
-                              <span className="font-medium text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">#{call.num}</span>
-                              <span className="text-xs">{call.date ? new Date(call.date).toLocaleDateString('en-IN') : ''}</span>
-                              <span className="text-xs font-medium text-gray-800 bg-gray-100 px-2 py-1 rounded">{call.status}</span>
-                            </div>
-                            <span className="text-gray-700 text-sm leading-relaxed">{call.remark && call.remark.length > 50 ? call.remark.substring(0, 50) + '...' : call.remark}</span>
-                          </div>
-                        )) : (
-                          <div className="text-sm text-gray-500 italic py-3 text-center">No previous calls recorded</div>
-                        )
-                      }
-                    </div>
-                  </div>
-                )}
-
-                {/* Current Call Form */}
-                <div className="px-6 space-y-5">
-                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5 text-blue-600" />
-                    Current Call
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Call Number */}
-                    <div className="space-y-2">
-                      <label htmlFor="call-number" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Call Number</label>
-                      <Input
-                        id="call-number"
-                        placeholder={`Call #${getNextCallNumber(selectedFollowUp)}`}
-                        value={`Call #${getNextCallNumber(selectedFollowUp)}`}
-                        disabled
-                        className="h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] bg-gray-50 text-sm font-medium text-gray-700 focus:outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                  {/* Update Form */}
+                  <div className="px-6 space-y-6">
+                    <div>
+                      <Label htmlFor="callRemark" className="text-sm font-semibold text-gray-700 mb-2 block flex items-center">
+                        <MessageSquare className="w-4 h-4 mr-2" />
+                        Call Remark (Call #{getNextCallNumber(selectedFollowUp)})
+                      </Label>
+                      <Textarea
+                        id="callRemark"
+                        value={callRemark}
+                        onChange={(e) => setCallRemark(e.target.value)}
+                        placeholder="Enter your call remarks..."
+                        className="min-h-[80px] rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20 resize-none"
                       />
                     </div>
 
-                    {/* Final Status */}
-                    <div className="space-y-2">
-                      <label htmlFor="final-status" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        Final Status
-                        {isFinalStatusLocked(callOutcome) && (
-                          <span className="text-red-500 ml-1">🔒</span>
-                        )}
-                      </label>
-                      <Select
-                        value={finalStatus}
-                        onValueChange={setFinalStatus}
-                        disabled={isFinalStatusLocked(callOutcome)}
-                      >
-                        <SelectTrigger className={`h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${isFinalStatusLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}>
-                          <SelectValue placeholder="Select status" className="text-gray-400" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Pending">Pending</SelectItem>
-                          <SelectItem value="Waiting for Approval">Waiting for Approval</SelectItem>
-                          <SelectItem value="Won">Won</SelectItem>
-                          <SelectItem value="Lost">Lost</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Lead Status / Outcome */}
-                  <div className="space-y-2">
-                    <label htmlFor="lead-status" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Lead Status / Outcome</label>
-                    <div className="flex flex-wrap gap-3">
+                    <div>
+                      <Label htmlFor="callOutcome" className="text-sm font-semibold text-gray-700 mb-2 block">
+                        Call Outcome
+                      </Label>
                       <Select value={callOutcome} onValueChange={setCallOutcome}>
-                        <SelectTrigger className="h-[44px] px-3 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] flex-1 min-w-[200px]">
-                          <SelectValue placeholder="Select Lead Status" className="text-gray-400" />
+                        <SelectTrigger className="rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20">
+                          <SelectValue placeholder="Select call outcome" />
                         </SelectTrigger>
-                        <SelectContent>
-                          {[
-                            'Call not Connected',
-                            'Retailed',
-                            'Discount Issue',
-                            'Delayed',
-                            'Booked',
-                            'Booked with another number',
-                            'Test Drive',
-                            'Planning in Next Month',
-                            'Interested',
-                            'Lost to Competition',
-                            'Finance Rejected',
-                            'Dropped',
-                            'Lost to codealer',
-                            'Busy on another call',
-                            'RNR',
-                            'Call me Back',
-                            'Not Interested'
-                          ].map((option) => (
-                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                          ))}
+                        <SelectContent className="rounded-xl border-0 shadow-lg">
+                          <SelectItem value="Hot">🔥 Hot</SelectItem>
+                          <SelectItem value="Warm">🔥 Warm</SelectItem>
+                          <SelectItem value="Cold">❄️ Cold</SelectItem>
+                          <SelectItem value="Booked">✅ Booked</SelectItem>
+                          <SelectItem value="Retailed">🛍️ Retailed</SelectItem>
+                          <SelectItem value="Lost to Competition">❌ Lost to Competition</SelectItem>
+                          <SelectItem value="Lost to codealer">❌ Lost to codealer</SelectItem>
+                          <SelectItem value="Dropped">❌ Dropped</SelectItem>
                         </SelectContent>
                       </Select>
-
-                      {/* Order No. (Booking ID) - Show only for Booked status */}
-                      {callOutcome === 'Booked' && (
-                        <Input
-                          value={bookingId}
-                          onChange={(e) => {
-                            let value = e.target.value.toUpperCase()
-                            value = value.replace(/[^A-Z0-9]/g, '')
-                            if (value && !value.startsWith('ORD')) {
-                              value = 'ORD' + value.replace(/^ORD/, '')
-                            }
-                            if (value.startsWith('ORD')) {
-                              const digits = value.substring(3).replace(/\D/g, '')
-                              if (digits.length <= 9) {
-                                value = 'ORD' + digits
-                              } else {
-                                value = 'ORD' + digits.substring(0, 9)
-                              }
-                            }
-                            setBookingId(value)
-                          }}
-                          placeholder="ORD123456789"
-                          className={`h-[44px] px-3 rounded-[8px] border text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] w-40 ${bookingId && bookingId.length !== 12 ? 'border-red-500' : 'border-[#e6e9ee]'}`}
-                          required
-                        />
-                      )}
-
-                      {/* DN No. (Retailed ID) - Show only for Retailed status */}
-                      {callOutcome === 'Retailed' && (
-                        <Input
-                          value={retailedId}
-                          onChange={(e) => {
-                            let value = e.target.value.toUpperCase()
-                            value = value.replace(/[^A-Z0-9]/g, '')
-                            if (value && !value.startsWith('DNN')) {
-                              value = 'DNN' + value.replace(/^DNN/, '')
-                            }
-                            if (value.startsWith('DNN')) {
-                              const digits = value.substring(3).replace(/\D/g, '')
-                              if (digits.length <= 9) {
-                                value = 'DNN' + digits
-                              } else {
-                                value = 'DNN' + digits.substring(0, 9)
-                              }
-                            }
-                            setRetailedId(value)
-                          }}
-                          placeholder="DNN123456789"
-                          className={`h-[44px] px-3 rounded-[8px] border text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] w-40 ${retailedId && retailedId.length !== 12 ? 'border-red-500' : 'border-[#e6e9ee]'}`}
-                          required
-                        />
-                      )}
                     </div>
-                  </div>
 
-                  {/* Call Remark */}
-                  <div className="space-y-2">
-                    <label htmlFor="call-remark" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Call Remark</label>
-                    <Textarea
-                      id="call-remark"
-                      placeholder="Provide detailed information about the call outcome"
-                      value={callRemark}
-                      onChange={(e) => setCallRemark(e.target.value)}
-                      rows={3}
-                      className="px-3 py-2 rounded-[8px] border border-[#e6e9ee] text-sm resize-none focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] placeholder:text-gray-400"
-                    />
-                  </div>
+                    {/* Booking/Retailed ID Input */}
+                    {isLeadWon(callOutcome) && (
+                      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
+                        {callOutcome === 'Booked' && (
+                          <div>
+                            <Label htmlFor="bookingId" className="text-sm font-semibold text-green-700 mb-2 block flex items-center">
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              Order Number (ORD + 9 digits)
+                            </Label>
+                            <Input
+                              id="bookingId"
+                              value={bookingId}
+                              onChange={(e) => setBookingId(e.target.value.toUpperCase())}
+                              placeholder="e.g., ORD123456789"
+                              className="rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500/20"
+                              maxLength={12}
+                            />
+                            <p className="text-xs text-green-600 mt-1">
+                              Format: ORD followed by exactly 9 digits
+                            </p>
+                          </div>
+                        )}
 
-                  {/* Next Follow-up Date */}
-                  <div className="space-y-2">
-                    <label htmlFor="follow-up-date" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                      Next Follow-up Date
-                      {isFollowUpDateLocked(callOutcome) && (
-                        <span className="text-red-500 ml-1">🔒</span>
-                      )}
-                    </label>
-                    <div className="relative w-40 md:w-56">
-                      <Input
-                        id="follow-up-date"
-                        type="datetime-local"
-                        value={followUpDate}
-                        onChange={(e) => setFollowUpDate(e.target.value)}
-                        className={`h-[44px] px-3 pr-10 rounded-[8px] border border-[#e6e9ee] text-sm focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.12)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${isFollowUpDateLocked(callOutcome) ? 'bg-gray-100 text-gray-600' : ''}`}
-                        disabled={isFollowUpDateLocked(callOutcome)}
-                      />
-                      <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-[18px] w-[18px] text-blue-600 pointer-events-none" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex justify-end gap-3 pt-6 px-6 border-t border-gray-100">
-                  <Button
-                    variant="ghost"
-                    onClick={() => setUpdateDialog(false)}
-                    className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleUpdateFollowUp}
-                    className="px-6 py-2 rounded-[6px] bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 text-sm font-medium shadow-sm hover:shadow-lg transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 transform hover:scale-105 active:scale-95 border border-gray-200 hover:border-gray-300 flex items-center gap-2"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    Update Follow-up
-                  </Button>
-                </div>
-              </div>
-          </DialogContent>
-        </Dialog>
-
-          {/* Trade-in Details Modal */}
-          <Dialog open={tradeInOpen} onOpenChange={setTradeInOpen}>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  <Car className="w-5 h-5 text-blue-600" />
-                  Trade-in Details
-                </DialogTitle>
-                <DialogDescription>
-                  View trade-in vehicle information
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                {tradeInLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                    <span className="ml-2 text-gray-600 text-sm">Loading trade-in details...</span>
-                  </div>
-                ) : tradeInData ? (
-                  <Card className="border-l-4 border-l-blue-500">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center space-x-2 text-sm">
-                        <Car className="h-4 w-4 text-blue-600" />
-                        <span>Vehicle Information</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-700 w-20">Make:</span>
-                          <span className="text-gray-800">{tradeInData.trade_in_make || '—'}</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-700 w-20">Model:</span>
-                          <span className="text-gray-800">{tradeInData.trade_in_model || '—'}</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-700 w-20">Year:</span>
-                          <span className="text-gray-800">{tradeInData.trade_in_year || '—'}</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-700 w-20">KM:</span>
-                          <span className="text-gray-800">{tradeInData.trade_in_km || '—'}</span>
-                        </div>
-                        {tradeInData.trade_in_ownership && (
-                          <div className="flex items-center space-x-2">
-                            <span className="font-medium text-gray-700 w-20">Owner:</span>
-                            <span className="text-gray-800">{tradeInData.trade_in_ownership}</span>
+                        {callOutcome === 'Retailed' && (
+                          <div>
+                            <Label htmlFor="retailedId" className="text-sm font-semibold text-green-700 mb-2 block flex items-center">
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              DN Number (DNN + 9 digits)
+                            </Label>
+                            <Input
+                              id="retailedId"
+                              value={retailedId}
+                              onChange={(e) => setRetailedId(e.target.value.toUpperCase())}
+                              placeholder="e.g., DNN123456789"
+                              className="rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500/20"
+                              maxLength={12}
+                            />
+                            <p className="text-xs text-green-600 mt-1">
+                              Format: DNN followed by exactly 9 digits
+                            </p>
                           </div>
                         )}
                       </div>
+                    )}
 
+                    {/* Follow-up Date */}
+                    {!isFollowUpDateLocked(callOutcome) && (
+                      <div>
+                        <Label htmlFor="followUpDate" className="text-sm font-semibold text-gray-700 mb-2 block flex items-center">
+                          <Calendar className="w-4 h-4 mr-2" />
+                          Next Follow-up Date
+                        </Label>
+                        <Input
+                          id="followUpDate"
+                          type="datetime-local"
+                          value={followUpDate}
+                          onChange={(e) => setFollowUpDate(e.target.value)}
+                          className="rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20"
+                        />
+                      </div>
+                    )}
+
+                    {/* Status warnings */}
+                    {isLeadWon(callOutcome) && (
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                        <div className="flex items-center text-blue-700">
+                          <Info className="w-4 h-4 mr-2" />
+                          <span className="text-sm font-medium">
+                            This lead will be sent to Sales Manager for approval
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {isLeadLost(callOutcome) && (
+                      <div className="bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl p-4 border border-orange-200">
+                        <div className="flex items-center text-orange-700">
+                          <AlertCircle className="w-4 h-4 mr-2" />
+                          <span className="text-sm font-medium">
+                            Lost status request will be sent to CRE for approval
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50/30">
+                    <Button
+                      variant="outline"
+                      onClick={() => setUpdateDialog(false)}
+                      className="px-6 py-2 rounded-xl border-gray-200 hover:bg-gray-50 font-medium"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleUpdateFollowUp}
+                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Update Follow-up
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Trade-in Details Modal */}
+            <Dialog open={tradeInOpen} onOpenChange={setTradeInOpen}>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border-0">
+                <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-1 rounded-t-2xl -mt-[1px]"></div>
+                
+                <DialogHeader className="pb-4 pt-6 px-6">
+                  <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
+                    <Car className="w-6 h-6 mr-3 text-orange-500" />
+                    Trade-in Vehicle Details
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="px-6 pb-6">
+                  {tradeInLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+                      <span className="ml-3 text-gray-600">Loading trade-in details...</span>
+                    </div>
+                  ) : tradeInData ? (
+                    <div className="space-y-6">
                       {/* Customer Information */}
-                      {(tradeInData.customer_name || tradeInData.customer_mobile_number) && (
-                        <div className="pt-3 border-t">
-                          <div className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-1">
-                            <User className="w-4 h-4" />
-                            Customer Info
-                          </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Customer Information</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <InfoLine label="Customer Name" value={tradeInData.customer_name || selectedFollowUp?.customer_name} />
+                          <InfoLine label="Mobile Number" value={tradeInData.customer_mobile_number || selectedFollowUp?.customer_mobile_number} />
+                          <InfoLine label="Profession" value={tradeInData.profession} />
+                          <InfoLine label="Test Drive Type" value={tradeInData.test_drive_type} />
+                        </div>
+                      </div>
+
+                      {/* Vehicle Details */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Trade-in Vehicle</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <InfoLine label="Make" value={tradeInData.make} />
+                          <InfoLine label="Model" value={tradeInData.model} />
+                          <InfoLine label="Year" value={tradeInData.year} />
+                          <InfoLine label="KMs Driven" value={tradeInData.kms_driven} />
+                          <InfoLine label="Ownership" value={tradeInData.ownership} />
+                        </div>
+                      </div>
+
+                      {/* Additional Information */}
+                      {(tradeInData.additional_info || tradeInData.condition_notes) && (
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-800 mb-3">Additional Information</h3>
                           <div className="space-y-2">
-                            {tradeInData.customer_name && (
-                              <div className="flex items-center space-x-2">
-                                <span className="font-medium text-gray-700 w-20">Name:</span>
-                                <span className="text-gray-800">{tradeInData.customer_name}</span>
-                              </div>
+                            {tradeInData.additional_info && (
+                              <InfoLine label="Additional Info" value={tradeInData.additional_info} />
                             )}
-                            {tradeInData.customer_mobile_number && (
-                              <div className="flex items-center space-x-2">
-                                <span className="font-medium text-gray-700 w-20">Mobile:</span>
-                                <span className="text-gray-800">{tradeInData.customer_mobile_number}</span>
-                              </div>
+                            {tradeInData.condition_notes && (
+                              <InfoLine label="Condition Notes" value={tradeInData.condition_notes} />
                             )}
                           </div>
                         </div>
                       )}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="text-center py-8">
-                    <Car className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <h3 className="text-sm font-semibold text-gray-600 mb-1">No Trade-in Details</h3>
-                    <p className="text-xs text-gray-500">Trade-in information not available for this lead.</p>
-                  </div>
-                )}
-              </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Car className="w-6 h-6 text-gray-400" />
+                      </div>
+                      <p className="text-gray-500">No trade-in details found</p>
+                    </div>
+                  )}
 
-              <div className="flex justify-end space-x-3 pt-4 border-t">
-                <Button variant="outline" onClick={() => setTradeInOpen(false)}>
-                  Close
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+                  <div className="flex justify-end mt-6">
+                    <Button
+                      onClick={() => setTradeInOpen(false)}
+                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
     </DashboardLayout>
   )
 }
+
