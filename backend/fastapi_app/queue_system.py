@@ -251,3 +251,12 @@ def get_queue_manager(supabase: Client) -> QueueManager:
     if queue_manager is None:
         queue_manager = QueueManager(supabase)
     return queue_manager
+
+def enqueue_task(task_name: str, task_data: dict):
+    """Enqueue a task for background processing"""
+    try:
+        q.enqueue(task_name, task_data)
+        print(f"Enqueued task {task_name} with data: {task_data}")
+    except Exception as e:
+        print(f"Error enqueuing task {task_name}: {str(e)}")
+        raise

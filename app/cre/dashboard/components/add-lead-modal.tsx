@@ -27,28 +27,38 @@ interface AddLeadModalProps {
   user: User | null
 }
 
-const sources = [
-  "Website", "Walk-in", "Referral", "Advertisement", "Social Media", 
-  "Cold Call", "Event", "Online Campaign", "Other"
-]
-
-const campaigns = [
-  "Google Ads", "Facebook Ads", "Instagram", "YouTube", "Newspaper", 
-  "Radio", "TV", "Banner", "Event", "Referral", "Other"
-]
+// Source/Subsource mapping as per requirements
+const SOURCE_OPTIONS: { [key: string]: string[] } = {
+  "Google": ["Web", "Tele In", "GMB Tele In"],
+  "WhatsApp": ["Tele In", "Bulk Message"],
+  "Car Dekho": ["CD B", "CD G"],
+  "Car Wale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
+  "OEM": ["Dealer CMS", "TKM"],
+  "Meta": ["Web"],
+  "Tele Out": ["Web"],
+  "Referral": [],
+  "Other": []
+}
 
 const chennaiLocations = [
-  "MOUNT ROAD", "CHINTHADRIPET", "EGMORE", "PUDHUPET", "CHETPET", "CHOOLAIMEDU", "NUNGAMBAKKAM", "KODAMBAKKAM", "VADAPALANI", "ANNASALAI", "ARUMBAKKAM", "ADYAR", "THIRUVANMIYUR", "VELACHERRY", "MEDAVAKKAM", "KILKATTALAI", "PERAMBAKKAM", "SHOLINGANALLUR", "PERUNGUDI", "NEELANGARAI", "SAIDAPET", "ST THOMAS MOUNT", "PAZHAVANTHANGAL", "PALLAVARAM", "MMDA COLONY", "MYLAPORE", "TRIPLICANE", "THOUSAND LIGHTS", "GREAMS ROAD", "ORMES ROAD", "ROYAPETTAH", "T NAGAR", "TEYNAMPET", "GUINDY", "MENAMBAKKAM", "TIRUSULAM", "ALWARPET", "R A PURAM", "AMINJIKARAI", "WEST MAMBALAM", "K K NAGAR", "ASHOK NAGAR", "EKKATUTHANGAL", "NANDANAM", "IIT", "KOTTURPURAM", "CHROMEPET", "SANITORIUM", "KELAMBAKKAM", "SELAIYUR", "KOVILAMBAKKAM", "SUNNAMBU KOLATHUR", "ASTHINAPURAM", "ANKAPUTTUR", "PAMMAL", "POZHICHALUR", "CHITLAPAKKAM", "VENGAIVASAL", "CHINMAYANAGAR", "VALASARAWALKAM", "VIRUGAMBAKKAM", "NESAPAKKAM", "MGR NAGAR", "JAFFERKHANPET", "FLOWERS ROAD", "GOPALAPURAM", "ALWARTHIRUNAGAR", "KOLAPAKKAM", "ADAMBAKKAM", "NANDAMBAKKAM", "MOULIVAKKAM", "RAMAPURAM", "MADIPAKKAM", "SALIGRAMAM", "KANDHANCHAVADI", "THARAMANI", "GOWRIVAKKAM", "TRUSTPURAM", "CIT NAGAR", "RANGARAJAPURAM", "ICE HOUSE", "JAM BAZAAR", "CENATOPH ROAD", "MRC NAGAR", "SANTHOME", "OKKIYAM", "NAVALUR", "THORAIPAKKAM", "GREENWAYS ROAD", "RAJAJI SALAI", "ECR", "OMR", "ABIRAMAPURAM", "MANDAVELI", "MUDICHUR", "IRUMBULIYUR", "PERUNGALATHUR", "VANDALUR", "URAPAKKAM", "KILAMBAKKAM", "GUDUVANCHERY", "MARAIMALAI NAGAR", "SP KOIL", "CHENGALPATTU", "VYSARPADI", "PURASAIWALKAM", "PERAMBUR", "CHOOLAI", "ANNANAGAR", "SHANTHI COLONY", "SHENOY NAGAR", "THIRUMANGALAM", "MUGAPPAIR", "NOLAMBUR", "AYANAVARAM", "VILLIVAKKAM", "PADI", "KORATTUR", "KOLATHUR", "MADHAVARAM", "KELLYS", "KILPAUK", "CENTRAL", "NERKUNDRAM", "MADURAVOYAL", "VELAPANCHAVADI", "IYYAPANTHANGAL", "POONAMALLEE", "THIRUMAZHISAI", "SRIPERUMBUTHUR", "PARRYS", "KANCHEEPURAM", "MANGADU", "SUNGUVARCHATIRAM", "REDHILLS", "CHOZHAVARAM", "KARANODAI", "PERIYAPALAYAM", "AMBATTUR", "THIRUMULLAIVOYAL", "AVADI", "PATTABIRAM", "THIRUNINRAVUR", "VEPPAMPATTU", "TIRUVALLUR", "ARAKONAM", "TIRUTHANI", "TIRUPATHI", "MINT", "WASHERMENPET", "TONDIARPET", "THIRUVOTRIYUR", "ENNORE", "PERAMBUR", "MOOLAKADAI", "ERUKANCHERY", "VYSARPADI", "MANALI", "GOOMIDIPOONDI", "PADAPPAI", "ORAGADAM", "KUNDRATHUR", "PORUR", "PARK TOWN", "VANAGARAM", "THIRUVERKADU", "MUGALIVAKKAM", "KATTUPAKKAM", "GERUGAMBAKKAM", "MADHURANTHANGAM", "MELMARUVATHUR", "AYAPAKKAM"
+  "MOUNT ROAD", "CHINTHADRIPET", "EGMORE", "PUDHUPET", "CHETPET", "CHOOLAIMEDU", "NUNGAMBAKKAM", "KODAMBAKKAM", "VADAPALANI", "ANNASALAI", "ARUMBAKKAM", "ADYAR", "THIRUVANMIYUR", "VELACHERRY", "MEDAVAKKAM", "KILKATTALAI", "PERAMBAKKAM", "SHOLINGANALLUR", "PERUNGUDI", "NEELANGARAI", "SAIDAPET", "ST THOMAS MOUNT", "PAZHAVANTHANGAL", "PALLAVARAM", "MMDA COLONY", "MYLAPORE", "TRIPLICANE", "THOUSAND LIGHTS", "GREAMS ROAD", "ORMES ROAD", "ROYAPETTAH", "T NAGAR", "TEYNAMPET", "GUINDY", "MENAMBAKKAM", "TIRUSULAM", "ALWARPET", "R A PURAM", "AMINJIKARAI", "WEST MAMBALAM", "K K NAGAR", "ASHOK NAGAR", "EKKATUTHANGAL", "NANDANAM", "IIT", "KOTTURPURAM", "CHROMEPET", "SANITORIUM", "KELAMBAKKAM", "SELAIYUR", "KOVILAMBAKKAM", "SUNNAMBU KOLATHUR", "ASTHINAPURAM", "ANKAPUTTUR", "PAMMAL", "POZHICHALUR", "CHITLAPAKKAM", "VENGAIVASAL", "CHINMAYANAGAR", "VALASARAWALKAM", "VIRUGAMBAKKAM", "NESAPAKKAM", "MGR NAGAR", "JAFFERKHANPET", "FLOWERS ROAD", "GOPALAPURAM", "ALWARTHIRUNAGAR", "KOLAPAKKAM", "ADAMBAKKAM", "NANDAMBAKKAM", "MOULIVAKKAM", "RAMAPURAM", "MADIPAKKAM", "SALIGRAMAM", "KANDHANCHAVADI", "THARAMANI", "GOWRIVAKKAM", "TRUSTPURAM", "CIT NAGAR", "RANGARAJAPURAM", "ICE HOUSE", "JAM BAZAAR", "CENATOPH ROAD", "MRC NAGAR", "SANTHOME", "OKKIYAM", "NAVALUR", "THORAIPAKKAM", "GREENWAYS ROAD", "RAJAJI SALAI", "ECR", "OMR", "ABIRAMAPURAM", "MANDAVELI", "MUDICHUR", "IRUMBULIYUR", "PERUNGALATHUR", "VANDALUR", "URAPAKKAM", "KILAMBAKKAM", "GUDUVANCHERY", "MARAIMALAI NAGAR", "SP KOIL", "CHENGALPATTU", "VYSARPADI", "PURASAIWALKAM", "PERAMBUR", "CHOOLAI", "ANNANAGAR", "SHANTHI COLONY", "SHENOY NAGAR", "THIRUMANGALAM", "MUGAPPAIR", "NOLAMBUR", "AYANAVARAM", "VILLIVAKKAM", "PADI", "KORATTUR", "KOLATHUR", "MADHAVARAM", "KELLYS", "KILPAUK", "CENTRAL", "NERKUNDRAM", "MADURAVOYAL", "VELAPANCHAVADI", "IYYAPANTHANGAL", "POONAMALLEE", "THIRUMAZHISAI", "SRIPERUMBUTHUR", "PARRYS", "KANCHEEPURAM", "MANGADU", "SUNGUVARCHATIRAM", "REDHILLS", "CHOZHAVARAM", "KARANODAI", "PERIYAPALAYAM", "AMBATTUR", "THIRUMULLAIVOYAL", "AVADI", "PATTABIRAM", "THIRUNINRAVUR", "VEPPAMPATTU", "TIRUVALLUR", "ARAKONAM", "TIRUTHANI", "TIRUPATHI", "MINT", "WASHERMENPET", "TONDIARPET", "THIRUVOTRIYUR", "ENNORE", "MOOLAKADAI", "ERUKANCHERY", "MANALI", "GOOMIDIPOONDI", "PADAPPAI", "ORAGADAM", "KUNDRATHUR", "PORUR", "PARK TOWN", "VANAGARAM", "THIRUVERKADU", "MUGALIVAKKAM", "KATTUPAKKAM", "GERUGAMBAKKAM", "MADHURANTHANGAM", "MELMARUVATHUR", "AYAPAKKAM"
 ]
 
 export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps) {
   const [formData, setFormData] = useState({
     customer_name: "",
     customer_mobile_number: "",
-    customer_email: "",
     customer_location: "",
     source: "",
-    campaign: "",
+    sub_source: "",
+    follow_up_date: "",
+    trade_in_make: "",
+    trade_in_model: "",
+    trade_in_make_other: "",
+    trade_in_model_other: "",
+    trade_in_year: "",
+    trade_in_km: "",
+    trade_in_ownership: "",
     remarks: ""
   })
   
@@ -60,19 +70,48 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
       setFormData({
         customer_name: "",
         customer_mobile_number: "",
-        customer_email: "",
         customer_location: "",
         source: "",
-        campaign: "",
+        sub_source: "",
+        follow_up_date: "",
+        trade_in_make: "",
+        trade_in_model: "",
+        trade_in_make_other: "",
+        trade_in_model_other: "",
+        trade_in_year: "",
+        trade_in_km: "",
+        trade_in_ownership: "",
         remarks: ""
       })
     }
   }, [isOpen])
 
   const handleSubmit = async () => {
-    if (!formData.customer_name || !formData.customer_mobile_number) {
-      alert("Please fill in required fields (Name and Mobile)")
+    if (!formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date) {
+      alert("Please fill in required fields (Name, Mobile, and Follow-up Date)")
       return
+    }
+
+    // Validations
+    const mobile = (formData.customer_mobile_number || '').trim()
+    if (!/^\d{10}$/.test(mobile)) {
+      alert("Enter a valid 10-digit mobile number")
+      return
+    }
+    if (formData.trade_in_year) {
+      const yearNum = Number(formData.trade_in_year)
+      const currentYear = new Date().getFullYear()
+      if (!Number.isInteger(yearNum) || yearNum < 1990 || yearNum > currentYear) {
+        alert(`Enter a valid trade-in year between 1990 and ${currentYear}`)
+        return
+      }
+    }
+    if (formData.trade_in_km) {
+      const kmNum = Number(formData.trade_in_km)
+      if (!Number.isFinite(kmNum) || kmNum < 0 || kmNum > 5000000) {
+        alert("Enter a valid KMs driven between 0 and 5,000,000")
+        return
+      }
     }
 
     setIsSubmitting(true)
@@ -81,29 +120,48 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
       // Generate UID (simple format: CRM + timestamp)
       const uid = `CRM${Date.now().toString().slice(-6)}`
       
+      const tradeInMake = formData.trade_in_make === 'Other' ? (formData.trade_in_make_other || '') : formData.trade_in_make
+      const tradeInModel = formData.trade_in_model === 'Other' ? (formData.trade_in_model_other || '') : formData.trade_in_model
+
       const leadData = {
         uid,
         customer_name: formData.customer_name,
         customer_mobile_number: formData.customer_mobile_number,
-        customer_email: formData.customer_email || null,
         customer_location: formData.customer_location || null,
         source: formData.source || "Walk-in",
-        campaign: formData.campaign || "",
-        cre_name: user?.first_name || user?.name || user?.username || "",
+        sub_source: formData.sub_source === "none" ? "" : (formData.sub_source || ""),
+        follow_up_date: formData.follow_up_date ? new Date(formData.follow_up_date + 'T00:00:00').toISOString() : null,
+        cre_name: user?.full_name || user?.first_name || user?.name || user?.username || "",
         cre_id: user?.id,
         assigned: "Yes",
-        lead_status: "Fresh",
+        lead_status: "Qualified", // CRE leads are immediately qualified
         final_status: "Pending",
-        lead_category: "Warm",
+        lead_category: null,
         remarks: formData.remarks || "",
+        // Trade-in details (optional)
+        trade_in_make: tradeInMake || null,
+        trade_in_model: tradeInModel || null,
+        trade_in_year: formData.trade_in_year || null,
+        trade_in_km: formData.trade_in_km || null,
+        trade_in_ownership: formData.trade_in_ownership || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }
 
       // Submit to backend
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || parsed?.token
+
+      console.log('CRE Lead - Sending data:', leadData)
+      console.log('CRE Lead - Token:', token ? 'Present' : 'Missing')
+
       const response = await fetch('/api/cre/leads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(leadData)
       })
 
@@ -165,22 +223,13 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
                   </Label>
                   <Input
                     id="customer_mobile_number"
+                    type="tel"
                     placeholder="Enter mobile number"
                     value={formData.customer_mobile_number}
                     onChange={(e) => setFormData(prev => ({ ...prev, customer_mobile_number: e.target.value }))}
+                    pattern="[0-9]{10}"
+                    maxLength={10}
                     required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="customer_email" className="text-sm font-medium">
-                    Email Address
-                  </Label>
-                  <Input
-                    id="customer_email"
-                    type="email"
-                    placeholder="Enter email address"
-                    value={formData.customer_email}
-                    onChange={(e) => setFormData(prev => ({ ...prev, customer_email: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -214,31 +263,184 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="source" className="text-sm font-medium">
-                    Source
+                    Source *
                   </Label>
-                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, source: value }))}>
+                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, source: value, sub_source: "" }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select source" />
                     </SelectTrigger>
                     <SelectContent>
-                      {sources.map((source) => (
+                      {Object.keys(SOURCE_OPTIONS).map((source) => (
                         <SelectItem key={source} value={source}>{source}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="campaign" className="text-sm font-medium">
-                    Campaign
+                  <Label htmlFor="sub_source" className="text-sm font-medium">
+                    Subsource
                   </Label>
-                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, campaign: value }))}>
+                  <Select 
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, sub_source: value }))}
+                    disabled={!formData.source}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select campaign" />
+                      <SelectValue placeholder="Select source first" />
                     </SelectTrigger>
                     <SelectContent>
-                      {campaigns.map((campaign) => (
-                        <SelectItem key={campaign} value={campaign}>{campaign}</SelectItem>
+                      {(SOURCE_OPTIONS[formData.source] || []).length === 0 ? (
+                        <SelectItem value="none">None</SelectItem>
+                      ) : (
+                        SOURCE_OPTIONS[formData.source].map((sub) => (
+                          <SelectItem key={sub} value={sub}>{sub}</SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Follow-up Date */}
+          <Card className="border-l-4 border-l-orange-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center space-x-2">
+                <Calendar className="h-5 w-5 text-orange-600" />
+                <span>Follow-up Schedule</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="follow_up_date" className="text-sm font-medium">
+                  Follow-up Date *
+                </Label>
+                <Input
+                  id="follow_up_date"
+                  type="date"
+                  value={formData.follow_up_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                  required
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Trade-in Details (Optional) */}
+          <Card className="border-l-4 border-l-purple-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center space-x-2">
+                <Car className="h-5 w-5 text-purple-600" />
+                <span>Trade-in Details (Optional)</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="trade_in_make" className="text-sm font-medium">
+                    Make
+                  </Label>
+                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_make: value, trade_in_model: '', trade_in_make_other: '' }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select make" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['Maruti','Hyundai','Toyota','Honda','Tata','Mahindra','Kia','Renault','Nissan','Skoda','Volkswagen','Ford','MG','Jeep','Other'].map((mk) => (
+                        <SelectItem key={mk} value={mk}>{mk}</SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                  {formData.trade_in_make === 'Other' && (
+                    <Input
+                      id="trade_in_make_other"
+                      placeholder="Enter make"
+                      value={formData.trade_in_make_other}
+                      onChange={(e) => setFormData(prev => ({ ...prev, trade_in_make_other: e.target.value }))}
+                    />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trade_in_model" className="text-sm font-medium">
+                    Model
+                  </Label>
+                  <Select disabled={!formData.trade_in_make} onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_model: value, trade_in_model_other: '' }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={formData.trade_in_make ? 'Select model' : 'Select make first'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(() => {
+                        const models: Record<string,string[]> = {
+                          Maruti: ['Alto','Wagon R','Swift','Baleno','Dzire','Vitara Brezza','Celerio','Ertiga','Fronx','Grand Vitara','Other'],
+                          Hyundai: ['i10','i20','Grand i10','Creta','Venue','Verna','Aura','Alcazar','Exter','Other'],
+                          Toyota: ['Glanza','Urban Cruiser','Innova','Fortuner','Hyryder','Rumion','Other'],
+                          Honda: ['Amaze','City','Jazz','WR-V','Elevate','Other'],
+                          Tata: ['Tiago','Tigor','Altroz','Nexon','Harrier','Safari','Punch','Other'],
+                          Mahindra: ['Bolero','Scorpio','XUV300','XUV700','Thar','Other'],
+                          Kia: ['Seltos','Sonet','Carens','Other'],
+                          Renault: ['Kwid','Triber','Kiger','Other'],
+                          Nissan: ['Magnite','Kicks','Other'],
+                          Skoda: ['Rapid','Slavia','Kushaq','Other'],
+                          Volkswagen: ['Polo','Virtus','Taigun','Other'],
+                          Ford: ['Figo','Aspire','EcoSport','Endeavour','Other'],
+                          MG: ['Hector','Astor','ZS EV','Other'],
+                          Jeep: ['Compass','Meridian','Wrangler','Other'],
+                          Other: ['Other']
+                        }
+                        const list = models[formData.trade_in_make as keyof typeof models] || ['Other']
+                        return list.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)
+                      })()}
+                    </SelectContent>
+                  </Select>
+                  {formData.trade_in_model === 'Other' && (
+                    <Input
+                      id="trade_in_model_other"
+                      placeholder="Enter model"
+                      value={formData.trade_in_model_other}
+                      onChange={(e) => setFormData(prev => ({ ...prev, trade_in_model_other: e.target.value }))}
+                    />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trade_in_year" className="text-sm font-medium">
+                    Year
+                  </Label>
+                  <Input
+                    id="trade_in_year"
+                    type="number"
+                    placeholder="e.g., 2020"
+                    value={formData.trade_in_year}
+                    onChange={(e) => setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))}
+                    min="1990"
+                    max={new Date().getFullYear()}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trade_in_km" className="text-sm font-medium">
+                    KMs Driven
+                  </Label>
+                  <Input
+                    id="trade_in_km"
+                    type="number"
+                    placeholder="e.g., 50000"
+                    value={formData.trade_in_km}
+                    onChange={(e) => setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))}
+                    min="0"
+                    max="5000000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trade_in_ownership" className="text-sm font-medium">
+                    Ownership
+                  </Label>
+                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_ownership: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select ownership" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="first">First Owner</SelectItem>
+                      <SelectItem value="second">Second Owner</SelectItem>
+                      <SelectItem value="third">Third Owner</SelectItem>
+                      <SelectItem value="more">More than 3</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -247,10 +449,10 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
           </Card>
 
           {/* Additional Information */}
-          <Card className="border-l-4 border-l-purple-500">
+          <Card className="border-l-4 border-l-indigo-500">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center space-x-2">
-                <Calendar className="h-5 w-5 text-purple-600" />
+                <Calendar className="h-5 w-5 text-indigo-600" />
                 <span>Additional Information</span>
               </CardTitle>
             </CardHeader>
@@ -277,7 +479,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
             </Button>
             <Button 
               onClick={handleSubmit}
-              disabled={isSubmitting || !formData.customer_name || !formData.customer_mobile_number}
+              disabled={isSubmitting || !formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {isSubmitting ? "Adding..." : "Add Lead"}

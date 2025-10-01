@@ -41,6 +41,9 @@ def start_worker():
         redis_conn.ping()
         logger.info("Connected to Redis successfully")
         
+        # Import workers module to register functions
+        import backend.fastapi_app.workers
+        
         # Create worker for all queues with Windows-compatible settings
         from rq.worker import SimpleWorker
         worker = SimpleWorker(['lead_processing', 'user_processing', 'notifications'], connection=redis_conn)

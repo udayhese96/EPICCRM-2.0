@@ -49,7 +49,13 @@ const computeCountsSnapshot = (leads: any[]) => {
     return fs === 'booked' || fs === 'retailed'
   }
   const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
-  const fresh = leads.filter(l => (normalizeStatus(l.lead_status) === '' && (l.final_status || '').toLowerCase() === 'pending') && !isFinalizedWon(l)).length
+  
+  // Fresh leads: all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
+  const fresh = leads.filter(l => {
+    const leadStatus = (l.lead_status || '').toLowerCase()
+    return leadStatus !== 'qualified' && !isFinalizedWon(l)
+  }).length
+  
   const called = leads.filter(l => calledSet.has(normalizeStatus(l.lead_status)) && !isFinalizedWon(l)).length
   const followUp = leads.filter(l => normalizeStatus(l.lead_status) === 'call me back' && !isFinalizedWon(l)).length
   const qualified = leads.filter(l => (l.lead_status === 'Qualified') && ((l.final_status || '').toLowerCase() === 'pending') && !isFinalizedWon(l)).length
@@ -335,7 +341,8 @@ export default function CREDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const username = parsed?.username || ''
       const fullName = parsed?.full_name || parsed?.name || ''
-      const qs = new URLSearchParams({ username })
+      // Use fullName for API call since database stores cre_name with proper case
+      const qs = new URLSearchParams({ username: fullName || username })
       if (fullName) qs.append('name', fullName)
       // Cache-busting to avoid any intermediate caching layers
       const cacheBuster = Date.now().toString()
@@ -345,9 +352,10 @@ export default function CREDashboard() {
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
       
       if (response.ok) {
-        const data = await response.json()
+        const raw = await response.json()
+        const data = Array.isArray(raw) ? raw : (Array.isArray(raw?.leads) ? raw.leads : [])
         const before = computeCountsSnapshot(leads)
-        console.debug('[CRE fetch] received', (data || []).length, 'leads. Prev counts:', before)
+        console.debug('[CRE fetch] received', (data || []).length, 'leads. Prev counts:', before, { sample: (data || [])[0] })
         
         // Map API lead_master fields to UI fields
         const mapped = (data || []).map((l: any) => ({
@@ -451,16 +459,20 @@ export default function CREDashboard() {
       customer_name: leadData.customer_name,
       customer_mobile_number: leadData.customer_mobile_number,
       source: leadData.source,
-      campaign: leadData.campaign || '',
+      campaign: leadData.sub_source || '', // Map sub_source to campaign for display
       date: leadData.created_at?.slice(0,10) || new Date().toISOString().slice(0,10),
-      lead_status: leadData.lead_status,
+      // CRE leads are immediately qualified
+      lead_status: 'Qualified',
       final_status: leadData.final_status,
       lead_category: leadData.lead_category || 'Warm',
       followup_count: 0,
       follow_up_date: leadData.follow_up_date,
+      first_call_date: new Date().toISOString(), // CRE adding lead counts as first call
       lead_remark: leadData.remarks || ''
     }
     setLeads(prevLeads => [newLead, ...prevLeads])
+    // Also refetch from server to ensure parity with backend
+    setTimeout(() => { fetchAssignedLeads(true) }, 600)
   }
 
   const handleApproveLost = async (leadUid: string) => {
@@ -562,7 +574,12 @@ export default function CREDashboard() {
     switch (activeTab) {
       case "fresh":
         // Fresh should exclude qualified and won leads
-        filteredLeads = leads.filter(l => !isFinalizedWon(l) && (l.lead_status ?? "").toLowerCase() !== "qualified")
+        // Include all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
+        filteredLeads = leads.filter(l => {
+          if (isFinalizedWon(l)) return false
+          const leadStatus = (l.lead_status ?? "").toLowerCase()
+          return leadStatus !== "qualified"
+        })
         break
       case "followup":
         {
@@ -644,8 +661,12 @@ export default function CREDashboard() {
     // Filter by status within tab using business rules
     if (activeTab === "fresh") {
       if (activeStatus === "Fresh") {
-        // Untouched: lead_status is null/empty AND final_status is Pending
-        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "") === "" && (lead.final_status ?? "").toLowerCase() === "pending")
+        // Untouched: lead_status is null/empty OR "Pending" (for admin-assigned leads) AND final_status is Pending
+        filteredLeads = filteredLeads.filter(lead => {
+          const leadStatus = (lead.lead_status ?? "").toLowerCase()
+          const finalStatus = (lead.final_status ?? "").toLowerCase()
+          return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
+        })
       } else if (activeStatus === "Called") {
         // Called: any of the non-CMB call outcomes
         const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
@@ -677,14 +698,21 @@ export default function CREDashboard() {
       const fs = (l.final_status || '').toLowerCase()
       return fs === 'booked' || fs === 'retailed'
     }
-    const isUntouched = (l: Lead) => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending"
+    const isUntouched = (l: Lead) => {
+      const leadStatus = (l.lead_status ?? "").toLowerCase()
+      const finalStatus = (l.final_status ?? "").toLowerCase()
+      return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
+    }
     const isCalled = (l: Lead) => {
       const s = (l.lead_status ?? "").toLowerCase()
       return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"].includes(s)
     }
     const isFollowUp = (l: Lead) => (l.lead_status ?? "").toLowerCase() === "call me back"
     return {
-      fresh: leads.filter(l => (isUntouched(l) || isCalled(l) || isFollowUp(l)) && !isFinalizedWon(l)).length,
+      fresh: leads.filter(l => {
+        const leadStatus = (l.lead_status || '').toLowerCase()
+        return leadStatus !== 'qualified' && !isFinalizedWon(l)
+      }).length,
       followup: leads.filter(lead => {
         if (!lead.follow_up_date) return false
         const followUpDate = lead.follow_up_date.includes('T') 
@@ -716,7 +744,11 @@ export default function CREDashboard() {
   }
 
   const getStatusCounts = () => {
-    const freshLeadsUntouched = leads.filter(l => (l.lead_status ?? "") === "" && (l.final_status ?? "").toLowerCase() === "pending")
+    const freshLeadsUntouched = leads.filter(l => {
+      const leadStatus = (l.lead_status ?? "").toLowerCase()
+      const finalStatus = (l.final_status ?? "").toLowerCase()
+      return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
+    })
     const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
     const freshLeadsCalled = leads.filter(l => calledSet.has((l.lead_status ?? "").toLowerCase()))
     const freshLeadsFollowUp = leads.filter(l => (l.lead_status ?? "").toLowerCase() === "call me back")

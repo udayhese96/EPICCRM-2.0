@@ -8,6 +8,7 @@ import json
 import psycopg2
 from psycopg2.extras import execute_values, RealDictCursor
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 import logging
 from dataclasses import asdict
@@ -27,6 +28,16 @@ except ImportError as e:
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Time utilities
+def now_ist_iso() -> str:
+    """Return current timestamp in Asia/Kolkata (IST) as ISO string without timezone."""
+    try:
+        # Return IST timestamp without timezone info (naive datetime)
+        return datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None).isoformat()
+    except Exception:
+        # Fallback to UTC if ZoneInfo fails
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 class LeadBatchProcessor:
     """Processes batches of lead updates with chunked upserts"""
@@ -121,7 +132,7 @@ class LeadBatchProcessor:
         for lead in leads:
             # Build update data
             update_data = {
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": now_ist_iso()
             }
             
             # Map fields from LeadUpdatePayload to lead_master columns
@@ -170,7 +181,7 @@ class LeadBatchProcessor:
             
             # Auto-stamp first call date if first_remark is provided
             if lead.first_remark and not lead.followup_note:
-                update_data["first_call_date"] = datetime.now(timezone.utc).isoformat()
+                update_data["first_call_date"] = now_ist_iso()
             
             # Create upsert values tuple
             value_tuple = (
@@ -196,8 +207,8 @@ class LeadBatchProcessor:
                 lead.ps_name or '',
                 lead.branch or '',
                 json.dumps(lead.metadata or {}),
-                datetime.now(timezone.utc).isoformat(),
-                datetime.now(timezone.utc).isoformat()
+                now_ist_iso(),
+                now_ist_iso()
             )
             values.append(value_tuple)
         
@@ -257,7 +268,7 @@ class LeadBatchProcessor:
                     """,
                     (
                         lead.customer_location,
-                        datetime.now(timezone.utc).isoformat(),
+                        now_ist_iso(),
                         lead.uid,
                     ),
                 )
@@ -276,17 +287,19 @@ class LeadBatchProcessor:
         """Upsert into qualified_leads table"""
         sql = """
         INSERT INTO qualified_leads (
-            lead_uid, customer_name, customer_mobile_number, customer_location, source, cre_name,
+            lead_uid, customer_name, customer_mobile_number, customer_location, source, sub_source, cre_name,
             lead_category, model_interested, first_remark, variant, buying_plan,
             finance_option, profession, test_drive_type, trade_in, branch, ps_name,
             created_at, updated_at
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (lead_uid) DO UPDATE SET
             customer_name = EXCLUDED.customer_name,
             customer_mobile_number = EXCLUDED.customer_mobile_number,
             customer_location = EXCLUDED.customer_location,
+            source = EXCLUDED.source,
+            sub_source = EXCLUDED.sub_source,
             lead_category = EXCLUDED.lead_category,
             model_interested = EXCLUDED.model_interested,
             first_remark = EXCLUDED.first_remark,
@@ -307,6 +320,7 @@ class LeadBatchProcessor:
             lead.customer_mobile_number or '',
             lead.customer_location or '',
             'website',  # Default source
+            '',  # sub_source (empty for now)
             lead.cre_name or '',
             lead.lead_category or '',
             lead.model_interested or '',
@@ -319,8 +333,8 @@ class LeadBatchProcessor:
             lead.trade_in or '',
             lead.branch or '',
             lead.ps_name or '',
-            datetime.now(timezone.utc).isoformat(),
-            datetime.now(timezone.utc).isoformat()
+            now_ist_iso(),
+            now_ist_iso()
         ))
     
     def upsert_ps_followup(self, cur, lead: LeadUpdatePayload):
@@ -361,12 +375,12 @@ class LeadBatchProcessor:
             lead.variant or '',
             lead.buying_plan or '',
             lead.finance_option or '',
-            lead.follow_up_date or datetime.now(timezone.utc).isoformat(),
+            lead.follow_up_date or now_ist_iso(),
             lead.lead_status or 'Pending',
             lead.final_status or 'Pending',
-            datetime.now(timezone.utc).isoformat(),
-            datetime.now(timezone.utc).isoformat(),
-            datetime.now(timezone.utc).isoformat()
+            now_ist_iso(),
+            now_ist_iso(),
+            now_ist_iso()
         ))
     
     def upsert_trade_in(self, cur, lead: LeadUpdatePayload):
@@ -397,8 +411,8 @@ class LeadBatchProcessor:
             lead.trade_in_year or '',
             lead.trade_in_km or '',
             lead.trade_in_ownership or '',
-            datetime.now(timezone.utc).isoformat(),
-            datetime.now(timezone.utc).isoformat()
+            now_ist_iso(),
+            now_ist_iso()
         ))
     
     def update_dashboard_metrics(self, processed_count: int, error_count: int):
@@ -407,8 +421,8 @@ class LeadBatchProcessor:
             # Update processing metrics
             metrics_data = {
                 "metric": "leads_processed_today",
-                "value": {"count": processed_count, "errors": error_count, "timestamp": datetime.now(timezone.utc).isoformat()},
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "value": {"count": processed_count, "errors": error_count, "timestamp": now_ist_iso()},
+                "updated_at": now_ist_iso()
             }
             
             self.supabase.table('dashboard_metrics').upsert(
@@ -418,6 +432,67 @@ class LeadBatchProcessor:
             
         except Exception as e:
             logger.error(f"Error updating dashboard metrics: {str(e)}")
+
+def process_cre_lead(task_data: dict):
+    """Process CRE lead creation - insert into qualified_leads and trade_in_master"""
+    try:
+        from .database import get_supabase_client
+        supabase = get_supabase_client()
+        
+        lead_uid = task_data.get('lead_uid')
+        if not lead_uid:
+            logger.error("No lead_uid provided in task data")
+            return
+        
+        # Insert into qualified_leads
+        qualified_lead_data = {
+            "lead_uid": lead_uid,
+            "customer_name": task_data.get('customer_name', ''),
+            "customer_mobile_number": task_data.get('customer_mobile_number', ''),
+            "source": task_data.get('source', ''),
+            "sub_source": task_data.get('sub_source', ''),
+            "cre_name": task_data.get('cre_name', ''),
+            "first_remark": task_data.get('remarks', ''),
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }
+        
+        # Insert qualified lead
+        qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+        if not qualified_response.data:
+            logger.error(f"Failed to insert qualified lead for {lead_uid}")
+            return
+        
+        # Insert into trade_in_master if trade-in details provided
+        trade_in_data = {
+            "lead_uid": lead_uid,
+            "customer_name": task_data.get('customer_name', ''),
+            "customer_mobile_number": task_data.get('customer_mobile_number', ''),
+            "trade_in_make": task_data.get('trade_in_make'),
+            "trade_in_model": task_data.get('trade_in_model'),
+            "trade_in_year": task_data.get('trade_in_year'),
+            "trade_in_km": task_data.get('trade_in_km'),
+            "trade_in_ownership": task_data.get('trade_in_ownership'),
+            "created_at": now_ist_iso(),
+            "updated_at": now_ist_iso()
+        }
+        
+        # Only insert if any trade-in details are provided
+        if any([trade_in_data.get('trade_in_make'), trade_in_data.get('trade_in_model'), 
+                trade_in_data.get('trade_in_year'), trade_in_data.get('trade_in_km'), 
+                trade_in_data.get('trade_in_ownership')]):
+            
+            trade_in_response = supabase.table('trade_in_master').upsert(trade_in_data).execute()
+            if not trade_in_response.data:
+                logger.error(f"Failed to insert trade-in data for {lead_uid}")
+            else:
+                logger.info(f"Successfully inserted trade-in data for {lead_uid}")
+        
+        logger.info(f"Successfully processed CRE lead {lead_uid}")
+        
+    except Exception as e:
+        logger.error(f"Error processing CRE lead: {str(e)}")
+        raise
 
 # Worker function for RQ
 def process_lead_batch(task_id: str):
