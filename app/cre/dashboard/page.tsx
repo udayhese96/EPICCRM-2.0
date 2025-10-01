@@ -297,7 +297,6 @@ export default function CREDashboard() {
     }
   }
 
-
   const checkRedisWorkerStatus = async () => {
     try {
       const response = await fetch('/api/jobs/queue-stats')
@@ -741,10 +740,10 @@ export default function CREDashboard() {
     <DashboardLayout>
       <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-xl">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-teal-100 rounded-lg">
+              <div className="p-2 bg-teal-100 rounded-2xl">
                 <User className="h-6 w-6 text-teal-600" />
               </div>
               <div>
@@ -765,7 +764,7 @@ export default function CREDashboard() {
             
             {/* Primary Button - Add Lead */}
             <button 
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-300 transition-all duration-150 min-h-[44px] min-w-[44px]"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-sm font-semibold shadow-sm bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-300 transition-all duration-150 min-h-[44px] min-w-[44px]"
               onClick={() => setIsAddModalOpen(true)}
               aria-label="Add new lead"
             >
@@ -775,7 +774,7 @@ export default function CREDashboard() {
             
             {/* Secondary Button - Refresh */}
             <button 
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
               onClick={() => {
                 console.log('🔄 [Manual] Manual refresh triggered')
                 fetchAssignedLeads()
@@ -789,7 +788,7 @@ export default function CREDashboard() {
             
             {/* Secondary Button - Analytics */}
             <button 
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
               onClick={() => window.location.assign('/analytics')}
               aria-label="View analytics"
             >
@@ -799,7 +798,7 @@ export default function CREDashboard() {
             
             {/* Ghost Button - Sign Out */}
             <button 
-              className="px-2 py-1 rounded-md text-sm text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
+              className="px-2 py-1 rounded-2xl text-sm text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
               onClick={() => { localStorage.clear(); window.location.assign('/auth/login') }}
               aria-label="Sign out"
             >
@@ -812,7 +811,7 @@ export default function CREDashboard() {
         <div className="p-6 space-y-6">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-            <Card className="relative overflow-hidden bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-slate-800 border border-blue-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-blue-100/90 to-blue-200/70 text-slate-800 border border-blue-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -856,7 +855,7 @@ export default function CREDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden bg-gradient-to-br from-yellow-100/90 to-yellow-200/70 text-slate-800 border border-yellow-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-yellow-100/90 to-yellow-200/70 text-slate-800 border border-yellow-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-yellow-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -880,7 +879,7 @@ export default function CREDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden bg-gradient-to-br from-orange-100/90 to-orange-200/70 text-slate-800 border border-orange-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-orange-100/90 to-orange-200/70 text-slate-800 border border-orange-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-orange-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -904,7 +903,7 @@ export default function CREDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden bg-gradient-to-br from-green-100/90 to-green-200/70 text-slate-800 border border-green-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-green-100/90 to-green-200/70 text-slate-800 border border-green-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-green-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -928,7 +927,7 @@ export default function CREDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-100/90 to-emerald-200/70 text-slate-800 border border-emerald-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-emerald-100/90 to-emerald-200/70 text-slate-800 border border-emerald-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-emerald-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -952,7 +951,7 @@ export default function CREDashboard() {
               </CardContent>
             </Card>
 
-            <Card className="relative overflow-hidden bg-gradient-to-br from-red-100/90 to-red-200/70 text-slate-800 border border-red-300/30 shadow-md rounded-xl backdrop-blur-[6px] h-40 md:h-44">
+            <Card className="relative overflow-hidden bg-gradient-to-br from-red-100/90 to-red-200/70 text-slate-800 border border-red-300/30 shadow-md rounded-3xl backdrop-blur-[6px] h-40 md:h-44">
               {/* Apple-Magnus glassy effect layers */}
               <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-red-300/25"></div>
               <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -1087,7 +1086,7 @@ export default function CREDashboard() {
           </div>
 
           {/* Dynamic Leads Section */}
-          <Card>
+          <Card className="rounded-3xl">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1103,7 +1102,7 @@ export default function CREDashboard() {
                   </CardTitle>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <div className="relative overflow-hidden rounded-lg backdrop-blur-[6px]">
+                  <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
                     {/* Apple Magnus glassy effect layers */}
                     <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -1111,7 +1110,7 @@ export default function CREDashboard() {
                     
                     <Clock className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500 z-10" />
                     <select 
-                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-lg border border-blue-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base z-10"
+                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-2xl border border-blue-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base z-10"
                       value={dateMode} 
                       onChange={(e) => setDateMode(e.target.value as any)}
                       aria-label="Select date filter"
@@ -1129,13 +1128,13 @@ export default function CREDashboard() {
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full sm:w-64 px-3 py-2 rounded-lg border border-gray-200 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base"
+                      className="w-full sm:w-64 px-3 py-2 rounded-2xl border border-gray-200 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base"
                       placeholder="Select Date"
                       aria-label="Select specific date"
                     />
                   )}
                   
-                  <div className="relative overflow-hidden rounded-lg backdrop-blur-[6px]">
+                  <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
                     {/* Apple Magnus glassy effect layers */}
                     <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-purple-300/25"></div>
                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
@@ -1145,14 +1144,14 @@ export default function CREDashboard() {
                     <input 
                       type="text"
                       placeholder="Search by UID, name..." 
-                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-lg border border-purple-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all duration-150 text-sm md:text-base z-10"
+                      className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-2xl border border-purple-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all duration-150 text-sm md:text-base z-10"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       aria-label="Search leads"
                     />
                   </div>
                       <button
-                    className="px-2 py-1 rounded-md text-sm text-gray-600 hover:bg-gray-50 focus:ring-2 focus:ring-gray-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
+                    className="px-2 py-1 rounded-2xl text-sm text-gray-600 hover:bg-gray-50 focus:ring-2 focus:ring-gray-100 transition-all duration-150 min-h-[44px] min-w-[44px]"
                         onClick={() => setSearchTerm("")}
                         aria-label="Clear search"
                       >
@@ -1298,14 +1297,14 @@ export default function CREDashboard() {
 
               {/* Subtle Refreshing Indicator */}
               {isRefreshing && (
-                <div className="mb-2 flex items-center justify-center text-sm text-blue-600 bg-blue-50 py-2 px-4 rounded-lg">
+                <div className="mb-2 flex items-center justify-center text-sm text-blue-600 bg-blue-50 py-2 px-4 rounded-2xl">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
                   Syncing data...
                 </div>
               )}
 
               {/* Leads Table */}
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-2xl">
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
@@ -1370,7 +1369,7 @@ export default function CREDashboard() {
                                 <>
                                   <Button 
                                     size="sm" 
-                                    className="bg-green-500 hover:bg-green-600 text-white"
+                                    className="bg-green-500 hover:bg-green-600 text-white rounded-2xl"
                                     onClick={() => handleApproveLost(lead.uid)}
                                     style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
                                   >
@@ -1379,7 +1378,7 @@ export default function CREDashboard() {
                                   <Button 
                                     size="sm" 
                                     variant="outline"
-                                    className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                    className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 rounded-2xl"
                                     onClick={() => handleRejectLost(lead.uid)}
                                     style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
                                   >
@@ -1389,7 +1388,7 @@ export default function CREDashboard() {
                               ) : (
                                 <>
                                   <button 
-                                    className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-300 bg-gradient-to-br from-green-50/90 to-green-100/70 text-green-800 border border-green-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
+                                    className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-300 bg-gradient-to-br from-green-50/90 to-green-100/70 text-green-800 border border-green-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
                                     onClick={() => openUpdateModal(lead)}
                                     aria-label={`Update lead ${lead.uid}`}
                                   >
@@ -1399,7 +1398,7 @@ export default function CREDashboard() {
                                     <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
                                     
                                     <span className="relative z-10 flex items-center gap-2">
-                                      <div className="p-1 bg-green-100/80 rounded-lg backdrop-blur-sm">
+                                      <div className="p-1 bg-green-100/80 rounded-xl backdrop-blur-sm">
                                         <Edit3 className="h-3 w-3 text-green-600" />
                                       </div>
                                       Update
@@ -1408,7 +1407,7 @@ export default function CREDashboard() {
                                   {/* Only show History button for leads that are not fresh/untouched */}
                                   {!(activeTab === "fresh" && activeStatus === "Fresh") && (
                                     <button 
-                                      className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
+                                      className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
                                       onClick={() => {
                                         setSelectedLead(lead)
                                         setIsRemarksSyncOpen(true)
@@ -1421,7 +1420,7 @@ export default function CREDashboard() {
                                       <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
                                       
                                       <span className="relative z-10 flex items-center gap-2">
-                                        <div className="p-1 bg-blue-100/80 rounded-lg backdrop-blur-sm">
+                                        <div className="p-1 bg-blue-100/80 rounded-xl backdrop-blur-sm">
                                           <Clock className="h-3 w-3 text-blue-600" />
                                         </div>
                                         History
@@ -1436,7 +1435,7 @@ export default function CREDashboard() {
                             <td className="p-3">
                               <Badge 
                                 variant="outline"
-                                className={
+                                className={`rounded-full ${
                                   (lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
                                    lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
                                    lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
@@ -1444,12 +1443,12 @@ export default function CREDashboard() {
                                    lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
                                    lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
                                    "bg-gray-100 text-gray-800")
-                                }
+                                }`}
                               >
                                 {lead.lead_status}
                               </Badge>
                               {activeTab === "followup" && overdueDays > 0 && (
-                                <Badge variant="secondary" className="ml-2 bg-red-600 text-white">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
+                                <Badge variant="secondary" className="ml-2 bg-red-600 text-white rounded-full">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
                               )}
                             </td>
                           )}
@@ -1458,25 +1457,25 @@ export default function CREDashboard() {
                           <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.source}</td>
                           <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.campaign}</td>
                           <td className="p-3">
-                            <Badge variant="outline" className={lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}>
+                            <Badge variant="outline" className={`rounded-full ${lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}>
                               {lead.branch || 'Unassigned'}
                             </Badge>
                           </td>
                           {!(activeTab === "fresh" && activeStatus === "Fresh") && (
                             <td className="p-3">
-                              <Badge variant="outline" className={lead.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}>
+                              <Badge variant="outline" className={`rounded-full ${lead.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}`}>
                                 {lead.icrop_id || 'Pending'}
                               </Badge>
                             </td>
                           )}
                           <td className="p-3">
-                            <Badge variant="outline" className={lead.ps_name ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}>
+                            <Badge variant="outline" className={`rounded-full ${lead.ps_name ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
                               {lead.ps_name || 'Unassigned'}
                             </Badge>
                           </td>
                           {activeTab === "lostconfirm" && (
                             <td className="p-3">
-                              <div className="text-sm text-gray-800 bg-red-50 rounded p-2 border border-red-200" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>
+                              <div className="text-sm text-gray-800 bg-red-50 rounded-2xl p-2 border border-red-200" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>
                                 {lead.lost_reason || 'No reason provided'}
                               </div>
                             </td>
@@ -1531,8 +1530,3 @@ export default function CREDashboard() {
     </DashboardLayout>
   )
 }
-
-
-
-
-
