@@ -42,7 +42,8 @@ export default function LoginPage() {
         username: data.user.username,
         email: data.user.email,
         role: data.user.role,
-        name: data.user.first_name || data.user.username,
+        name: data.user.full_name || data.user.first_name || data.user.username,
+        full_name: data.user.full_name || data.user.first_name || data.user.username,
         access_token: data.access_token
       }))
 

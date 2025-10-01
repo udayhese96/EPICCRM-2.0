@@ -61,6 +61,17 @@ export default function AssignLeadsPage() {
     assigned_cre_id: "",
     assigned_cre_name: ""
   })
+  const SOURCE_OPTIONS: { [key: string]: string[] } = {
+    "Google": ["Web", "Tele In", "GMB Tele In"],
+    "WhatsApp": ["Tele In", "Bulk Message"],
+    "Car Dekho": ["CD B", "CD G"],
+    "Car Wale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
+    "OEM": ["Dealer CMS", "TKM"],
+    "Meta": ["Web"],
+    "Tele Out": ["Web"],
+    "Referral": [],
+    "Other": []
+  }
   const [bucketAssignments, setBucketAssignments] = useState<{ [source: string]: BucketAssignment[] }>({})
 
   useEffect(() => {
@@ -452,6 +463,12 @@ export default function AssignLeadsPage() {
   const handleAddLead = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
+      // Basic mobile validation (10 digits)
+      const mobile = (addLeadForm.customer_mobile_number || '').trim()
+      if (!/^\d{10}$/.test(mobile)) {
+        alert('Enter a valid 10-digit phone number')
+        return
+      }
       const response = await fetch('/api/admin/leads', {
         method: 'POST',
         headers: {
@@ -459,7 +476,10 @@ export default function AssignLeadsPage() {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
         },
-        body: JSON.stringify(addLeadForm)
+        body: JSON.stringify({
+          ...addLeadForm,
+          sub_source: addLeadForm.sub_source === "none" ? "" : (addLeadForm.sub_source || "")
+        })
       })
 
       if (response.ok) {
@@ -638,8 +658,11 @@ export default function AssignLeadsPage() {
                     <Label htmlFor="customer_mobile_number">Phone Number *</Label>
                     <Input
                       id="customer_mobile_number"
+                      type="tel"
                       value={addLeadForm.customer_mobile_number}
                       onChange={(e) => setAddLeadForm(prev => ({ ...prev, customer_mobile_number: e.target.value }))}
+                      pattern="[0-9]{10}"
+                      maxLength={10}
                       required
                     />
                   </div>
@@ -660,44 +683,37 @@ export default function AssignLeadsPage() {
                   </div>
                   <div>
                     <Label htmlFor="source">Source *</Label>
-                    <Select value={addLeadForm.source} onValueChange={(value) => setAddLeadForm(prev => ({ ...prev, source: value }))}>
+                    <Select value={addLeadForm.source} onValueChange={(value) => setAddLeadForm(prev => ({ ...prev, source: value, sub_source: "" }))}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select Source" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Bulkwatsup(Telein)">Bulkwatsup(Telein)</SelectItem>
-                        <SelectItem value="Bulkwatsup(Watco)">Bulkwatsup(Watco)</SelectItem>
-                        <SelectItem value="Car Dekho">Car Dekho</SelectItem>
-                        <SelectItem value="Car Wale">Car Wale</SelectItem>
-                        <SelectItem value="CD B">CD B</SelectItem>
-                        <SelectItem value="CD G">CD G</SelectItem>
-                        <SelectItem value="CWA">CWA</SelectItem>
-                        <SelectItem value="CWB">CWB</SelectItem>
-                        <SelectItem value="CWC">CWC</SelectItem>
-                        <SelectItem value="CWG">CWG</SelectItem>
-                        <SelectItem value="CWH">CWH</SelectItem>
-                        <SelectItem value="CWK">CWK</SelectItem>
-                        <SelectItem value="Dealer CMS">Dealer CMS</SelectItem>
-                        <SelectItem value="Email">Email</SelectItem>
-                        <SelectItem value="GMB (Telein)">GMB (Telein)</SelectItem>
-                        <SelectItem value="Google Telein">Google Telein</SelectItem>
-                        <SelectItem value="Landing Page">Landing Page</SelectItem>
-                        <SelectItem value="Meta">Meta</SelectItem>
-                        <SelectItem value="Tele Out">Tele Out</SelectItem>
-                        <SelectItem value="Telein">Telein</SelectItem>
-                        <SelectItem value="TKM">TKM</SelectItem>
+                        {Object.keys(SOURCE_OPTIONS).map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Label htmlFor="sub_source">Subsource</Label>
-                    <Input
-                      id="sub_source"
+                    <Select
                       value={addLeadForm.sub_source}
-                      onChange={(e) => setAddLeadForm(prev => ({ ...prev, sub_source: e.target.value }))}
-                      placeholder="Select Source First"
+                      onValueChange={(value) => setAddLeadForm(prev => ({ ...prev, sub_source: value }))}
                       disabled={!addLeadForm.source}
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Source First" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(SOURCE_OPTIONS[addLeadForm.source] || []).length === 0 ? (
+                          <SelectItem value="none">None</SelectItem>
+                        ) : (
+                          SOURCE_OPTIONS[addLeadForm.source].map((sub) => (
+                            <SelectItem key={sub} value={sub}>{sub}</SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="flex justify-end space-x-3">
                     <Button type="button" variant="outline" onClick={() => setShowAddLeadModal(false)}>

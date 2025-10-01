@@ -1225,17 +1225,23 @@ class CRELeadCreate(BaseModel):
     uid: str
     customer_name: str
     customer_mobile_number: str
-    customer_email: Optional[str] = None
     customer_location: Optional[str] = None
     source: str
-    campaign: Optional[str] = None
+    sub_source: Optional[str] = None
+    follow_up_date: str
     cre_name: str
     cre_id: str
     assigned: str = "Yes"
     lead_status: Optional[str] = None  # Fresh leads start with null/empty lead_status
     final_status: str = "Pending"
-    lead_category: str = "Warm"
+    lead_category: Optional[str] = None
     remarks: Optional[str] = None
+    # Trade-in details (optional)
+    trade_in_make: Optional[str] = None
+    trade_in_model: Optional[str] = None
+    trade_in_year: Optional[str] = None
+    trade_in_km: Optional[str] = None
+    trade_in_ownership: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -1256,14 +1262,14 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
             "source": lead_data.source,
             "sub_source": lead_data.sub_source,
             "date": now_ist_iso(),
-            "lead_category": "Warm",  # Default category
+            "lead_category": None,  # Admin-created leads start with null category
             "lead_status": None,  # Fresh leads start with null/empty lead_status
             "final_status": "Pending",
             "created_at": now_ist_iso(),
             "updated_at": now_ist_iso()
         }
         
-        # If CRE is assigned, mark as assigned
+        # If CRE is assigned, mark as assigned (Admin flow requires CRE selection)
         if lead_data.assigned_cre_id and lead_data.assigned_cre_name:
             insert_data["assigned"] = "Yes"
             insert_data["cre_id"] = lead_data.assigned_cre_id
@@ -1283,7 +1289,7 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
 
 @app.post("/api/cre/leads", response_model=dict)
 async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_current_user)):
-    """Create a new lead for CRE users"""
+    """Create a new lead for CRE users with background processing for qualified_leads and trade_in_master"""
     try:
         # Verify the CRE user is creating the lead for themselves
         if current_user.role != 'cre' or current_user.id != lead_data.cre_id:
@@ -1294,11 +1300,9 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
             "uid": lead_data.uid,
             "customer_name": lead_data.customer_name,
             "customer_mobile_number": lead_data.customer_mobile_number,
-            "customer_email": lead_data.customer_email,
             "customer_location": lead_data.customer_location,
             "source": lead_data.source,
-            "campaign": lead_data.campaign,
-            "sub_source": lead_data.campaign,  # Map campaign to sub_source
+            "sub_source": lead_data.sub_source,
             "cre_name": lead_data.cre_name,
             "cre_id": lead_data.cre_id,
             "assigned": lead_data.assigned,
@@ -1306,15 +1310,91 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
             "final_status": lead_data.final_status,
             "lead_category": lead_data.lead_category,
             "first_remark": lead_data.remarks,
+            "follow_up_date": lead_data.follow_up_date,  # Follow-up date as provided
+            "first_call_date": now_ist_iso(),  # CRE adding lead counts as first call
             "date": now_ist_iso(),
             "created_at": now_ist_iso(),
             "updated_at": now_ist_iso(),
             "cre_assigned_at": now_ist_iso()
         }
         
+        # Insert into lead_master
         response = supabase.table('lead_master').insert(lead_record).execute()
         
         if response.data:
+            lead_uid = response.data[0]['uid']
+            
+            # Enqueue background task for qualified_leads and trade_in_master
+            background_task_data = {
+                "lead_uid": lead_uid,
+                "customer_name": lead_data.customer_name,
+                "customer_mobile_number": lead_data.customer_mobile_number,
+                "follow_up_date": lead_data.follow_up_date,
+                "cre_name": lead_data.cre_name,
+                "cre_id": lead_data.cre_id,
+                "source": lead_data.source,
+                "sub_source": lead_data.sub_source,
+                "remarks": lead_data.remarks,
+                # Trade-in details
+                "trade_in_make": lead_data.trade_in_make,
+                "trade_in_model": lead_data.trade_in_model,
+                "trade_in_year": lead_data.trade_in_year,
+                "trade_in_km": lead_data.trade_in_km,
+                "trade_in_ownership": lead_data.trade_in_ownership
+            }
+            
+            # Enqueue background task for qualified_leads and trade_in_master
+            try:
+                from .queue_system import enqueue_task
+                from .workers import process_cre_lead
+                
+                # Enqueue the background task
+                task_id = enqueue_task("backend.fastapi_app.workers.process_cre_lead", background_task_data)
+                print(f"Enqueued CRE lead processing task: {task_id}")
+                
+            except Exception as e:
+                print(f"Warning: Failed to enqueue background task: {e}")
+                # Fallback: insert directly
+                try:
+                    qualified_lead_data = {
+                        "lead_uid": lead_uid,
+                        "customer_name": lead_data.customer_name,
+                        "customer_mobile_number": lead_data.customer_mobile_number,
+                        "source": lead_data.source,
+                        "sub_source": lead_data.sub_source,
+                        "cre_name": lead_data.cre_name,
+                        "first_remark": lead_data.remarks,
+                        "created_at": now_ist_iso(),
+                        "updated_at": now_ist_iso()
+                    }
+                    
+                    # Insert qualified lead
+                    qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+                    if not qualified_response.data:
+                        print(f"Warning: Failed to insert qualified lead for {lead_uid}")
+                    
+                    # Insert into trade_in_master if trade-in details provided
+                    if any([lead_data.trade_in_make, lead_data.trade_in_model, lead_data.trade_in_year, lead_data.trade_in_km, lead_data.trade_in_ownership]):
+                        trade_in_data = {
+                            "lead_uid": lead_uid,
+                            "customer_name": lead_data.customer_name,
+                            "customer_mobile_number": lead_data.customer_mobile_number,
+                            "trade_in_make": lead_data.trade_in_make,
+                            "trade_in_model": lead_data.trade_in_model,
+                            "trade_in_year": lead_data.trade_in_year,
+                            "trade_in_km": lead_data.trade_in_km,
+                            "trade_in_ownership": lead_data.trade_in_ownership,
+                            "created_at": now_ist_iso(),
+                            "updated_at": now_ist_iso()
+                        }
+                        
+                        trade_in_response = supabase.table('trade_in_master').upsert(trade_in_data).execute()
+                        if not trade_in_response.data:
+                            print(f"Warning: Failed to insert trade-in data for {lead_uid}")
+                            
+                except Exception as fallback_error:
+                    print(f"Warning: Failed to process qualified leads and trade-in: {fallback_error}")
+            
             return {"message": "Lead created successfully", "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
