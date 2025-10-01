@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
+import { Plus_Jakarta_Sans } from 'next/font/google'
 // import { Analytics } from '@vercel/analytics/next' // Disabled for development
 // Temporarily enable console for debugging
 import './globals.css'
@@ -11,19 +12,26 @@ export const metadata: Metadata = {
   generator: 'EPIC CRM 2.0',
 }
 
+// Load font at module scope as required by next/font
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['200','300','400','500','600','700','800'],
+  display: 'swap',
+  variable: '--font-plus-jakarta'
+})
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={plusJakarta.variable}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet" />
       </head>
-      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`} style={{ fontFamily: '"Inter", sans-serif' }}>
+      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`} style={{ fontFamily: 'var(--font-sans)' }}>
         {children}
         {/* <Analytics /> */}
       </body>

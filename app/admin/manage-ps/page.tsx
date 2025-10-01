@@ -61,8 +61,9 @@ export default function ManagePSPage() {
         }
       })
       if (response.ok) {
-        const users = await response.json()
-        setPSUsers(users)
+        const data = await response.json()
+        const list = Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
+        setPSUsers(list as PSUser[])
       }
     } catch (error) {
       console.error('Error fetching PS users:', error)

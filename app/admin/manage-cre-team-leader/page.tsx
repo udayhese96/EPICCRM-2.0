@@ -64,7 +64,8 @@ const ManageCRETeamLeaderPage = () => {
       }
 
       const data = await response.json()
-      setUsers(data)
+      const list = Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
+      setUsers(list as any)
     } catch (error: any) {
       toast.error(error.message || 'Error fetching CRE Team Leader users')
       console.error('Error fetching CRE Team Leader users:', error)

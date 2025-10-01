@@ -748,7 +748,7 @@ export default function CREDashboard() {
                 <User className="h-6 w-6 text-teal-600" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>CRE Dashboard</h1>
+                <h1 className="text-2xl font-bold text-gray-900">CRE Dashboard</h1>
                 <p className="text-gray-600" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Welcome back, {userName}!</p>
               </div>
             </div>
@@ -1309,26 +1309,26 @@ export default function CREDashboard() {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>ACTION</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">ACTION</th>
                       {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
-                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>
+                        <th className="text-left p-3 font-semibold text-gray-800">
                           LEAD STATUS
                         </th>
                       )}
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>CUSTOMER NAME</th>
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>MOBILE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>SOURCE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>CAMPAIGN</th>
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>BRANCH</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">CUSTOMER NAME</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">MOBILE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">SOURCE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">CAMPAIGN</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">BRANCH</th>
                       {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>ICROP ID</th>
+                        <th className="text-left p-3 font-semibold text-gray-800">ICROP ID</th>
                       )}
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>GEM</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">GEM</th>
                       {activeTab === "lostconfirm" && (
-                        <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>LOST REASON</th>
+                        <th className="text-left p-3 font-semibold text-gray-800">LOST REASON</th>
                       )}
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>DATE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800" style={{ fontFamily: 'Inter, Roboto, sans-serif', fontWeight: 600 }}>UID</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">DATE</th>
+                      <th className="text-left p-3 font-semibold text-gray-800">UID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1453,7 +1453,7 @@ export default function CREDashboard() {
                               )}
                             </td>
                           )}
-                          <td className="p-3 font-medium text-gray-900" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.customer_name}</td>
+                          <td className="p-3 font-medium text-gray-900">{lead.customer_name}</td>
                           <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.customer_mobile_number}</td>
                           <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.source}</td>
                           <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.campaign}</td>
@@ -1482,7 +1482,7 @@ export default function CREDashboard() {
                             </td>
                           )}
                           <td className="p-3 text-sm text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.date}</td>
-                          <td className="p-3 text-sm font-mono text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.uid}</td>
+                          <td className="p-3 text-sm font-mono text-gray-800">{lead.uid}</td>
                         </tr>
                         )
                       })

@@ -227,11 +227,11 @@ export function Sidebar({ userRole }: SidebarProps) {
   const navigation = getNavigationForRole(userRole)
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-4 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">EPIC CRM</h2>
-        <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setIsMobileOpen(false)}>
-          <X className="h-4 w-4" />
+    <div className="flex flex-col h-full bg-gradient-to-br from-slate-50 via-orange-50 to-red-50">
+      <div className="flex items-center justify-between p-4 border-b border-orange-200/40">
+        <h2 className="text-lg font-semibold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">EPIC CRM</h2>
+        <Button variant="ghost" size="sm" className="lg:hidden hover:bg-orange-100" onClick={() => setIsMobileOpen(false)}>
+          <X className="h-4 w-4 text-orange-600" />
         </Button>
       </div>
 
@@ -244,8 +244,10 @@ export function Sidebar({ userRole }: SidebarProps) {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                  isActive ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                  "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-200",
+                  isActive 
+                    ? "bg-gradient-to-r from-orange-100 to-red-100 text-orange-700 shadow-md border border-orange-200" 
+                    : "text-gray-700 hover:bg-gradient-to-r hover:from-orange-50 hover:to-red-50 hover:text-orange-600",
                 )}
                 onClick={() => setIsMobileOpen(false)}
               >
@@ -257,10 +259,10 @@ export function Sidebar({ userRole }: SidebarProps) {
         </nav>
       </ScrollArea>
 
-      <div className="p-4 border-t">
+      <div className="p-4 border-t border-orange-200/40">
         <Button
           variant="ghost"
-          className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+          className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-gradient-to-r hover:from-red-50 hover:to-orange-50 transition-all"
           onClick={handleLogout}
         >
           <LogOut className="h-5 w-5 mr-3" />
@@ -286,14 +288,14 @@ export function Sidebar({ userRole }: SidebarProps) {
       {isMobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
           <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setIsMobileOpen(false)} />
-          <div className="relative flex-1 flex flex-col max-w-xs w-full bg-white">
+          <div className="relative flex-1 flex flex-col max-w-xs w-full shadow-2xl">
             <SidebarContent />
           </div>
         </div>
       )}
 
       {/* Desktop sidebar */}
-      <div className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 lg:bg-white lg:border-r lg:border-gray-200">
+      <div className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 lg:border-r lg:border-orange-200/50 shadow-lg">
         <SidebarContent />
       </div>
     </>

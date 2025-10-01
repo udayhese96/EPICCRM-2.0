@@ -63,8 +63,9 @@ export default function ManageCREPage() {
       })
       
       if (response.ok) {
-        const users = await response.json()
-        setCREUsers(users)
+        const data = await response.json()
+        const list = Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
+        setCREUsers(list as CREUser[])
       } else {
         console.error('Failed to fetch CRE users:', response.status, response.statusText)
       }
@@ -110,11 +111,13 @@ export default function ManageCREPage() {
         await fetchCREUsers() // Refresh the list
         // Reset form
         setFormData({
-          name: "",
           username: "",
           email: "",
+          full_name: "",
           phone: "",
-          password: ""
+          branch: "",
+          password: "",
+          is_active: true
         })
         setEditingUser(null)
         setIsDialogOpen(false)
@@ -133,11 +136,13 @@ export default function ManageCREPage() {
   const handleEdit = (user: CREUser) => {
     setEditingUser(user)
     setFormData({
-      name: user.name,
       username: user.username,
       email: user.email,
-      phone: user.phone,
-      password: ""
+      full_name: user.full_name,
+      phone: user.phone || "",
+      branch: user.branch,
+      password: "",
+      is_active: user.is_active
     })
     setIsDialogOpen(true)
   }

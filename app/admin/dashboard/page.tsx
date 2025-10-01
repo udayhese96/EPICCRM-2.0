@@ -15,349 +15,273 @@ import {
   BarChart3,
   Shield,
   Rocket,
-  Building2
+  Building2,
+  LogOut,
+  Zap,
+  Loader2
 } from "lucide-react"
+import { useState } from "react"
 
 export default function AdminDashboard() {
   const router = useRouter()
-  
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  const QuickCard = ({
+    title,
+    desc,
+    icon: Icon,
+    accent = "blue",
+    onClick
+  }: {
+    title: string
+    desc: string
+    icon: any
+    accent?: "blue" | "green" | "purple" | "indigo" | "teal" | "pink" | "orange" | "red" | "cyan" | "gray"
+    onClick?: () => void
+  }) => {
+    const palettes: Record<string, { icon: string; grad: string }> = {
+      blue: { icon: "text-blue-600", grad: "from-blue-50 to-blue-100" },
+      green: { icon: "text-green-600", grad: "from-green-50 to-green-100" },
+      purple: { icon: "text-purple-600", grad: "from-purple-50 to-purple-100" },
+      indigo: { icon: "text-indigo-600", grad: "from-indigo-50 to-indigo-100" },
+      teal: { icon: "text-teal-600", grad: "from-teal-50 to-teal-100" },
+      pink: { icon: "text-pink-600", grad: "from-pink-50 to-pink-100" },
+      orange: { icon: "text-orange-600", grad: "from-orange-50 to-orange-100" },
+      red: { icon: "text-red-600", grad: "from-red-50 to-red-100" },
+      cyan: { icon: "text-cyan-600", grad: "from-cyan-50 to-cyan-100" },
+      gray: { icon: "text-gray-600", grad: "from-gray-50 to-gray-100" },
+    }
+    const p = palettes[accent]
+
+    return (
+      <Card
+        onClick={onClick}
+        className="rounded-3xl bg-white/80 backdrop-blur-md border border-white/60 shadow-[0_10px_30px_rgba(16,24,40,0.06)] hover:shadow-[0_16px_40px_rgba(16,24,40,0.10)] transition-all duration-300 cursor-pointer group"
+      >
+        <CardHeader className="pb-2">
+          <div className="flex items-center space-x-3">
+            <div className={`p-2 rounded-2xl bg-gradient-to-br ${p.grad} group-hover:scale-105 transition-transform`}>
+              <Icon className={`h-5 w-5 ${p.icon}`} />
+            </div>
+            <CardTitle className="text-sm font-semibold text-gray-900">{title}</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <CardDescription className="text-xs text-gray-600">{desc}</CardDescription>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <DashboardLayout>
-      <div className="space-y-8">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-            <p className="text-gray-600 mt-1">Manage your CRM system and user access</p>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-500">Welcome, admin</span>
-            <Button variant="outline" size="sm">
-              Logout
-            </Button>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100/30 relative overflow-hidden">
+        {/* subtle decor */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-8 -right-10 w-64 h-64 bg-gradient-to-br from-orange-100/30 to-orange-200/30 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-10 w-40 h-40 bg-gradient-to-tr from-orange-100/25 to-orange-200/25 rounded-full blur-2xl" />
         </div>
 
-        {/* Lead Management Section */}
-        <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <BarChart3 className="h-5 w-5 text-blue-600" />
-            <h2 className="text-xl font-semibold text-gray-900">LEAD MANAGEMENT</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-red-100 rounded-lg">
-                    <Upload className="h-5 w-5 text-red-600" />
+        <div className="relative z-10 space-y-8">
+          {/* Header */}
+          <div className="rounded-3xl overflow-hidden shadow-xl border border-white/50 bg-white/70 backdrop-blur-md">
+            <div
+              className="bg-gradient-to-r from-orange-500/90 via-orange-600/80 to-orange-700/70 px-6 md:px-8 py-6"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(234,88,12,0.9) 0%, rgba(251,146,60,0.85) 50%, rgba(254,215,170,0.8) 100%)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                    <Zap className="w-6 h-6 text-white" />
                   </div>
-                  <CardTitle className="text-sm font-medium">Upload Data</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Import leads and customer data
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/assign-leads')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <UserPlus className="h-5 w-5 text-orange-600" />
+                  <div>
+                    <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
+                    <p className="text-orange-100 font-medium">Manage CRM configuration, users, and analytics</p>
                   </div>
-                  <CardTitle className="text-sm font-medium">Assign Leads</CardTitle>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Distribute leads to team members
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <Edit className="h-5 w-5 text-green-600" />
+                <div className="flex items-center gap-3">
+                  <div className="hidden md:flex items-center gap-2 bg-white/10 px-3 py-2 rounded-2xl border border-white/20">
+                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-xs text-white/90 font-medium">System Online</span>
                   </div>
-                  <CardTitle className="text-sm font-medium">Manage Leads</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      setLoggingOut(true)
+                      // preserve existing behavior; implement actual logout where appropriate
+                      setTimeout(() => {
+                        setLoggingOut(false)
+                      }, 800)
+                    }}
+                    className="rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/30"
+                  >
+                    {loggingOut ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <LogOut className="h-4 w-4 mr-2" />}
+                    Logout
+                  </Button>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  View and edit lead information
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Download className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Export Leads</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Download lead data and reports
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Building2 className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Export Walk-in</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Download walk-in data by branch/date
-                </CardDescription>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-pink-100 rounded-lg">
-                    <Copy className="h-5 w-5 text-pink-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Duplicate Leads</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Identify and manage duplicate entries
-                </CardDescription>
-              </CardContent>
-            </Card>
+          {/* Lead Management */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-blue-600" />
+              <h2 className="text-xl font-semibold text-gray-900">Lead management</h2>
+            </div>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-indigo-100 rounded-lg">
-                    <ArrowRightLeft className="h-5 w-5 text-indigo-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Lead Transfer</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Transfer leads between team members
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <QuickCard
+                title="Upload Data"
+                desc="Import leads and customer data"
+                icon={Upload}
+                accent="red"
+              />
+              <QuickCard
+                title="Assign Leads"
+                desc="Distribute leads to team members"
+                icon={UserPlus}
+                accent="orange"
+                onClick={() => router.push("/admin/assign-leads")}
+              />
+              <QuickCard
+                title="Manage Leads"
+                desc="View and edit lead information"
+                icon={Edit}
+                accent="green"
+              />
+              <QuickCard
+                title="Export Leads"
+                desc="Download lead data and reports"
+                icon={Download}
+                accent="blue"
+              />
+              <QuickCard
+                title="Export Walk-in"
+                desc="Download walk-in data by branch/date"
+                icon={Building2}
+                accent="purple"
+              />
+            </div>
 
-        {/* User Management Section */}
-        <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <Users className="h-5 w-5 text-green-600" />
-            <h2 className="text-xl font-semibold text-gray-900">USER MANAGEMENT</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Users className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage CREs</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure Customer Relationship Executives
-                </CardDescription>
-              </CardContent>
-            </Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <QuickCard
+                title="Duplicate Leads"
+                desc="Identify and manage duplicate entries"
+                icon={Copy}
+                accent="pink"
+              />
+              <QuickCard
+                title="Lead Transfer"
+                desc="Transfer leads between team members"
+                icon={ArrowRightLeft}
+                accent="indigo"
+              />
+            </div>
+          </section>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-ps')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <UserPlus className="h-5 w-5 text-green-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage PS</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure Product Specialists
-                </CardDescription>
-              </CardContent>
-            </Card>
+          {/* User Management */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-green-600" />
+              <h2 className="text-xl font-semibold text-gray-900">User management</h2>
+            </div>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre-team-leader')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Shield className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage CRE TL</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure CRE Team Leaders
-                </CardDescription>
-              </CardContent>
-            </Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <QuickCard
+                title="Manage CREs"
+                desc="Configure Customer Relationship Executives"
+                icon={Users}
+                accent="blue"
+                onClick={() => router.push("/admin/manage-cre")}
+              />
+              <QuickCard
+                title="Manage PS"
+                desc="Configure Product Specialists"
+                icon={UserPlus}
+                accent="green"
+                onClick={() => router.push("/admin/manage-ps")}
+              />
+              <QuickCard
+                title="Manage CRE TL"
+                desc="Configure CRE Team Leaders"
+                icon={Shield}
+                accent="purple"
+                onClick={() => router.push("/admin/manage-cre-team-leader")}
+              />
+              <QuickCard
+                title="Manage CRE ICROP"
+                desc="Configure CRE ICROP Users"
+                icon={Building2}
+                accent="indigo"
+                onClick={() => router.push("/admin/manage-cre-icrop")}
+              />
+            </div>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-cre-icrop')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-indigo-100 rounded-lg">
-                    <Building2 className="h-5 w-5 text-indigo-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage CRE ICROP</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure CRE ICROP Users
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <QuickCard
+                title="Manage Sales Manager"
+                desc="Configure Sales Managers"
+                icon={Users}
+                accent="orange"
+                onClick={() => router.push("/admin/manage-sales-manager")}
+              />
+              <QuickCard
+                title="Manage Team Leaders"
+                desc="Configure Team Leaders and PS assignments"
+                icon={Shield}
+                accent="cyan"
+                onClick={() => router.push("/admin/manage-team-leaders")}
+              />
+              <QuickCard
+                title="All Users"
+                desc="View and manage all users"
+                icon={Users}
+                accent="gray"
+                onClick={() => router.push("/admin/users")}
+              />
+              <QuickCard
+                title="Manage Branches"
+                desc="Configure branch locations"
+                icon={Building2}
+                accent="teal"
+                onClick={() => router.push("/admin/branches")}
+              />
+            </div>
+          </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-sales-manager')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <Users className="h-5 w-5 text-orange-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage Sales Manager</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure Sales Managers
-                </CardDescription>
-              </CardContent>
-            </Card>
+          {/* Analytics & Reports */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-purple-600" />
+              <h2 className="text-xl font-semibold text-gray-900">Analytics & reports</h2>
+            </div>
 
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/manage-team-leaders')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-cyan-100 rounded-lg">
-                    <Shield className="h-5 w-5 text-cyan-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage Team Leaders</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure Team Leaders and PS assignments
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/users')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-gray-100 rounded-lg">
-                    <Users className="h-5 w-5 text-gray-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">All Users</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  View and manage all users
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => router.push('/admin/branches')}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-teal-100 rounded-lg">
-                    <Building2 className="h-5 w-5 text-teal-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Manage Branches</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Configure branch locations
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Analytics & Reports Section */}
-        <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <BarChart3 className="h-5 w-5 text-purple-600" />
-            <h2 className="text-xl font-semibold text-gray-900">ANALYTICS & REPORTS</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <BarChart3 className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">View Analytics</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Comprehensive system analytics
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-red-100 rounded-lg">
-                    <Rocket className="h-5 w-5 text-red-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Analytics 2.0</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  Open Streamlit dashboard in a new tab
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="pb-2">
-                <div className="flex items-center space-x-2">
-                  <div className="p-2 bg-red-100 rounded-lg">
-                    <Shield className="h-5 w-5 text-red-600" />
-                  </div>
-                  <CardTitle className="text-sm font-medium">Security Audit</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-xs">
-                  System security and access logs
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <QuickCard
+                title="View Analytics"
+                desc="Comprehensive system analytics"
+                icon={BarChart3}
+                accent="blue"
+              />
+              <QuickCard
+                title="Analytics 2.0"
+                desc="Open Streamlit dashboard in a new tab"
+                icon={Rocket}
+                accent="red"
+              />
+              <QuickCard
+                title="Security Audit"
+                desc="System security and access logs"
+                icon={Shield}
+                accent="red"
+              />
+            </div>
+          </section>
         </div>
       </div>
     </DashboardLayout>
