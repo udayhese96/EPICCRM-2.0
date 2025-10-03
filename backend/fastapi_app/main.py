@@ -2891,6 +2891,74 @@ async def get_ps_followups(current_user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/ps/leads")
+async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
+    """Add a new lead directly to ps_followup_master table"""
+    try:
+        print(f"[PS Lead] Adding new lead: {lead_data}")
+        
+        # Insert into lead_master first
+        lead_master_data = {
+            'uid': lead_data['uid'],
+            'customer_name': lead_data['customer_name'],
+            'customer_mobile_number': lead_data['customer_mobile_number'],
+            'alternate_mobile_number': lead_data.get('alternate_mobile_number'),
+            'source': lead_data['source'],
+            'sub_source': '',
+            'follow_up_date': lead_data['follow_up_date'],
+            'cre_name': lead_data.get('cre_name'),
+            'cre_id': lead_data.get('cre_id'),
+            'assigned': 'Yes',
+            'lead_status': lead_data.get('lead_status', ''),
+            'final_status': lead_data.get('final_status', 'Pending'),
+            'lead_category': lead_data.get('lead_category'),
+            'remarks': lead_data.get('first_call_remark'),
+            'created_at': lead_data.get('created_at'),
+            'updated_at': lead_data.get('updated_at')
+        }
+        
+        # Insert into lead_master
+        lead_response = supabase.table('lead_master').insert(lead_master_data).execute()
+        print(f"[PS Lead] Lead master inserted: {lead_response}")
+        
+        # Insert into ps_followup_master
+        ps_followup_data = {
+            'lead_uid': lead_data['uid'],
+            'ps_name': lead_data['ps_name'],
+            'ps_id': lead_data['ps_id'],
+            'ps_branch': lead_data['ps_branch'],
+            'customer_name': lead_data['customer_name'],
+            'customer_mobile_number': lead_data['customer_mobile_number'],
+            'alternate_mobile_number': lead_data.get('alternate_mobile_number'),
+            'source': lead_data['source'],
+            'cre_name': lead_data.get('cre_name'),
+            'cre_id': lead_data.get('cre_id'),
+            'lead_category': lead_data.get('lead_category'),
+            'model_interested': lead_data.get('model_interested'),
+            'follow_up_date': lead_data['follow_up_date'],
+            'lead_status': lead_data.get('lead_status', ''),
+            'first_call_date': lead_data.get('first_call_date'),
+            'first_call_remark': lead_data.get('first_call_remark'),
+            'first_call_lead_status': lead_data.get('first_call_lead_status'),
+            'final_status': lead_data.get('final_status', 'Pending'),
+            'test_drive_done': False,
+            'created_at': lead_data.get('created_at'),
+            'updated_at': lead_data.get('updated_at'),
+            'ps_assigned_at': lead_data.get('ps_assigned_at'),
+            'variant': lead_data.get('variant'),
+            'buying_plan': lead_data.get('buying_plan'),
+            'finance_option': lead_data.get('finance_option')
+        }
+        
+        ps_response = supabase.table('ps_followup_master').insert(ps_followup_data).execute()
+        print(f"[PS Lead] PS followup inserted: {ps_response}")
+        
+        return JSONResponse(content={"message": "Lead added successfully", "lead_uid": lead_data['uid']})
+        
+    except Exception as e:
+        print(f"[PS Lead] Error adding lead: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add lead: {str(e)}")
+
 @app.put("/api/ps-followup")
 async def update_ps_followup(update_data: PSFollowUpUpdate, current_user=Depends(get_current_user)):
     """Update PS follow-up"""

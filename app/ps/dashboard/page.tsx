@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState, useMemo } from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -38,6 +39,443 @@ import {
   Zap,
   Loader2
 } from "lucide-react"
+
+// Toyota models and variants data (matching CRE dashboard)
+const toyotaModels = {
+  "Toyota Glanza": [
+    "E", "S (MT / AMT / CNG)", "G (MT / AMT / CNG)", "V (MT / AMT)"
+  ],
+  "Toyota Urban Cruiser Taisor": [
+    "E (Petrol / CNG)", "S (MT / AMT)", "S+", "G Turbo (MT / AT)", "V Turbo (MT / AT)"
+  ],
+  "Toyota Urban Cruiser Hyryder": [
+    "E", "S (NeoDrive / Hybrid / CNG)", "G (NeoDrive / Hybrid)", "V (NeoDrive / Hybrid)"
+  ],
+  "Toyota Rumion": [
+    "S (MT / AT / CNG)", "G (MT / AT)", "V (MT / AT)"
+  ],
+  "Toyota Fortuner": [
+    "Petrol 4x2 MT / AT", "Diesel 4x2 MT / AT", "Diesel 4x4 MT / AT", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Innova Crysta": [
+    "G", "GX / GX+", "VX", "ZX"
+  ],
+  "Toyota Innova Hycross": [
+    "G", "GX / GX(O)", "VX / VX(O)", "ZX / ZX(O)"
+  ],
+  "Toyota Hilux": [
+    "STD", "High MT", "High AT"
+  ],
+  "Toyota Fortuner Legender": [
+    "4x2 AT Diesel", "4x4 AT Diesel", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Vellfire": [
+    "Hi", "VIP Executive Lounge"
+  ],
+  "Toyota Camry": [
+    "Elegance", "Sprint"
+  ],
+  "Toyota Land Cruiser 300 (LC 300)": [
+    "ZX", "GR-S"
+  ]
+}
+
+interface AddLeadFormProps {
+  onClose: () => void
+  onAdd: (leadData: any) => void
+}
+
+const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
+  const [formData, setFormData] = useState({
+    customer_name: "",
+    customer_mobile_number: "",
+    alternate_mobile_number: "",
+    source: "",
+    model_interested: "",
+    variant: "",
+    buying_plan: "",
+    finance_option: "",
+    trade_in_make: "",
+    trade_in_model: "",
+    trade_in_make_other: "",
+    trade_in_model_other: "",
+    trade_in_year: "",
+    trade_in_km: "",
+    follow_up_date: "",
+    first_call_remark: ""
+  })
+  
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date) {
+      alert("Please fill in required fields (Name, Mobile, and Follow-up Date)")
+      return
+    }
+
+    // Validate mobile number
+    const mobile = (formData.customer_mobile_number || '').trim()
+    if (!/^\d{10}$/.test(mobile)) {
+      alert("Enter a valid 10-digit mobile number")
+      return
+    }
+
+    setIsSubmitting(true)
+    
+    try {
+      // Generate UID (simple format: CRM + timestamp)
+      const uid = `CRM${Date.now().toString().slice(-6)}`
+      
+      // Get current user info
+      const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+
+    const leadData = {
+      uid,
+      customer_name: formData.customer_name,
+      customer_mobile_number: formData.customer_mobile_number,
+      alternate_mobile_number: formData.alternate_mobile_number || null,
+      source: formData.source,
+      follow_up_date: formData.follow_up_date ? new Date(formData.follow_up_date + 'T00:00:00').toISOString() : null,
+      ps_name: parsed?.name || parsed?.username || '',
+      ps_id: parsed?.id || null,
+      ps_branch: 'GEM', // Default branch for PS dashboard
+      cre_name: null, // Empty for PS leads
+      cre_id: null, // Empty for PS leads
+      lead_category: null,
+      model_interested: formData.model_interested || null,
+      variant: formData.variant || null,
+      buying_plan: formData.buying_plan || null,
+      finance_option: formData.finance_option || null,
+      trade_in_make: formData.trade_in_make === 'Other' ? (formData.trade_in_make_other || null) : (formData.trade_in_make || null),
+      trade_in_model: formData.trade_in_model === 'Other' ? (formData.trade_in_model_other || null) : (formData.trade_in_model || null),
+      trade_in_year: formData.trade_in_year || null,
+      trade_in_km: formData.trade_in_km || null,
+      lead_status: "", // Empty for fresh leads
+      final_status: "Pending",
+      first_call_date: null, // No first call date for fresh leads
+      first_call_remark: null, // No remarks for fresh leads
+      first_call_lead_status: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ps_assigned_at: new Date().toISOString()
+    }
+
+      // PS Lead - Sending data
+
+      const response = await fetch('/api/ps/leads', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(leadData)
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        // Lead added successfully
+        
+        // Wait for UI refresh to complete before closing form
+        onAdd(leadData)
+        
+        // Add a small delay to ensure the refresh completes
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Only close form after successful insertion and refresh
+        onClose()
+      } else {
+        const error = await response.text()
+        console.error('❌ [PS Lead] Failed to add lead:', error)
+        alert("Failed to add lead. Please try again.")
+      }
+    } catch (error) {
+      console.error('Error adding lead:', error)
+      alert("Error adding lead. Please try again.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6 px-6 pb-6">
+      {/* Customer Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+          <User className="w-5 h-5 mr-2 text-orange-500" />
+          Customer Information
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="customer_name" className="text-sm font-medium">
+              Customer Name *
+            </Label>
+            <Input
+              id="customer_name"
+              placeholder="Enter customer name"
+              value={formData.customer_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, customer_name: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="customer_mobile_number" className="text-sm font-medium">
+              Mobile Number *
+            </Label>
+            <Input
+              id="customer_mobile_number"
+              type="tel"
+              placeholder="Enter mobile number"
+              value={formData.customer_mobile_number}
+              onChange={(e) => setFormData(prev => ({ ...prev, customer_mobile_number: e.target.value }))}
+              pattern="[0-9]{10}"
+              maxLength={10}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="alternate_mobile_number" className="text-sm font-medium">
+              Alternate Mobile Number
+            </Label>
+            <Input
+              id="alternate_mobile_number"
+              type="tel"
+              placeholder="Enter alternate mobile number"
+              value={formData.alternate_mobile_number}
+              onChange={(e) => setFormData(prev => ({ ...prev, alternate_mobile_number: e.target.value }))}
+              maxLength={10}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="source" className="text-sm font-medium">
+              Source *
+            </Label>
+            <Select value={formData.source} onValueChange={(value) => setFormData(prev => ({ ...prev, source: value }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Walkin">Walkin</SelectItem>
+                <SelectItem value="Referral">Referral</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Vehicle Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+          <Car className="w-5 h-5 mr-2 text-orange-500" />
+          Vehicle Information
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="model_interested" className="text-sm font-medium">
+              Model Interested
+            </Label>
+            <Select value={formData.model_interested} onValueChange={(value) => setFormData(prev => ({ ...prev, model_interested: value, variant: "" }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select Toyota Model" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(toyotaModels).map((model) => (
+                  <SelectItem key={model} value={model}>{model}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="variant" className="text-sm font-medium">
+              Variant
+            </Label>
+            <Select 
+              value={formData.variant}
+              disabled={!formData.model_interested} 
+              onValueChange={(value) => setFormData(prev => ({ ...prev, variant: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={formData.model_interested ? 'Select variant' : 'Select model first'} />
+              </SelectTrigger>
+              <SelectContent>
+                {formData.model_interested && toyotaModels[formData.model_interested as keyof typeof toyotaModels]?.map((variant) => (
+                  <SelectItem key={variant} value={variant}>{variant}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="buying_plan" className="text-sm font-medium">
+              Buying Plan
+            </Label>
+            <Input
+              id="buying_plan"
+              placeholder="Enter buying plan"
+              value={formData.buying_plan}
+              onChange={(e) => setFormData(prev => ({ ...prev, buying_plan: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="finance_option" className="text-sm font-medium">
+              Finance Option
+            </Label>
+            <Input
+              id="finance_option"
+              placeholder="Enter finance option"
+              value={formData.finance_option}
+              onChange={(e) => setFormData(prev => ({ ...prev, finance_option: e.target.value }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Trade-in Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+          <Car className="w-5 h-5 mr-2 text-orange-500" />
+          Trade-in Information
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="trade_in_make" className="text-sm font-medium">
+              Make
+            </Label>
+            <Select value={formData.trade_in_make} onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_make: value, trade_in_model: '', trade_in_make_other: '' }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select make" />
+              </SelectTrigger>
+              <SelectContent>
+                {['Maruti','Hyundai','Toyota','Honda','Tata','Mahindra','Kia','Renault','Nissan','Skoda','Volkswagen','Ford','MG','Jeep','Other'].map((mk) => (
+                  <SelectItem key={mk} value={mk}>{mk}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {formData.trade_in_make === 'Other' && (
+              <Input
+                id="trade_in_make_other"
+                placeholder="Enter make"
+                value={formData.trade_in_make_other}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_make_other: e.target.value }))}
+              />
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="trade_in_model" className="text-sm font-medium">
+              Model
+            </Label>
+            <Select value={formData.trade_in_model} disabled={!formData.trade_in_make} onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_model: value, trade_in_model_other: '' }))}>
+              <SelectTrigger>
+                <SelectValue placeholder={formData.trade_in_make ? 'Select model' : 'Select make first'} />
+              </SelectTrigger>
+              <SelectContent>
+                {(() => {
+                  const models: Record<string,string[]> = {
+                    Maruti: ['Alto','Wagon R','Swift','Baleno','Dzire','Vitara Brezza','Celerio','Ertiga','Fronx','Grand Vitara','Other'],
+                    Hyundai: ['i10','i20','Grand i10','Creta','Venue','Verna','Aura','Alcazar','Exter','Other'],
+                    Toyota: ['Glanza','Urban Cruiser','Innova','Innova Crysta','Innova Hycross','Fortuner','Fortuner Legender','Camry','Vellfire','Land Cruiser 300 (LC 300)','Hilux','Hyryder','Rumion','Other'],
+                    Honda: ['Amaze','City','Jazz','WR-V','Elevate','Other'],
+                    Tata: ['Tiago','Tigor','Altroz','Nexon','Harrier','Safari','Punch','Other'],
+                    Mahindra: ['Bolero','Scorpio','XUV300','XUV700','Thar','Other'],
+                    Kia: ['Seltos','Sonet','Carens','EV6','Other'],
+                    Renault: ['Kwid','Triber','Kiger','Duster','Other'],
+                    Nissan: ['Magnite','Kicks','Other'],
+                    Skoda: ['Kushaq','Slavia','Kodiaq','Other'],
+                    Volkswagen: ['Polo','Vento','Taigun','Virtus','Other'],
+                    Ford: ['Figo','Aspire','EcoSport','Endeavour','Other'],
+                    MG: ['Hector','Astor','ZS EV','Other'],
+                    Jeep: ['Compass','Meridian','Wrangler','Other'],
+                    Other: ['Other']
+                  }
+                  const list = models[formData.trade_in_make as keyof typeof models] || ['Other']
+                  return list.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)
+                })()}
+              </SelectContent>
+            </Select>
+            {formData.trade_in_model === 'Other' && (
+              <Input
+                id="trade_in_model_other"
+                placeholder="Enter model"
+                value={formData.trade_in_model_other}
+                onChange={(e) => setFormData(prev => ({ ...prev, trade_in_model_other: e.target.value }))}
+              />
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="trade_in_year" className="text-sm font-medium">
+              Year
+            </Label>
+            <Input
+              id="trade_in_year"
+              placeholder="Enter year (e.g., 2020)"
+              value={formData.trade_in_year}
+              onChange={(e) => setFormData(prev => ({ ...prev, trade_in_year: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="trade_in_km" className="text-sm font-medium">
+              Kilometers
+            </Label>
+            <Input
+              id="trade_in_km"
+              placeholder="Enter kilometers"
+              value={formData.trade_in_km}
+              onChange={(e) => setFormData(prev => ({ ...prev, trade_in_km: e.target.value }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Follow-up Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+          <Calendar className="w-5 h-5 mr-2 text-orange-500" />
+          Follow-up Information
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="follow_up_date" className="text-sm font-medium">
+              Follow-up Date *
+            </Label>
+            <Input
+              id="follow_up_date"
+              type="date"
+              value={formData.follow_up_date}
+              onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="first_call_remark" className="text-sm font-medium">
+              Initial Remark
+            </Label>
+            <Textarea
+              id="first_call_remark"
+              placeholder="Enter initial remark"
+              value={formData.first_call_remark}
+              onChange={(e) => setFormData(prev => ({ ...prev, first_call_remark: e.target.value }))}
+              className="min-h-[80px]"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+        <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button 
+          onClick={handleSubmit}
+          disabled={isSubmitting || !formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date || !formData.source}
+          className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg"
+        >
+          {isSubmitting ? "Adding..." : "Add Lead"}
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 interface PSFollowUp {
   id: string
@@ -105,9 +543,50 @@ interface PSFollowUp {
 }
 
 export default function PSDashboard() {
-  const [followUps, setFollowUps] = useState<PSFollowUp[]>([])
-  const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([])
+  // Initialize with cached data to prevent reset on navigation
+  const [followUps, setFollowUps] = useState<PSFollowUp[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('ps_followups_cache')
+        const timestamp = localStorage.getItem('ps_followups_timestamp')
+        
+        // Use cache if it's less than 5 minutes old
+        if (cached && timestamp) {
+          const cacheAge = Date.now() - parseInt(timestamp)
+          if (cacheAge < 5 * 60 * 1000) { // 5 minutes
+            return JSON.parse(cached)
+          }
+        }
+      } catch {
+        return []
+      }
+    }
+    return []
+  })
+  const [qualifiedLeads, setQualifiedLeads] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('ps_qualified_leads_cache')
+        const timestamp = localStorage.getItem('ps_qualified_leads_timestamp')
+        
+        // Use cache if it's less than 5 minutes old
+        if (cached && timestamp) {
+          const cacheAge = Date.now() - parseInt(timestamp)
+          if (cacheAge < 5 * 60 * 1000) { // 5 minutes
+            return JSON.parse(cached)
+          }
+        }
+      } catch {
+        return []
+      }
+    }
+    return []
+  })
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [countsUpdating, setCountsUpdating] = useState(false)
+  const [forceRender, setForceRender] = useState(0)
+  const [lastRefreshTime, setLastRefreshTime] = useState<string>('')
   const [selectedFollowUp, setSelectedFollowUp] = useState<PSFollowUp | null>(null)
   const [updateDialog, setUpdateDialog] = useState(false)
   const [callNumber, setCallNumber] = useState(1)
@@ -125,6 +604,7 @@ export default function PSDashboard() {
   const [bookingId, setBookingId] = useState('')
   const [retailedId, setRetailedId] = useState('')
   const [showMobileRefreshButton, setShowMobileRefreshButton] = useState(true)
+  const [addLeadModalOpen, setAddLeadModalOpen] = useState(false)
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('today')
@@ -173,13 +653,166 @@ export default function PSDashboard() {
     loadFollowUps()
     loadQualifiedLeads()
 
-    // Set up real-time refresh every 30 seconds to catch ICROP ID updates
-    const interval = setInterval(() => {
-      loadFollowUps()
-      loadQualifiedLeads()
-    }, 30000) // 30 seconds
+    // Set up real-time subscriptions similar to CRE dashboard
+    const cleanup = setupRealtimeSubscriptions()
+    
+    // Primary polling system (more reliable than real-time)
+    const primaryPolling = setInterval(() => {
+      if (!isLoading && !isRefreshing) {
+        loadFollowUps()
+        loadQualifiedLeads()
+      }
+    }, 3000) // 3 seconds - aggressive polling like CRE dashboard
+    
+    // Secondary polling for count updates
+    const countPolling = setInterval(() => {
+      if (!isLoading && !isRefreshing) {
+        loadFollowUps()
+        loadQualifiedLeads()
+      }
+    }, 15000) // 15 seconds - less frequent count checks
 
-    return () => clearInterval(interval)
+    // Cleanup function
+    return () => {
+      if (cleanup) {
+        cleanup()
+      }
+      clearInterval(primaryPolling)
+      clearInterval(countPolling)
+    }
+  }, [])
+
+  const setupRealtimeSubscriptions = () => {
+    try {
+      const supabase = createClient()
+
+      // Subscribe to ps_followup_master changes
+      const psFollowupSubscription = supabase
+        .channel('ps_followup_master_changes')
+        .on('postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'ps_followup_master' 
+          }, 
+          (payload) => {
+            console.log('🔄 [PS Real-time] ps_followup_master change detected:', payload.eventType)
+            setCountsUpdating(true)
+            setForceRender(prev => prev + 1) // Force UI update
+            // Immediate refresh for ps_followup_master changes
+            loadFollowUps(true)
+            loadQualifiedLeads()
+            // Reset updating state after a short delay
+            setTimeout(() => {
+              setCountsUpdating(false)
+            }, 500)
+          }
+        )
+        .subscribe((status) => {
+          console.log('📡 [PS Real-time] ps_followup_master subscription status:', status)
+        })
+
+      // Subscribe to lead_master changes (for lead status changes)
+      const leadMasterSubscription = supabase
+        .channel('lead_master_changes')
+        .on('postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'lead_master' 
+          }, 
+          (payload) => {
+            setCountsUpdating(true)
+            loadFollowUps(true)
+            setTimeout(() => {
+              loadFollowUps(true)
+              setCountsUpdating(false)
+            }, 1000)
+            loadQualifiedLeads()
+          }
+        )
+        .subscribe()
+
+      // Subscribe to qualified_leads changes
+      const qualifiedLeadsSubscription = supabase
+        .channel('qualified_leads_changes')
+        .on('postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'qualified_leads' 
+          }, 
+          (payload) => {
+            loadQualifiedLeads()
+          }
+        )
+        .subscribe()
+
+      // Return cleanup function
+      return () => {
+        supabase.removeChannel(psFollowupSubscription)
+        supabase.removeChannel(leadMasterSubscription)
+        supabase.removeChannel(qualifiedLeadsSubscription)
+      }
+      
+    } catch (error) {
+      // Fallback to polling if real-time fails
+      const fallbackInterval = setInterval(() => {
+        if (!isLoading && !isRefreshing) {
+          loadFollowUps()
+        }
+      }, 30000) // 30 seconds fallback
+      
+      return () => clearInterval(fallbackInterval)
+    }
+  }
+
+  // Track followUps state changes
+  useEffect(() => {
+    // State changed - followUps updated
+  }, [followUps, forceRender])
+
+  // Effect to handle custom events for immediate refresh
+  useEffect(() => {
+    // Listen for immediate refresh events after modal submits (like CRE dashboard)
+    const immediateRefresh = async () => {
+      console.log('🎯 [PS Custom Event] Lead master updated - triggering refresh')
+      setIsRefreshing(true)
+      setCountsUpdating(true)
+      loadFollowUps(true)
+      loadQualifiedLeads()
+      setForceRender(prev => prev + 1) // Force UI update
+      setTimeout(() => {
+        setIsRefreshing(false)
+        setCountsUpdating(false)
+      }, 1000)
+    }
+    
+    // Listen for lead status changes specifically
+    const handleLeadStatusChange = async () => {
+      console.log('🎯 [PS Custom Event] Lead status changed - triggering refresh')
+      setIsRefreshing(true)
+      setCountsUpdating(true)
+      // Single refresh to catch status changes
+      loadFollowUps(true)
+      setForceRender(prev => prev + 1) // Force UI update
+      setTimeout(() => {
+        setIsRefreshing(false)
+        setCountsUpdating(false)
+      }, 1000)
+    }
+    
+    window.addEventListener('lead-master-updated', immediateRefresh as any)
+    window.addEventListener('lead-status-changed', handleLeadStatusChange as any)
+    window.addEventListener('lead-added', immediateRefresh as any)
+    window.addEventListener('lead-updated', immediateRefresh as any)
+
+    return () => {
+      window.removeEventListener('lead-master-updated', immediateRefresh as any)
+      window.removeEventListener('lead-status-changed', handleLeadStatusChange as any)
+      window.removeEventListener('lead-added', immediateRefresh as any)
+      window.removeEventListener('lead-updated', immediateRefresh as any)
+    }
   }, [])
 
   // Effect to handle hiding mobile refresh button after KPI cards section
@@ -204,10 +837,16 @@ export default function PSDashboard() {
     }
   }, [])
 
-  const loadFollowUps = async () => {
-    setIsLoading(true)
+  const loadFollowUps = async (forceRefresh = false) => {
+    if (forceRefresh) {
+      setIsRefreshing(true)
+      setCountsUpdating(true)
+    } else {
+      setIsLoading(true)
+    }
     try {
-      console.log('📡 [API Debug] Loading PS follow-ups...')
+      const timestamp = new Date().toISOString()
+      // Loading PS follow-ups
       
       const response = await fetch('/api/ps-followup', {
         headers: {
@@ -216,23 +855,40 @@ export default function PSDashboard() {
         credentials: 'include' // Include cookies for authentication
       })
       
-      console.log('📡 [API Debug] Response status:', response.status)
-      
       if (response.ok) {
         const data = await response.json()
-        console.log('PS Follow-ups loaded:', data.length, 'items')
-        console.log('Sample follow-up data:', data[0])
-        setFollowUps(data)
+        // Follow-ups loaded successfully
+        
+        // Always create new array reference to trigger re-render
+        setFollowUps([...data])
+        
+        // Cache the data in localStorage to prevent reset on navigation
+        try {
+          localStorage.setItem('ps_followups_cache', JSON.stringify(data))
+          localStorage.setItem('ps_followups_timestamp', Date.now().toString())
+        } catch (error) {
+          console.warn('Failed to cache follow-ups:', error)
+        }
+        
+        setForceRender(prev => prev + 1) // Force re-render
+        setLastRefreshTime(new Date().toLocaleTimeString())
       } else {
         const errorData = await response.json()
-        console.error('Error loading follow-ups:', errorData)
+        console.error('Error loading PS follow-ups:', errorData)
         toast.error(errorData.error || 'Failed to load follow-ups')
       }
     } catch (error) {
       console.error('Error loading follow-ups:', error)
       toast.error('Failed to load follow-ups')
     } finally {
-      setIsLoading(false)
+      if (forceRefresh) {
+        setTimeout(() => {
+          setIsRefreshing(false)
+          setCountsUpdating(false)
+        }, 500)
+      } else {
+        setIsLoading(false)
+      }
     }
   }
 
@@ -251,33 +907,30 @@ export default function PSDashboard() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('Qualified leads loaded:', data)
+        // Qualified leads loaded
         // Debug logging removed
         
         // Check for status changes before updating state
         checkForStatusChanges(data)
         
         // Debug logging
-        console.log('Qualified leads loaded:', data.length, 'leads')
+        // Qualified leads count loaded
         
         // Debug: Check for retailed leads
         const retailedLeads = data.filter((lead: any) => lead.retailed_id)
-        console.log('🛍️ [Retailed Leads] Found:', retailedLeads)
-        console.log('🛍️ [Retailed Leads] Count:', retailedLeads.length)
+        // Retailed leads found and counted
         
-        // Debug: Show all leads with their retailed info
-        data.forEach((lead: any, index: number) => {
-          if (lead.retailed_id || lead.retailed_status) {
-            console.log(`🛍️ [Lead ${index}] ${lead.lead_uid}:`, {
-              ps_name: lead.ps_name,
-              retailed_id: lead.retailed_id,
-              retailed_status: lead.retailed_status,
-              customer_name: lead.customer_name
-            })
-          }
-        })
+        // Debug: Show all leads with their retailed info (removed for performance)
         
         setQualifiedLeads(data)
+        
+        // Cache the data in localStorage to prevent reset on navigation
+        try {
+          localStorage.setItem('ps_qualified_leads_cache', JSON.stringify(data))
+          localStorage.setItem('ps_qualified_leads_timestamp', Date.now().toString())
+        } catch (error) {
+          console.warn('Failed to cache qualified leads:', error)
+        }
       } else {
         console.error('Error loading qualified leads:', await response.text())
       }
@@ -341,6 +994,7 @@ export default function PSDashboard() {
   const getInternalStatusName = (uiStatus: string) => {
     switch (uiStatus) {
       case 'Booked': return 'Booking Requested'
+      case 'Booked with another number': return 'Booking Requested'
       case 'Retailed': return 'Retail Requested'
       default: return uiStatus
     }
@@ -350,7 +1004,7 @@ export default function PSDashboard() {
     if (!selectedFollowUp) return
 
     // Validate Order No. format if Booked
-    if (callOutcome === 'Booked' && bookingId) {
+    if ((callOutcome === 'Booked' || callOutcome === 'Booked with another number') && bookingId) {
       if (bookingId.length !== 12 || !bookingId.startsWith('ORD') || !/^ORD\d{9}$/.test(bookingId)) {
         alert('Order No. must be in format ORD followed by exactly 9 digits (e.g., ORD123456789)')
         return
@@ -383,7 +1037,7 @@ export default function PSDashboard() {
 
       // Handle booking/retailed ID for won leads
       if (isLeadWon(callOutcome)) {
-        if (callOutcome === 'Booked' && bookingId) {
+        if ((callOutcome === 'Booked' || callOutcome === 'Booked with another number') && bookingId) {
           updateData.booking_id = bookingId
         } else if (callOutcome === 'Retailed' && retailedId) {
           updateData.retailed_id = retailedId
@@ -435,7 +1089,7 @@ export default function PSDashboard() {
         updateData[callLeadStatusFields[currentCallNumber - 1]] = getInternalStatusName(callOutcome)
       }
 
-      console.log('🔄 [PS Follow-up] Updating follow-up with data:', updateData)
+      // Updating follow-up
 
       const response = await fetch('/api/ps-followup', {
         method: 'PUT',
@@ -449,16 +1103,16 @@ export default function PSDashboard() {
 
       if (response.ok) {
         const responseData = await response.json()
-        console.log('✅ [PS Follow-up] Update successful:', responseData)
+        // Update successful
         
         // Show appropriate success message based on lead status
         if (isLeadWon(callOutcome)) {
-          if (callOutcome === 'Booked') {
+          if (callOutcome === 'Booked' || callOutcome === 'Booked with another number') {
             toast.success('Follow-up updated! Booking request sent to Sales Manager for approval')
           } else if (callOutcome === 'Retailed') {
             toast.success('Follow-up updated! Retail request sent to Sales Manager for approval')
           } else {
-        toast.success('Follow-up updated successfully')
+            toast.success('Follow-up updated successfully')
           }
         } else if (isLeadLost(callOutcome)) {
           toast.success('Lost status requested! Awaiting CRE approval')
@@ -472,8 +1126,11 @@ export default function PSDashboard() {
         setCallOutcome("")
         setFollowUpDate("")
         setFinalStatus("")
-        loadFollowUps()
+        loadFollowUps(true) // Force refresh
         loadQualifiedLeads() // Also refresh qualified leads to get updated lost status
+        // Dispatch custom events for immediate refresh across components
+        window.dispatchEvent(new CustomEvent('lead-master-updated'))
+        window.dispatchEvent(new CustomEvent('lead-status-changed'))
       } else {
         const errorData = await response.json()
         console.error('❌ [PS Follow-up] Update failed:', errorData)
@@ -637,17 +1294,17 @@ export default function PSDashboard() {
 
   // Helper function to check if lead is won (booked/retailed)
   const isLeadWon = (status: string) => {
-    return status === 'Booked' || status === 'Retailed'
+    return status === 'Booked' || status === 'Booked with another number' || status === 'Retailed'
   }
 
   // Helper function to check if lead is lost
   const isLeadLost = (status: string) => {
-    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped'
+    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped' || status === 'Finance Rejected' || status === 'Not Interested'
   }
 
   // Helper function to check if lead status requires lost request
   const requiresLostRequest = (status: string) => {
-    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped'
+    return status === 'Lost to Competition' || status === 'Lost to codealer' || status === 'Dropped' || status === 'Finance Rejected' || status === 'Not Interested'
   }
 
   // Helper function to check if follow-up date should be locked
@@ -662,10 +1319,10 @@ export default function PSDashboard() {
 
   // Helper function to get the appropriate final status based on lead status
   const getFinalStatusForLeadStatus = (leadStatus: string) => {
-    if (leadStatus === 'Booked' || leadStatus === 'Retailed') {
+    if (leadStatus === 'Booked' || leadStatus === 'Booked with another number' || leadStatus === 'Retailed') {
       return 'Waiting for Approval'
     } else if (isLeadLost(leadStatus)) {
-      return 'Lost'
+      return 'Lost Requested'
     }
     return 'Pending'
   }
@@ -779,53 +1436,94 @@ export default function PSDashboard() {
     return list.filter(f => (f.final_status || '').toLowerCase() === pendingStatusFilter.toLowerCase())
   }
 
-  // Helper function to check if a lead has been updated (has any call remarks)
+  // Helper function to check if a lead has been updated (has any call remarks or status)
   const hasBeenUpdated = (followUp: PSFollowUp) => {
     const callFields = [
       'first_call_remark', 'second_call_remark', 'third_call_remark',
       'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark',
       'eighth_call_remark', 'ninth_call_remark', 'tenth_call_remark'
     ]
-    return callFields.some(field => followUp[field as keyof PSFollowUp])
+    const statusFields = [
+      'first_call_lead_status', 'second_call_lead_status', 'third_call_lead_status',
+      'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status', 'seventh_call_lead_status',
+      'eighth_call_lead_status', 'ninth_call_lead_status', 'tenth_call_lead_status'
+    ]
+    
+    // Check if any call remarks exist
+    const hasCallRemarks = callFields.some(field => followUp[field as keyof PSFollowUp])
+    
+    // Check if any call status is set (not null/empty and not 'pending')
+    const hasCallStatus = statusFields.some(field => {
+      const status = followUp[field as keyof PSFollowUp]
+      return status && status !== '' && status !== 'pending'
+    })
+    
+    return hasCallRemarks || hasCallStatus
   }
 
-  // Fresh leads: Leads that have never been updated (no call remarks) and are not won/lost
-  const freshList = followUps.filter(f => 
-    !hasBeenUpdated(f) && 
-    !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
-    (f.final_status || '').toLowerCase() !== 'lost'
-  )
-  const freshCount = freshList.length
-  
-  // Debug logging
-  console.log('Fresh leads count:', freshCount, 'out of', followUps.length, 'total follow-ups')
-  console.log('Fresh leads sample:', freshList.slice(0, 2))
-  
-  // Today's follow-ups: Leads with follow-up dates for today or overdue
-  // Today list should ignore global dateFilter and always be today + overdue
-  const todayBaseList = followUps.filter(f => 
-    !['won','lost'].includes((f.final_status || '').toLowerCase()) && 
-    (isToday(f.follow_up_date) || isOverdue(f.follow_up_date))
-  )
-  // Apply search for today's list
-  const todayListSearched = todayBaseList.filter(f => {
-    if (!todaySearch.trim()) return true
-    const q = todaySearch.toLowerCase()
-    return (
-      f.customer_name?.toLowerCase().includes(q) ||
-      f.customer_mobile_number?.toLowerCase().includes(q) ||
-      f.lead_uid?.toLowerCase().includes(q)
+  // Memoized count calculations to ensure they update when followUps changes
+  const { freshCount, todayCount, pendingCount, freshList, todayList, pendingList } = useMemo(() => {
+    // Fresh leads: Leads that have never been updated (no call remarks) and are not won/lost
+    const freshList = followUps.filter(f =>
+      !hasBeenUpdated(f) &&
+      !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
+      (f.final_status || '').toLowerCase() !== 'lost'
     )
-  })
-  const todayCount = todayBaseList.length
+    const freshCount = freshList.length
+    
+    
+    // Debug: Log sample fresh leads to understand the filtering (reduced logging)
+    // Removed excessive logging for performance
+    
+    // Today's follow-ups: Leads with follow-up dates for today or overdue
+    // Today list should ignore global dateFilter and always be today + overdue
+    const todayBaseList = followUps.filter(f =>
+      !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
+      (isToday(f.follow_up_date) || isOverdue(f.follow_up_date))
+    )
+    // Apply search for today's list
+    const todayListSearched = todayBaseList.filter(f => {
+      if (!todaySearch.trim()) return true
+      const q = todaySearch.toLowerCase()
+      return (
+        f.customer_name?.toLowerCase().includes(q) ||
+        f.customer_mobile_number?.toLowerCase().includes(q) ||
+        f.lead_uid?.toLowerCase().includes(q)
+      )
+    })
+    const todayCount = todayBaseList.length
+    
+    // Pending leads: Leads with final_status = 'pending' or 'booked' (excluding fresh leads and won/lost)
+    const pendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(followUps.filter(f =>
+      !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
+      (['pending', 'booked', 'waiting for approval'].includes((f.final_status || '').toLowerCase())) &&
+      hasBeenUpdated(f)
+    ))))
+    const pendingCount = pendingList.length
+    
+    return { freshCount, todayCount, pendingCount, freshList, todayList: todayListSearched, pendingList }
+  }, [followUps, todaySearch, dateFilter, startDate, pendingFilter, pendingStatusFilter, forceRender])
   
-  // Pending leads: Leads with final_status = 'pending' or 'booked' (excluding fresh leads and won/lost)
-  const pendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(followUps.filter(f => 
-    !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
-    (['pending', 'booked', 'waiting for approval'].includes((f.final_status || '').toLowerCase())) && 
-    hasBeenUpdated(f)
-  ))))
-  const pendingCount = pendingList.length
+  // Track count changes and force UI updates
+  useEffect(() => {
+    // Log count changes immediately
+    console.log(`📊 [Count Update] Fresh: ${freshCount}, Today: ${todayCount}, Pending: ${pendingCount}`)
+    
+    // Counts updated - force update count displays immediately
+    const freshButton = document.querySelector('[data-tab="fresh"] .count-display')
+    const pendingButton = document.querySelector('[data-tab="pending"] .count-display')
+    const todayButton = document.querySelector('[data-tab="today"] .count-display')
+    
+    if (freshButton) {
+      freshButton.textContent = countsUpdating ? "..." : freshCount.toString()
+    }
+    if (pendingButton) {
+      pendingButton.textContent = countsUpdating ? "..." : pendingCount.toString()
+    }
+    if (todayButton) {
+      todayButton.textContent = countsUpdating ? "..." : todayCount.toString()
+    }
+  }, [freshCount, pendingCount, todayCount, countsUpdating])
   
   // Get current PS user name for filtering
   const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
@@ -908,7 +1606,7 @@ export default function PSDashboard() {
   const filteredFollowUps = (() => {
     switch(activeTab){
       case 'fresh': return freshList
-      case 'today': return todayListSearched
+      case 'today': return todayList
       case 'pending': return pendingList
       case 'booked': 
         switch(activeSubTab) {
@@ -946,8 +1644,11 @@ export default function PSDashboard() {
     </Card>
   )
 
-  const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => (
+  const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => {
+    // Tab button rendering with count
+    return (
     <button
+      data-tab={id}
       onClick={() => onClick(id)}
       className={`relative flex flex-col items-center justify-center gap-1 px-2 py-2 md:px-3 md:py-3 rounded-xl font-medium transition-all duration-300 whitespace-nowrap min-w-0 flex-1 ${
         isActive
@@ -967,13 +1668,14 @@ export default function PSDashboard() {
           </span>
         ))}
       </span>
-      <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
+      <span className={`count-display px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
         isActive ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
       }`}>
         {count}
       </span>
     </button>
-  )
+    )
+  }
 
   return (
     <DashboardLayout>
@@ -1037,23 +1739,41 @@ export default function PSDashboard() {
                       </p>
                     </div>
                   </div>
-                  <Button
-                    onClick={loadFollowUps}
-                    disabled={isLoading}
-                    className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-6 py-2 rounded-xl transition-all duration-300"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Loading...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        Refresh Data
-                      </>
+                  <div className="flex flex-col gap-3">
+                    {lastRefreshTime && (
+                      <div className="text-xs text-orange-100 text-right">
+                        Last updated: {lastRefreshTime}
+                      </div>
                     )}
-                  </Button>
+                    <div className="flex gap-3">
+             <Button
+               onClick={() => setAddLeadModalOpen(true)}
+               className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white border-0 shadow-lg font-medium px-6 py-2 rounded-xl transition-all duration-300"
+             >
+               <User className="w-4 h-4 mr-2" />
+               Add Lead
+             </Button>
+                      <Button
+                        onClick={() => {
+                          loadFollowUps(true)
+                        }}
+                        disabled={isLoading || isRefreshing}
+                        className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-6 py-2 rounded-xl transition-all duration-300"
+                    >
+                      {(isLoading || isRefreshing) ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          {isRefreshing ? 'Syncing...' : 'Loading...'}
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Refresh Data
+                        </>
+                      )}
+                    </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -1099,30 +1819,34 @@ export default function PSDashboard() {
               <div className="absolute inset-0 bg-gradient-to-r from-orange-100/20 via-orange-200/20 to-orange-300/20 backdrop-blur-lg"></div>
               <div className="relative grid grid-cols-3 md:grid-cols-6 gap-1 md:gap-2">
                 <TabButton
+                  key={`fresh-${freshCount}-${forceRender}`}
                   id="fresh"
                   label="Fresh Leads"
-                  count={freshCount}
+                  count={countsUpdating ? "..." : freshCount}
                   icon={Star}
                   isActive={activeTab === 'fresh'}
                   onClick={handleTabChange}
                 />
                 <TabButton
+                  key={`today-${todayCount}-${forceRender}`}
                   id="today"
                   label="Today's Follow-ups"
-                  count={todayCount}
+                  count={countsUpdating ? "..." : todayCount}
                   icon={Calendar}
                   isActive={activeTab === 'today'}
                   onClick={handleTabChange}
                 />
                 <TabButton
+                  key={`pending-${pendingCount}-${forceRender}`}
                   id="pending"
                   label="Pending Leads"
-                  count={pendingCount}
+                  count={countsUpdating ? "..." : pendingCount}
                   icon={Clock}
                   isActive={activeTab === 'pending'}
                   onClick={handleTabChange}
                 />
                 <TabButton
+                  key={`booked-${bookedCount}-${forceRender}`}
                   id="booked"
                   label="Booked Approval"
                   count={bookedCount}
@@ -1131,6 +1855,7 @@ export default function PSDashboard() {
                   onClick={handleTabChange}
                 />
                 <TabButton
+                  key={`retailed-${retailedCount}-${forceRender}`}
                   id="retailed"
                   label="Retailed Approval"
                   count={retailedCount}
@@ -1139,6 +1864,7 @@ export default function PSDashboard() {
                   onClick={handleTabChange}
                 />
                 <TabButton
+                  key={`wonlost-${wonLostCount}-${forceRender}`}
                   id="wonlost"
                   label="Won/Lost Leads"
                   count={wonLostCount}
@@ -1374,7 +2100,7 @@ export default function PSDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredFollowUps.map((item, index) => {
+                    {filteredFollowUps.map((item: any, index: number) => {
                       // Handle both qualified leads and follow-ups
                       const isQualifiedLead = item.booking_id || item.retailed_id
                       const customerName = isQualifiedLead ? item.customer_name : item.customer_name
@@ -1721,14 +2447,23 @@ export default function PSDashboard() {
                           <SelectValue placeholder="Select call outcome" />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl border-0 shadow-lg">
-                          <SelectItem value="Hot">🔥 Hot</SelectItem>
-                          <SelectItem value="Warm">🔥 Warm</SelectItem>
-                          <SelectItem value="Cold">❄️ Cold</SelectItem>
-                          <SelectItem value="Booked">✅ Booked</SelectItem>
+                          <SelectItem value="Call not Connected">📞 Call not Connected</SelectItem>
                           <SelectItem value="Retailed">🛍️ Retailed</SelectItem>
+                          <SelectItem value="Discount Issue">💰 Discount Issue</SelectItem>
+                          <SelectItem value="Delayed">⏰ Delayed</SelectItem>
+                          <SelectItem value="Booked">✅ Booked</SelectItem>
+                          <SelectItem value="Booked with another number">📱 Booked with another number</SelectItem>
+                          <SelectItem value="Test Drive">🚗 Test Drive</SelectItem>
+                          <SelectItem value="Planning in Next Month">📅 Planning in Next Month</SelectItem>
+                          <SelectItem value="Interested">😊 Interested</SelectItem>
                           <SelectItem value="Lost to Competition">❌ Lost to Competition</SelectItem>
-                          <SelectItem value="Lost to codealer">❌ Lost to codealer</SelectItem>
+                          <SelectItem value="Finance Rejected">💳 Finance Rejected</SelectItem>
                           <SelectItem value="Dropped">❌ Dropped</SelectItem>
+                          <SelectItem value="Lost to codealer">❌ Lost to codealer</SelectItem>
+                          <SelectItem value="Busy on another call">📞 Busy on another call</SelectItem>
+                          <SelectItem value="RNR">📞 RNR</SelectItem>
+                          <SelectItem value="Call me Back">📞 Call me Back</SelectItem>
+                          <SelectItem value="Not Interested">😞 Not Interested</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1736,7 +2471,7 @@ export default function PSDashboard() {
                     {/* Booking/Retailed ID Input */}
                     {isLeadWon(callOutcome) && (
                       <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
-                        {callOutcome === 'Booked' && (
+                        {(callOutcome === 'Booked' || callOutcome === 'Booked with another number') && (
                           <div>
                             <Label htmlFor="bookingId" className="text-sm font-semibold text-green-700 mb-2 block flex items-center">
                               <CheckCircle className="w-4 h-4 mr-2" />
@@ -1916,6 +2651,47 @@ export default function PSDashboard() {
                     </Button>
                   </div>
                 </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Add Lead Modal */}
+            <Dialog open={addLeadModalOpen} onOpenChange={setAddLeadModalOpen}>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border-0">
+                <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-1 rounded-t-2xl -mt-[1px]"></div>
+
+                <DialogHeader className="pb-4 pt-6 px-6">
+                  <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
+                    <User className="w-6 h-6 mr-3 text-orange-500" />
+                    Add New Lead
+                  </DialogTitle>
+                  <DialogDescription>
+                    Add a walkin or referral lead to your follow-up list
+                  </DialogDescription>
+                </DialogHeader>
+
+                <AddLeadForm 
+                  onClose={() => setAddLeadModalOpen(false)}
+                  onAdd={async (leadData) => {
+                    // Lead added callback triggered
+                    
+                    // Force refresh the follow-ups list
+                    setIsRefreshing(true)
+                    setCountsUpdating(true)
+                    
+                    // Multiple rapid refreshes to ensure data syncs
+                    await loadFollowUps(true)
+                    setTimeout(() => loadFollowUps(true), 500)
+                    setTimeout(() => loadFollowUps(true), 1000)
+                    
+                    // Dispatch custom event for immediate refresh across components
+                    window.dispatchEvent(new CustomEvent('lead-added'))
+                    
+                    // Show success message
+                    toast.success(`Lead "${leadData.customer_name}" added successfully!`)
+                    
+                    // UI refresh completed
+                  }}
+                />
               </DialogContent>
             </Dialog>
           </div>

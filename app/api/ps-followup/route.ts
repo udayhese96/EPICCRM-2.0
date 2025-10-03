@@ -45,3 +45,44 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
+export async function PUT(request: NextRequest) {
+  try {
+    // Get authorization from header or cookie
+    const headerAuth = request.headers.get('Authorization')
+    const cookieToken = request.cookies.get('access_token')?.value
+    const token = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
+    
+    if (!token) {
+      console.error('❌ [API Debug] No authentication found for PUT request')
+      return NextResponse.json({ error: 'No authorization token provided' }, { status: 401 })
+    }
+
+    // Get the request body
+    const body = await request.json()
+    console.log('🔍 [API Debug] PUT request body:', body)
+
+    // Forward request to FastAPI backend for follow-up update
+    const response = await fetch(`${FASTAPI_URL}/api/ps-followup`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('❌ [API Debug] FastAPI PUT error:', errorData)
+      return NextResponse.json({ error: errorData.detail || 'Failed to update PS follow-up' }, { status: response.status })
+    }
+
+    const data = await response.json()
+    console.log('✅ [API Debug] Updated PS follow-up successfully')
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('Error in PS follow-up PUT API:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
