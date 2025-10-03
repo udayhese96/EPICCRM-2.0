@@ -125,6 +125,7 @@ export default function CREDashboard() {
     // Listen for immediate refresh events after modal submits
     const immediateRefresh = async () => {
       setIsRefreshing(true)
+      console.log('🔄 [Event] Lead master updated event triggered')
       const result = await fetchAssignedLeads(true)
       fetchLostRequests()
       // If counts didn't change yet, retry once after 1s to cover propagation lag
@@ -135,7 +136,20 @@ export default function CREDashboard() {
       } catch {}
       setTimeout(() => setIsRefreshing(false), 900)
     }
+    
+    // Listen for lead status changes specifically
+    const handleLeadStatusChange = async () => {
+      console.log('🔄 [Event] Lead status change event triggered')
+      setIsRefreshing(true)
+      // Multiple rapid refreshes to catch status changes
+      fetchAssignedLeads(true)
+      setTimeout(() => fetchAssignedLeads(true), 500)
+      setTimeout(() => fetchAssignedLeads(true), 1000)
+      setTimeout(() => setIsRefreshing(false), 1500)
+    }
+    
     window.addEventListener('lead-master-updated', immediateRefresh as any)
+    window.addEventListener('lead-status-changed', handleLeadStatusChange as any)
     checkRedisWorkerStatus()
     
     // Set up real-time subscriptions instead of polling
@@ -170,6 +184,7 @@ export default function CREDashboard() {
         cleanup()
       }
       window.removeEventListener('lead-master-updated', immediateRefresh as any)
+      window.removeEventListener('lead-status-changed', handleLeadStatusChange as any)
       // Cleanup polling intervals
       clearInterval(primaryPolling)
       clearInterval(countPolling)
@@ -207,10 +222,21 @@ export default function CREDashboard() {
           }
 
           console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
+          console.log('🔄 [Real-time] Lead status change:', {
+            old_status: (payload.old as any)?.lead_status,
+            new_status: (payload.new as any)?.lead_status,
+            old_remark: (payload.old as any)?.lead_remark,
+            new_remark: (payload.new as any)?.lead_remark
+          })
           console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
           setCountsUpdating(true)
-          fetchAssignedLeads()
-          setTimeout(() => setCountsUpdating(false), 1000)
+          // Immediate refresh for status changes
+          fetchAssignedLeads(true)
+          // Also trigger a delayed refresh to catch any propagation lag
+          setTimeout(() => {
+            fetchAssignedLeads(true)
+            setCountsUpdating(false)
+          }, 1000)
         }
       )
       .subscribe((status) => {
@@ -243,10 +269,19 @@ export default function CREDashboard() {
 
           // Qualified leads changes always affect counts, so refresh immediately
           console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+          console.log('🔄 [Real-time] Qualified leads status change:', {
+            old_status: (payload.old as any)?.lead_status,
+            new_status: (payload.new as any)?.lead_status
+          })
           console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
           setCountsUpdating(true)
-          fetchAssignedLeads()
-          setTimeout(() => setCountsUpdating(false), 1000)
+          // Immediate refresh for qualified leads changes
+          fetchAssignedLeads(true)
+          // Also trigger a delayed refresh to catch any propagation lag
+          setTimeout(() => {
+            fetchAssignedLeads(true)
+            setCountsUpdating(false)
+          }, 1000)
         }
       )
       .subscribe((status) => {
@@ -780,7 +815,7 @@ export default function CREDashboard() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">CRE Dashboard</h1>
-                <p className="text-gray-600" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>Welcome back, {userName}!</p>
+                <p className="text-gray-600">Welcome back, {userName}!</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
@@ -788,7 +823,7 @@ export default function CREDashboard() {
             {isRefreshing && (
               <div className="flex items-center space-x-2 text-blue-600">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                <span className="text-sm" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 400 }}>
+                <span className="text-sm">
                   Syncing counts...
                 </span>
               </div>
@@ -1403,7 +1438,6 @@ export default function CREDashboard() {
                                     size="sm" 
                                     className="bg-green-500 hover:bg-green-600 text-white rounded-2xl"
                                     onClick={() => handleApproveLost(lead.uid)}
-                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
                                   >
                                     Approve
                                   </Button>
@@ -1412,7 +1446,6 @@ export default function CREDashboard() {
                                     variant="outline"
                                     className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 rounded-2xl"
                                     onClick={() => handleRejectLost(lead.uid)}
-                                    style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 500 }}
                                   >
                                     Reject
                                   </Button>
@@ -1485,9 +1518,9 @@ export default function CREDashboard() {
                             </td>
                           )}
                           <td className="p-3 font-medium text-gray-900">{lead.customer_name}</td>
-                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.customer_mobile_number}</td>
-                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.source}</td>
-                          <td className="p-3 text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.campaign}</td>
+                          <td className="p-3 text-gray-800">{lead.customer_mobile_number}</td>
+                          <td className="p-3 text-gray-800">{lead.source}</td>
+                          <td className="p-3 text-gray-800">{lead.campaign}</td>
                           <td className="p-3">
                             <Badge variant="outline" className={`rounded-full ${lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}>
                               {lead.branch || 'Unassigned'}
@@ -1507,12 +1540,12 @@ export default function CREDashboard() {
                           </td>
                           {activeTab === "lostconfirm" && (
                             <td className="p-3">
-                              <div className="text-sm text-gray-800 bg-red-50 rounded-2xl p-2 border border-red-200" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>
+                              <div className="text-sm text-gray-800 bg-red-50 rounded-2xl p-2 border border-red-200">
                                 {lead.lost_reason || 'No reason provided'}
                               </div>
                             </td>
                           )}
-                          <td className="p-3 text-sm text-gray-800" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400 }}>{lead.date}</td>
+                          <td className="p-3 text-sm text-gray-800">{lead.date}</td>
                           <td className="p-3 text-sm font-mono text-gray-800">{lead.uid}</td>
                         </tr>
                         )

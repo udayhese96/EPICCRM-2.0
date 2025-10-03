@@ -407,30 +407,40 @@ interface LeadUpdateModalProps {
 
 const toyotaModels = {
   "Toyota Glanza": [
-    "E MT", "S MT", "G MT", "V MT", "S AT", "G AT", "V AT", "S CNG", "G CNG"
+    "E", "S (MT / AMT / CNG)", "G (MT / AMT / CNG)", "V (MT / AMT)"
   ],
   "Toyota Urban Cruiser Taisor": [
-    "E MT", "E CNG MT", "S MT", "S+ MT", "S AMT", "S+ AMT", 
-    "G Turbo MT", "G Turbo AT", "V Turbo MT", "V Turbo AT",
-    "V Turbo MT Dual Tone", "V Turbo AT Dual Tone"
+    "E (Petrol / CNG)", "S (MT / AMT)", "S+", "G Turbo (MT / AT)", "V Turbo (MT / AT)"
   ],
   "Toyota Urban Cruiser Hyryder": [
-    "S Hybrid", "G Hybrid", "G Dual Tone Hybrid", "V Hybrid", "V Dual Tone Hybrid",
-    "E MT", "S MT", "S AT", "G MT", "G AT", "G MT Dual Tone",
-    "V MT", "V AT", "V MT AWD", "V MT Dual Tone", "V AT Dual Tone", "V MT AWD Dual Tone",
-    "S MT CNG", "G MT CNG"
+    "E", "S (NeoDrive / Hybrid / CNG)", "G (NeoDrive / Hybrid)", "V (NeoDrive / Hybrid)"
   ],
   "Toyota Rumion": [
-    "S MT", "G MT", "V MT", "S MT CNG", "S AT", "G AT", "V AT"
+    "S (MT / AT / CNG)", "G (MT / AT)", "V (MT / AT)"
   ],
   "Toyota Fortuner": [
-    "4x2 MT (Diesel) – Other Colours", "4x2 MT (Diesel) – Pearl White",
-    "4x2 AT (Diesel) – Other Colours", "4x2 AT (Diesel) – Pearl White",
-    "4x4 MT (Diesel) – Other Colours", "4x4 MT (Diesel) – Pearl White",
-    "4x4 AT (Diesel) – Other Colours", "4x4 AT (Diesel) – Pearl White",
-    "Legender 4x2 AT", "Legender 4x4 AT",
-    "GR-S 4x4 AT (Black)", "GR-S 4x4 AT (White)",
-    "Legender Edition 4x2 MT", "Legender Edition 4x2 AT"
+    "Petrol 4x2 MT / AT", "Diesel 4x2 MT / AT", "Diesel 4x4 MT / AT", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Innova Crysta": [
+    "G", "GX / GX+", "VX", "ZX"
+  ],
+  "Toyota Innova Hycross": [
+    "G", "GX / GX(O)", "VX / VX(O)", "ZX / ZX(O)"
+  ],
+  "Toyota Hilux": [
+    "STD", "High MT", "High AT"
+  ],
+  "Toyota Fortuner Legender": [
+    "4x2 AT Diesel", "4x4 AT Diesel", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Vellfire": [
+    "Hi", "VIP Executive Lounge"
+  ],
+  "Toyota Camry": [
+    "Elegance", "Sprint"
+  ],
+  "Toyota Land Cruiser 300 (LC 300)": [
+    "ZX", "GR-S"
   ]
 }
 
@@ -800,6 +810,15 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       // Proactively notify dashboard to refresh immediately
       try {
         window.dispatchEvent(new CustomEvent('lead-master-updated', { detail: { uid: lead?.uid } }))
+        // Also trigger lead status change event for immediate section updates
+        window.dispatchEvent(new CustomEvent('lead-status-changed', {
+          detail: {
+            leadUid: lead?.uid,
+            oldStatus: lead?.lead_status,
+            newStatus: (updateData as any).lead_status,
+            selectedStatus: selectedStatus
+          }
+        }))
       } catch {}
 
       // Now update UI and close modal
@@ -885,7 +904,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-gray-100 px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <DialogTitle className="text-lg font-semibold text-gray-900 leading-tight" style={{ fontFamily: 'Inter, Roboto, sans-serif' }}>
+              <DialogTitle className="text-lg font-semibold text-gray-900 leading-tight">
             Update Lead - {lead.uid}
           </DialogTitle>
               <DialogDescription className="text-sm text-gray-500 mt-1">
@@ -1808,16 +1827,6 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         </button>
                       ))}
                   </div>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
-                    <Textarea
-                      placeholder="Add pending reason/remark"
-                      value={formData.general_remarks}
-                      onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
-                      rows={3}
-                      className="text-sm"
-                    />
                   </div>
                 </div>
               </div>

@@ -59,6 +59,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
     trade_in_year: "",
     trade_in_km: "",
     trade_in_ownership: "",
+    variant: "",
     remarks: ""
   })
   
@@ -81,6 +82,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         trade_in_year: "",
         trade_in_km: "",
         trade_in_ownership: "",
+        variant: "",
         remarks: ""
       })
     }
@@ -131,10 +133,10 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         source: formData.source || "Walk-in",
         sub_source: formData.sub_source === "none" ? "" : (formData.sub_source || ""),
         follow_up_date: formData.follow_up_date ? new Date(formData.follow_up_date + 'T00:00:00').toISOString() : null,
-        cre_name: user?.full_name || user?.first_name || user?.name || user?.username || "",
+        cre_name: user?.name || user?.first_name || user?.username || "",
         cre_id: user?.id,
         assigned: "Yes",
-        lead_status: "Qualified", // CRE leads are immediately qualified
+        lead_status: "", // CRE leads start as fresh for qualification
         final_status: "Pending",
         lead_category: null,
         remarks: formData.remarks || "",
@@ -144,6 +146,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         trade_in_year: formData.trade_in_year || null,
         trade_in_km: formData.trade_in_km || null,
         trade_in_ownership: formData.trade_in_ownership || null,
+        variant: formData.variant || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }
@@ -186,7 +189,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'Roboto, sans-serif', fontWeight: 700 }}>
+          <DialogTitle className="text-2xl font-bold text-gray-900">
             Add New Lead
           </DialogTitle>
           <DialogDescription>
@@ -372,7 +375,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
                         const models: Record<string,string[]> = {
                           Maruti: ['Alto','Wagon R','Swift','Baleno','Dzire','Vitara Brezza','Celerio','Ertiga','Fronx','Grand Vitara','Other'],
                           Hyundai: ['i10','i20','Grand i10','Creta','Venue','Verna','Aura','Alcazar','Exter','Other'],
-                          Toyota: ['Glanza','Urban Cruiser','Innova','Fortuner','Hyryder','Rumion','Other'],
+                          Toyota: ['Glanza','Urban Cruiser','Innova','Innova Crysta','Innova Hycross','Fortuner','Fortuner Legender','Camry','Vellfire','Land Cruiser 300 (LC 300)','Hilux','Hyryder','Rumion','Other'],
                           Honda: ['Amaze','City','Jazz','WR-V','Elevate','Other'],
                           Tata: ['Tiago','Tigor','Altroz','Nexon','Harrier','Safari','Punch','Other'],
                           Mahindra: ['Bolero','Scorpio','XUV300','XUV700','Thar','Other'],
@@ -444,6 +447,66 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Model and Variant Information */}
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center space-x-2">
+                <Car className="h-5 w-5 text-cyan-600" />
+                <span>Model and Variant Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="variant" className="text-sm font-medium">
+                  Model Interested & Variant
+                </Label>
+                <Select onValueChange={(value) => setFormData(prev => ({ ...prev, variant: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select model and variant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Toyota Innova Crysta */}
+                    <SelectItem value="Toyota Innova Crysta G">Toyota Innova Crysta - G</SelectItem>
+                    <SelectItem value="Toyota Innova Crysta GX / GX+">Toyota Innova Crysta - GX / GX+</SelectItem>
+                    <SelectItem value="Toyota Innova Crysta VX">Toyota Innova Crysta - VX</SelectItem>
+                    <SelectItem value="Toyota Innova Crysta ZX">Toyota Innova Crysta - ZX</SelectItem>
+                    
+                    {/* Toyota Innova Hycross */}
+                    <SelectItem value="Toyota Innova Hycross G">Toyota Innova Hycross - G</SelectItem>
+                    <SelectItem value="Toyota Innova Hycross GX / GX (O)">Toyota Innova Hycross - GX / GX (O)</SelectItem>
+                    <SelectItem value="Toyota Innova Hycross VX / VX (O)">Toyota Innova Hycross - VX / VX (O)</SelectItem>
+                    <SelectItem value="Toyota Innova Hycross ZX / ZX (O)">Toyota Innova Hycross - ZX / ZX (O)</SelectItem>
+                    
+                    {/* Toyota Hilux */}
+                    <SelectItem value="Toyota Hilux STD">Toyota Hilux - STD</SelectItem>
+                    <SelectItem value="Toyota Hilux High MT">Toyota Hilux - High MT</SelectItem>
+                    <SelectItem value="Toyota Hilux High AT">Toyota Hilux - High AT</SelectItem>
+                    
+                    {/* Toyota Fortuner Legender */}
+                    <SelectItem value="Toyota Fortuner Legender 4x2 AT Diesel">Toyota Fortuner Legender - 4x2 AT Diesel</SelectItem>
+                    <SelectItem value="Toyota Fortuner Legender 4x4 AT Diesel">Toyota Fortuner Legender - 4x4 AT Diesel</SelectItem>
+                    <SelectItem value="Toyota Fortuner Legender Neo Drive (48V mild hybrid)">Toyota Fortuner Legender - Neo Drive (48V mild hybrid)</SelectItem>
+                    
+                    {/* Toyota Vellfire */}
+                    <SelectItem value="Toyota Vellfire Hi">Toyota Vellfire - Hi</SelectItem>
+                    <SelectItem value="Toyota Vellfire VIP Executive Lounge">Toyota Vellfire - VIP Executive Lounge</SelectItem>
+                    
+                    {/* Toyota Camry */}
+                    <SelectItem value="Toyota Camry Elegance">Toyota Camry - Elegance</SelectItem>
+                    <SelectItem value="Toyota Camry Sprint">Toyota Camry - Sprint</SelectItem>
+                    
+                    {/* Toyota Land Cruiser 300 (LC 300) */}
+                    <SelectItem value="Toyota Land Cruiser 300 (LC 300) ZX">Toyota Land Cruiser 300 (LC 300) - ZX</SelectItem>
+                    <SelectItem value="Toyota Land Cruiser 300 (LC 300) GR-S">Toyota Land Cruiser 300 (LC 300) - GR-S</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  Select the model and variant the customer is interested in
+                </p>
               </div>
             </CardContent>
           </Card>
