@@ -11,6 +11,7 @@ interface Remark {
   type: 'CRE' | 'PS'
   call_number: number
   remark: string
+  lead_status?: string
   date: string
   user: string
 }
@@ -74,7 +75,9 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata'
       })
     } catch {
       return dateString
@@ -181,8 +184,16 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                       </span>
                     </div>
                     
+                    {remark.lead_status && (
+                      <div className="mb-2">
+                        <Badge variant="secondary" className="text-xs">
+                          Status: {remark.lead_status}
+                        </Badge>
+                      </div>
+                    )}
+                    
                     <div className="text-sm text-gray-800 bg-white rounded p-3 border">
-                      {remark.remark}
+                      <span className="font-semibold text-gray-600">Remark:</span> {remark.remark}
                     </div>
                   </div>
                 ))}

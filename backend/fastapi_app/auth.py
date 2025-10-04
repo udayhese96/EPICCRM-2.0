@@ -119,6 +119,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     try:
         token = credentials.credentials
         print(f"[Auth] Received token: {token[:50]}..." if token else "[Auth] No token received")
+        print(f"[Auth] Token length: {len(token) if token else 0}")
         
         # 1) Try to decode our app-issued JWT (from /api/auth/login)
         try:
@@ -133,14 +134,15 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             username = decoded_token.get('username')
             email = decoded_token.get('email')
             role = decoded_token.get('role')
+            branch = decoded_token.get('branch')
             if user_id and username and role:
-                print(f"[Auth] Creating CurrentUser: {username} with role {role}")
+                print(f"[Auth] Creating CurrentUser: {username} with role {role}, branch: {branch}")
                 return CurrentUser(
                     user_id=user_id,
                     username=username,
                     email=email or "",
                     role=role,
-                    branch_id=None
+                    branch_id=branch  # Use branch from JWT token as branch_id
                 )
         except jwt.InvalidTokenError as e:
             print(f"[Auth] JWT decode failed: {e}")
@@ -170,12 +172,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     detail="User not found"
                 )
             user_data = user_response.data[0]
+            # For receptionist users, use 'branch' field instead of 'branch_id'
+            role = user_data.get('role', 'receptionist')
+            if role == 'receptionist':
+                branch_id = user_data.get('branch')  # Use branch string as branch_id for receptionist
+            else:
+                branch_id = user_data.get('branch_id')  # Use branch_id for other roles
+                
             return CurrentUser(
                 user_id=user_id,
                 username=username,
                 email=email or user_data.get('email', ''),
-                role=user_data.get('role', 'receptionist'),
-                branch_id=user_data.get('branch_id')
+                role=role,
+                branch_id=branch_id
             )
         except jwt.InvalidTokenError:
             raise HTTPException(

@@ -57,6 +57,14 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       ],
       branch_head: [
         { icon: Home, label: 'Branch Dashboard', href: '/branch-head/dashboard' },
+      ],
+      receptionist: [
+        { icon: Home, label: 'Dashboard', href: '/receptionist/dashboard' },
+      ],
+      cre_team_leader: [
+        { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },
+        { icon: Users, label: 'Teams', href: '/teams' },
+        { icon: UserCheck, label: 'Walk-in CRE Assignment', href: '/cre-team-leader/assign-walkin-cre' },
       ]
     }
 

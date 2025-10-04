@@ -74,6 +74,7 @@ export default function CRETeamLeaderDashboard() {
   // Date range filter states
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
 
   useEffect(() => {
     // Initialize user from localStorage
@@ -117,12 +118,28 @@ export default function CRETeamLeaderDashboard() {
         
         if (start && leadDate < start) return false
         if (end && leadDate > end) return false
+
+        // Apply source filter
+        if (sourceFilter !== 'all') {
+          if (sourceFilter === 'walkin') {
+            // Show walk-in and digital leads
+            if (!['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(lead.source)) {
+              return false
+            }
+          } else {
+            // Show specific source
+            if (lead.source !== sourceFilter) {
+              return false
+            }
+          }
+        }
+
         return true
       })
     }
 
     setFilteredLeads(filtered)
-  }, [searchTerm, qualifiedLeads, startDate, endDate])
+  }, [searchTerm, qualifiedLeads, startDate, endDate, sourceFilter])
 
   const loadData = async () => {
     setIsLoading(true)
@@ -164,7 +181,31 @@ export default function CRETeamLeaderDashboard() {
       console.log('📊 [CRE TL] Sample lead data:', leadsData[0])
       console.log('📊 [CRE TL] Lead with ps_name:', leadsData.find((l: any) => l.lead_uid === 'LD000546'))
       
-      setQualifiedLeads(leadsData)
+      // Sort: Fresh leads (no ps_name) at top by created_at, then assigned leads by updated_at (newest assignments first)
+      const sortedLeads = leadsData.sort((a: any, b: any) => {
+        const aHasPS = !!a.ps_name
+        const bHasPS = !!b.ps_name
+        
+        // Fresh leads (no PS) come first
+        if (!aHasPS && bHasPS) return -1
+        if (aHasPS && !bHasPS) return 1
+        
+        // Both are fresh leads - sort by created_at (newest first)
+        if (!aHasPS && !bHasPS) {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        }
+        
+        // Both are assigned leads - sort by updated_at (newest assignments at top)
+        if (aHasPS && bHasPS) {
+          const aTime = new Date(a.updated_at || a.created_at).getTime()
+          const bTime = new Date(b.updated_at || b.created_at).getTime()
+          return bTime - aTime
+        }
+        
+        return 0
+      })
+      
+      setQualifiedLeads(sortedLeads)
       setGemUsers(gemData)
       setBranches(branchesData)
     } catch (error) {
@@ -676,13 +717,14 @@ export default function CRETeamLeaderDashboard() {
                         placeholder="To"
                       />
                     </div>
-                    {(startDate || endDate || searchTerm) && (
+                    {(startDate || endDate || searchTerm || sourceFilter !== 'all') && (
                       <Button
                         variant="outline"
                         onClick={() => {
                           setSearchTerm('')
                           setStartDate('')
                           setEndDate('')
+                          setSourceFilter('all')
                         }}
                         className="rounded-xl border-gray-200 hover:bg-gray-50 text-gray-600 font-medium px-4"
                       >
@@ -691,6 +733,32 @@ export default function CRETeamLeaderDashboard() {
                       </Button>
                     )}
                   </div>
+                </div>
+
+                {/* Source Filter */}
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700 mb-3 block flex items-center">
+                    <Filter className="w-4 h-4 mr-2" />
+                    Source Filter
+                  </Label>
+                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                    <SelectTrigger className="w-full rounded-xl border-gray-200 focus:border-orange-500 focus:ring-orange-500/20 bg-white/50">
+                      <SelectValue placeholder="Select source filter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Sources</SelectItem>
+                      <SelectItem value="walkin">Walk-in & Digital Leads</SelectItem>
+                      <SelectItem value="Google">Google</SelectItem>
+                      <SelectItem value="Meta">Meta</SelectItem>
+                      <SelectItem value="WhatsApp">WhatsApp</SelectItem>
+                      <SelectItem value="Car Dekho">Car Dekho</SelectItem>
+                      <SelectItem value="Car Wale">Car Wale</SelectItem>
+                      <SelectItem value="OEM">OEM</SelectItem>
+                      <SelectItem value="Tele Out">Tele Out</SelectItem>
+                      <SelectItem value="Referral">Referral</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>
