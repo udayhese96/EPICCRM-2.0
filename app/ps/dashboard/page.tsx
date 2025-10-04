@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useMemo } from "react"
+import React, { useEffect, useState, useMemo, useRef } from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -93,8 +93,6 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
     source: "",
     model_interested: "",
     variant: "",
-    buying_plan: "",
-    finance_option: "",
     trade_in_make: "",
     trade_in_model: "",
     trade_in_make_other: "",
@@ -106,6 +104,7 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
   })
   
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isUpdatingLead, setIsUpdatingLead] = useState(false)
 
   const handleSubmit = async () => {
     if (!formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date) {
@@ -146,8 +145,6 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
       lead_category: null,
       model_interested: formData.model_interested || null,
       variant: formData.variant || null,
-      buying_plan: formData.buying_plan || null,
-      finance_option: formData.finance_option || null,
       trade_in_make: formData.trade_in_make === 'Other' ? (formData.trade_in_make_other || null) : (formData.trade_in_make || null),
       trade_in_model: formData.trade_in_model === 'Other' ? (formData.trade_in_model_other || null) : (formData.trade_in_model || null),
       trade_in_year: formData.trade_in_year || null,
@@ -305,36 +302,14 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="buying_plan" className="text-sm font-medium">
-              Buying Plan
-            </Label>
-            <Input
-              id="buying_plan"
-              placeholder="Enter buying plan"
-              value={formData.buying_plan}
-              onChange={(e) => setFormData(prev => ({ ...prev, buying_plan: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="finance_option" className="text-sm font-medium">
-              Finance Option
-            </Label>
-            <Input
-              id="finance_option"
-              placeholder="Enter finance option"
-              value={formData.finance_option}
-              onChange={(e) => setFormData(prev => ({ ...prev, finance_option: e.target.value }))}
-            />
-          </div>
         </div>
       </div>
 
-      {/* Trade-in Information */}
+      {/* Trade-in Information (Optional) */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-gray-800 flex items-center">
           <Car className="w-5 h-5 mr-2 text-orange-500" />
-          Trade-in Information
+          Trade-in Information <span className="text-sm text-gray-500 ml-2">(Optional)</span>
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -540,9 +515,16 @@ interface PSFollowUp {
   trade_in?: string
   booking_id?: string
   retailed_id?: string
+  // Server-side classification
+  is_fresh?: boolean
+  is_pending?: boolean
 }
 
 export default function PSDashboard() {
+  // Render count for debugging
+  const renderCount = useRef(0)
+  renderCount.current++
+  
   // Initialize with cached data to prevent reset on navigation
   const [followUps, setFollowUps] = useState<PSFollowUp[]>(() => {
     if (typeof window !== 'undefined') {
@@ -587,6 +569,7 @@ export default function PSDashboard() {
   const [countsUpdating, setCountsUpdating] = useState(false)
   const [forceRender, setForceRender] = useState(0)
   const [lastRefreshTime, setLastRefreshTime] = useState<string>('')
+  const [isUpdatingLead, setIsUpdatingLead] = useState(false)
   const [selectedFollowUp, setSelectedFollowUp] = useState<PSFollowUp | null>(null)
   const [updateDialog, setUpdateDialog] = useState(false)
   const [callNumber, setCallNumber] = useState(1)
@@ -600,11 +583,19 @@ export default function PSDashboard() {
   const [tradeInData, setTradeInData] = useState<any | null>(null)
   const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'booked'|'retailed'|'wonlost'>('fresh')
   const [activeSubTab, setActiveSubTab] = useState<'requested'|'approved'|'rejected'>('requested')
-  const [notifications, setNotifications] = useState<Array<{id: string, type: 'approved'|'rejected', leadUid: string, requestType: 'booking'|'retailed', timestamp: Date}>>([])
+  const [notifications, setNotifications] = useState<Array<{id: string, type: 'approved'|'rejected'|'walkin', leadUid: string, requestType?: 'booking'|'retailed', timestamp: Date, message?: string}>>([])
   const [bookingId, setBookingId] = useState('')
   const [retailedId, setRetailedId] = useState('')
   const [showMobileRefreshButton, setShowMobileRefreshButton] = useState(true)
   const [addLeadModalOpen, setAddLeadModalOpen] = useState(false)
+  
+  // Ref to maintain latest followUps reference (fix stale closure in realtime subscription)
+  const followUpsRef = useRef(followUps)
+  
+  // Update ref whenever followUps changes
+  useEffect(() => {
+    followUpsRef.current = followUps
+  }, [followUps])
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('today')
@@ -612,10 +603,13 @@ export default function PSDashboard() {
   const [endDate, setEndDate] = useState('')
   const [pendingFilter, setPendingFilter] = useState<'all'|'hot'|'warm'|'cold'>('all')
   const [todaySearch, setTodaySearch] = useState('')
+  const [freshSearch, setFreshSearch] = useState('')
+  const [pendingSearch, setPendingSearch] = useState('')
+  const [walkinSearch, setWalkinSearch] = useState('')
   const [pendingStatusFilter, setPendingStatusFilter] = useState<'all'|'pending'|'booked'>('all')
 
   // Reset filters when switching tabs
-  const handleTabChange = (tab: 'fresh'|'today'|'pending'|'booked'|'retailed'|'wonlost') => {
+  const handleTabChange = (tab: 'fresh'|'today'|'pending'|'walkin'|'booked'|'retailed'|'wonlost') => {
     setActiveTab(tab)
     setActiveSubTab('requested') // Reset sub-tab to 'requested' when switching main tabs
     
@@ -631,6 +625,8 @@ export default function PSDashboard() {
       setEndDate('')
     } else if (tab === 'pending') {
       setPendingFilter('all')
+    } else if (tab === 'walkin') {
+      setWalkinSearch('')
     }
   }
 
@@ -654,31 +650,35 @@ export default function PSDashboard() {
     loadQualifiedLeads()
 
     // Set up real-time subscriptions similar to CRE dashboard
-    const cleanup = setupRealtimeSubscriptions()
-    
-    // Primary polling system (more reliable than real-time)
-    const primaryPolling = setInterval(() => {
+    let cleanup: (() => void) | undefined
+
+    const initializeSubscriptions = () => {
+      try {
+        cleanup = setupRealtimeSubscriptions()
+      } catch (error) {
+        console.error('Failed to setup subscriptions:', error)
+      }
+    }
+
+    // Delay subscription setup slightly to avoid race conditions
+    const subscriptionTimer = setTimeout(initializeSubscriptions, 100)
+
+    // Disabled aggressive polling - real-time subscriptions work now!
+    // Only poll occasionally as a safety net
+    const safetyPolling = setInterval(() => {
       if (!isLoading && !isRefreshing) {
         loadFollowUps()
         loadQualifiedLeads()
       }
-    }, 3000) // 3 seconds - aggressive polling like CRE dashboard
-    
-    // Secondary polling for count updates
-    const countPolling = setInterval(() => {
-      if (!isLoading && !isRefreshing) {
-        loadFollowUps()
-        loadQualifiedLeads()
-      }
-    }, 15000) // 15 seconds - less frequent count checks
+    }, 300000) // 5 minutes - just as a safety net
 
     // Cleanup function
     return () => {
+      clearTimeout(subscriptionTimer)
       if (cleanup) {
         cleanup()
       }
-      clearInterval(primaryPolling)
-      clearInterval(countPolling)
+      clearInterval(safetyPolling)
     }
   }, [])
 
@@ -687,119 +687,104 @@ export default function PSDashboard() {
       const supabase = createClient()
 
       // Subscribe to ps_followup_master changes
+      // Using closure-safe approach: no direct state access, only function calls
       const psFollowupSubscription = supabase
         .channel('ps_followup_master_changes')
-        .on('postgres_changes', 
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'ps_followup_master' 
-          }, 
+        .on('postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'ps_followup_master'
+          },
           (payload) => {
-            console.log('🔄 [PS Real-time] ps_followup_master change detected:', payload.eventType)
-            setCountsUpdating(true)
-            setForceRender(prev => prev + 1) // Force UI update
-            // Immediate refresh for ps_followup_master changes
+            console.log('🔄 [PS Real-time] Change detected, refreshing data...')
+
+            // Clear any cached data
+            try {
+              localStorage.removeItem('ps_followups_cache')
+              localStorage.removeItem('ps_followups_timestamp')
+            } catch (error) {
+              // Silently handle cache clearing errors
+            }
+
+            // Force immediate data refresh using functional updates (no stale closure)
             loadFollowUps(true)
             loadQualifiedLeads()
-            // Reset updating state after a short delay
-            setTimeout(() => {
-              setCountsUpdating(false)
-            }, 500)
-          }
-        )
-        .subscribe((status) => {
-          console.log('📡 [PS Real-time] ps_followup_master subscription status:', status)
-        })
+            setForceRender(prev => prev + 1)
 
-      // Subscribe to lead_master changes (for lead status changes)
-      const leadMasterSubscription = supabase
-        .channel('lead_master_changes')
-        .on('postgres_changes', 
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'lead_master' 
-          }, 
-          (payload) => {
-            setCountsUpdating(true)
-            loadFollowUps(true)
+            // Additional refresh to ensure data is synced
             setTimeout(() => {
               loadFollowUps(true)
-              setCountsUpdating(false)
+              loadQualifiedLeads()
+              setForceRender(prev => prev + 1)
             }, 1000)
-            loadQualifiedLeads()
-          }
-        )
-        .subscribe()
-
-      // Subscribe to qualified_leads changes
-      const qualifiedLeadsSubscription = supabase
-        .channel('qualified_leads_changes')
-        .on('postgres_changes', 
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'qualified_leads' 
-          }, 
-          (payload) => {
-            loadQualifiedLeads()
           }
         )
         .subscribe()
 
       // Return cleanup function
       return () => {
-        supabase.removeChannel(psFollowupSubscription)
-        supabase.removeChannel(leadMasterSubscription)
-        supabase.removeChannel(qualifiedLeadsSubscription)
+        try {
+          supabase.removeChannel(psFollowupSubscription)
+        } catch (error) {
+          // Silently handle cleanup errors
+        }
       }
-      
+
     } catch (error) {
       // Fallback to polling if real-time fails
       const fallbackInterval = setInterval(() => {
         if (!isLoading && !isRefreshing) {
           loadFollowUps()
         }
-      }, 30000) // 30 seconds fallback
-      
+      }, 5000) // 5 seconds fallback
+
       return () => clearInterval(fallbackInterval)
     }
   }
 
   // Track followUps state changes
   useEffect(() => {
-    // State changed - followUps updated
+    // State tracking (silent)
   }, [followUps, forceRender])
 
   // Effect to handle custom events for immediate refresh
   useEffect(() => {
     // Listen for immediate refresh events after modal submits (like CRE dashboard)
     const immediateRefresh = async () => {
-      console.log('🎯 [PS Custom Event] Lead master updated - triggering refresh')
       setIsRefreshing(true)
       setCountsUpdating(true)
-      loadFollowUps(true)
-      loadQualifiedLeads()
+      await loadFollowUps(true)
+      await loadQualifiedLeads()
       setForceRender(prev => prev + 1) // Force UI update
-      setTimeout(() => {
+
+      // Additional refresh after delay to ensure data is fully synced
+      setTimeout(async () => {
+        await loadFollowUps(true)
+        await loadQualifiedLeads()
+        setForceRender(prev => prev + 1)
         setIsRefreshing(false)
         setCountsUpdating(false)
-      }, 1000)
+      }, 1500)
     }
     
     // Listen for lead status changes specifically
     const handleLeadStatusChange = async () => {
-      console.log('🎯 [PS Custom Event] Lead status changed - triggering refresh')
       setIsRefreshing(true)
       setCountsUpdating(true)
-      // Single refresh to catch status changes
-      loadFollowUps(true)
+      // Multiple refreshes to catch status changes
+      await loadFollowUps(true)
+      await loadQualifiedLeads()
       setForceRender(prev => prev + 1) // Force UI update
-      setTimeout(() => {
+
+      // Additional refresh after delay to ensure data is fully synced
+      setTimeout(async () => {
+        await loadFollowUps(true)
+        await loadQualifiedLeads()
+        setForceRender(prev => prev + 1)
         setIsRefreshing(false)
         setCountsUpdating(false)
-      }, 1000)
+      }, 1500)
     }
     
     window.addEventListener('lead-master-updated', immediateRefresh as any)
@@ -844,41 +829,49 @@ export default function PSDashboard() {
     } else {
       setIsLoading(true)
     }
+
     try {
       const timestamp = new Date().toISOString()
-      // Loading PS follow-ups
-      
-      const response = await fetch('/api/ps-followup', {
+
+      const response = await fetch(`/api/ps-followup?_t=${timestamp}`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         },
         credentials: 'include' // Include cookies for authentication
       })
-      
+
       if (response.ok) {
         const data = await response.json()
-        // Follow-ups loaded successfully
-        
-        // Always create new array reference to trigger re-render
-        setFollowUps([...data])
-        
-        // Cache the data in localStorage to prevent reset on navigation
+
+        // CRITICAL: Use functional update with NEW array reference
+        setFollowUps(() => {
+          const newData = data.map((item: any) => ({...item})) // Deep clone each object
+          return newData
+        })
+
+        // Clear cache to force fresh data
         try {
-          localStorage.setItem('ps_followups_cache', JSON.stringify(data))
-          localStorage.setItem('ps_followups_timestamp', Date.now().toString())
+          localStorage.removeItem('ps_followups_cache')
+          localStorage.removeItem('ps_followups_timestamp')
         } catch (error) {
-          console.warn('Failed to cache follow-ups:', error)
+          // Silently handle cache clearing errors
         }
-        
-        setForceRender(prev => prev + 1) // Force re-render
+
+        // Multiple force renders to ensure UI updates
+        setForceRender(prev => prev + 1)
+        setTimeout(() => {
+          setForceRender(prev => prev + 1)
+        }, 100)
         setLastRefreshTime(new Date().toLocaleTimeString())
       } else {
         const errorData = await response.json()
-        console.error('Error loading PS follow-ups:', errorData)
         toast.error(errorData.error || 'Failed to load follow-ups')
       }
     } catch (error) {
-      console.error('Error loading follow-ups:', error)
       toast.error('Failed to load follow-ups')
     } finally {
       if (forceRefresh) {
@@ -1019,6 +1012,7 @@ export default function PSDashboard() {
       }
     }
 
+    setIsUpdatingLead(true)
     try {
       // Get authentication token
       const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
@@ -1030,8 +1024,8 @@ export default function PSDashboard() {
         lead_uid: selectedFollowUp.lead_uid,
         lead_status: getInternalStatusName(callOutcome), // Convert UI name to internal name
         // ps_id and ps_name are not needed in update - backend will use current user from JWT
-        follow_up_date: followUpDate ? (followUpDate.includes('T') ? followUpDate : followUpDate + 'T00:00') : selectedFollowUp.follow_up_date,
-        final_status: finalStatus || selectedFollowUp.final_status,
+        follow_up_date: followUpDate && followUpDate.trim() ? (followUpDate.includes('T') ? followUpDate : followUpDate + 'T00:00') : (selectedFollowUp.follow_up_date || null),
+        final_status: finalStatus && finalStatus.trim() ? finalStatus : (selectedFollowUp.final_status || "Pending"),
         updated_at: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace(' ', 'T')
       }
 
@@ -1103,7 +1097,7 @@ export default function PSDashboard() {
 
       if (response.ok) {
         const responseData = await response.json()
-        // Update successful
+        
         
         // Show appropriate success message based on lead status
         if (isLeadWon(callOutcome)) {
@@ -1126,19 +1120,39 @@ export default function PSDashboard() {
         setCallOutcome("")
         setFollowUpDate("")
         setFinalStatus("")
-        loadFollowUps(true) // Force refresh
-        loadQualifiedLeads() // Also refresh qualified leads to get updated lost status
+        
+        // Force complete state reset
+        setFollowUps([])
+        setForceRender(prev => prev + 1)
+        
+        // Wait a tick for React to process the empty state
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
+        // Force immediate refresh
+        await loadFollowUps(true)
+        await loadQualifiedLeads()
+
+        // Additional refresh after a short delay to catch any backend processing
+        setTimeout(async () => {
+          await loadFollowUps(true)
+          await loadQualifiedLeads()
+          setForceRender(prev => prev + 1)
+        }, 1000)
+
         // Dispatch custom events for immediate refresh across components
         window.dispatchEvent(new CustomEvent('lead-master-updated'))
         window.dispatchEvent(new CustomEvent('lead-status-changed'))
+
+        // Force UI update by incrementing forceRender
+        setForceRender(prev => prev + 1)
       } else {
         const errorData = await response.json()
-        console.error('❌ [PS Follow-up] Update failed:', errorData)
         toast.error(errorData.error || 'Failed to update follow-up')
       }
     } catch (error) {
-      console.error('❌ [PS Follow-up] Error updating follow-up:', error)
       toast.error('Failed to update follow-up')
+    } finally {
+      setIsUpdatingLead(false)
     }
   }
 
@@ -1147,8 +1161,10 @@ export default function PSDashboard() {
     setUpdateDialog(true)
     setCallNumber(1)
     setCallRemark("")
-    setFollowUpDate(followUp.follow_up_date)
-    setFinalStatus(followUp.final_status)
+    // Default to tomorrow if no follow-up date exists
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+    setFollowUpDate(followUp.follow_up_date || tomorrow)
+    setFinalStatus(followUp.final_status || "")
     setCallOutcome("")
     setBookingId("")
     setRetailedId("")
@@ -1438,42 +1454,68 @@ export default function PSDashboard() {
 
   // Helper function to check if a lead has been updated (has any call remarks or status)
   const hasBeenUpdated = (followUp: PSFollowUp) => {
-    const callFields = [
+    // Check if any call remarks exist (check for actual string content)
+    const callRemarkFields = [
       'first_call_remark', 'second_call_remark', 'third_call_remark',
       'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark',
       'eighth_call_remark', 'ninth_call_remark', 'tenth_call_remark'
     ]
-    const statusFields = [
+
+    const hasCallRemarks = callRemarkFields.some(field => {
+      const remark = followUp[field as keyof PSFollowUp]
+      return remark && typeof remark === 'string' && remark.trim().length > 0
+    })
+
+    // Check if any call dates exist (indicates a call was made)
+    const callDateFields = [
+      'first_call_date', 'second_call_date', 'third_call_date',
+      'fourth_call_date', 'fifth_call_date', 'sixth_call_date', 'seventh_call_date',
+      'eighth_call_date', 'ninth_call_date', 'tenth_call_date'
+    ]
+
+    const hasCallDates = callDateFields.some(field => {
+      const callDate = followUp[field as keyof PSFollowUp]
+      return callDate && typeof callDate === 'string' && callDate.trim().length > 0
+    })
+
+    // Check if final_status indicates any activity (not just 'Pending')
+    const hasFinalStatusActivity = followUp.final_status &&
+      typeof followUp.final_status === 'string' &&
+      followUp.final_status.trim().length > 0 &&
+      followUp.final_status.toLowerCase() !== 'pending'
+
+    // Check if any call lead status is set (not null/empty and not 'pending')
+    const callStatusFields = [
       'first_call_lead_status', 'second_call_lead_status', 'third_call_lead_status',
       'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status', 'seventh_call_lead_status',
       'eighth_call_lead_status', 'ninth_call_lead_status', 'tenth_call_lead_status'
     ]
-    
-    // Check if any call remarks exist
-    const hasCallRemarks = callFields.some(field => followUp[field as keyof PSFollowUp])
-    
-    // Check if any call status is set (not null/empty and not 'pending')
-    const hasCallStatus = statusFields.some(field => {
+
+    const hasCallStatus = callStatusFields.some(field => {
       const status = followUp[field as keyof PSFollowUp]
-      return status && status !== '' && status !== 'pending'
+      return status && typeof status === 'string' && status.trim().length > 0 && status.toLowerCase() !== 'pending'
     })
-    
-    return hasCallRemarks || hasCallStatus
+
+    const isUpdated = hasCallRemarks || hasCallDates || hasFinalStatusActivity || hasCallStatus
+    return isUpdated
   }
 
-  // Memoized count calculations to ensure they update when followUps changes
-  const { freshCount, todayCount, pendingCount, freshList, todayList, pendingList } = useMemo(() => {
-    // Fresh leads: Leads that have never been updated (no call remarks) and are not won/lost
-    const freshList = followUps.filter(f =>
-      !hasBeenUpdated(f) &&
-      !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
-      (f.final_status || '').toLowerCase() !== 'lost'
-    )
-    const freshCount = freshList.length
-    
-    
-    // Debug: Log sample fresh leads to understand the filtering (reduced logging)
-    // Removed excessive logging for performance
+  // Memoized count calculations using server-side classification (prevents stale closure issues)
+  const { freshCount, todayCount, pendingCount, walkinCount, freshList, todayList, pendingList, walkinList } = useMemo(() => {
+    // Fresh leads: Use server-side classification from backend
+    const freshBaseList = followUps.filter(f => f.is_fresh === true)
+    // Apply search for fresh list
+    const freshList = freshBaseList.filter(f => {
+      if (!freshSearch.trim()) return true
+      const q = freshSearch.toLowerCase()
+      return (
+        f.customer_name?.toLowerCase().includes(q) ||
+        f.customer_mobile_number?.toLowerCase().includes(q) ||
+        f.lead_uid?.toLowerCase().includes(q)
+      )
+    })
+    const freshCount = freshBaseList.length
+
     
     // Today's follow-ups: Leads with follow-up dates for today or overdue
     // Today list should ignore global dateFilter and always be today + overdue
@@ -1493,27 +1535,78 @@ export default function PSDashboard() {
     })
     const todayCount = todayBaseList.length
     
-    // Pending leads: Leads with final_status = 'pending' or 'booked' (excluding fresh leads and won/lost)
-    const pendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(followUps.filter(f =>
-      !['won','lost'].includes((f.final_status || '').toLowerCase()) &&
-      (['pending', 'booked', 'waiting for approval'].includes((f.final_status || '').toLowerCase())) &&
-      hasBeenUpdated(f)
-    ))))
-    const pendingCount = pendingList.length
-    
-    return { freshCount, todayCount, pendingCount, freshList, todayList: todayListSearched, pendingList }
-  }, [followUps, todaySearch, dateFilter, startDate, pendingFilter, pendingStatusFilter, forceRender])
+    // Pending leads: Use server-side classification + filters
+    const basePendingList = followUps.filter(f => f.is_pending === true)
+    const filteredPendingList = applyPendingFilter(applyPendingStatusFilter(applyDateFilter(basePendingList)))
+    // Apply search for pending list
+    const pendingList = filteredPendingList.filter(f => {
+      if (!pendingSearch.trim()) return true
+      const q = pendingSearch.toLowerCase()
+      return (
+        f.customer_name?.toLowerCase().includes(q) ||
+        f.customer_mobile_number?.toLowerCase().includes(q) ||
+        f.lead_uid?.toLowerCase().includes(q)
+      )
+    })
+    const pendingCount = filteredPendingList.length
+
+    // Walk-in leads: Filter by source (walk-in/digital leads)
+    const baseWalkinList = followUps.filter(f =>
+      ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(f.source || '')
+    )
+    const walkinList = baseWalkinList.filter(f => {
+      if (!walkinSearch.trim()) return true
+      const q = walkinSearch.toLowerCase()
+      return (
+        f.customer_name?.toLowerCase().includes(q) ||
+        f.customer_mobile_number?.toLowerCase().includes(q) ||
+        f.lead_uid?.toLowerCase().includes(q)
+      )
+    })
+    const walkinCount = baseWalkinList.length
+
+    return { freshCount, todayCount, pendingCount, walkinCount, freshList, todayList: todayListSearched, pendingList, walkinList }
+  }, [followUps, freshSearch, todaySearch, pendingSearch, walkinSearch, dateFilter, startDate, pendingFilter, pendingStatusFilter, forceRender])
   
+  // Check for new walk-in leads and show notifications
+  useEffect(() => {
+    if (followUps.length > 0) {
+      const walkinLeads = followUps.filter(f =>
+        ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(f.source || '')
+      )
+
+      // Check for new walk-in leads (leads that weren't there in previous check)
+      const newWalkinLeads = walkinLeads.filter(lead =>
+        !localStorage.getItem(`walkin_lead_seen_${lead.lead_uid}`)
+      )
+
+      if (newWalkinLeads.length > 0) {
+        // Show notifications for new walk-in leads
+        newWalkinLeads.forEach(lead => {
+          const notification = {
+            id: `walkin_${lead.lead_uid}_${Date.now()}`,
+            type: 'walkin' as const,
+            leadUid: lead.lead_uid,
+            timestamp: new Date(),
+            message: `${lead.source} lead assigned: ${lead.customer_name}`
+          }
+          setNotifications(prev => [notification, ...prev.slice(0, 4)]) // Keep only 5 recent notifications
+
+          // Mark as seen
+          localStorage.setItem(`walkin_lead_seen_${lead.lead_uid}`, 'true')
+        })
+      }
+    }
+  }, [followUps])
+
   // Track count changes and force UI updates
   useEffect(() => {
-    // Log count changes immediately
-    console.log(`📊 [Count Update] Fresh: ${freshCount}, Today: ${todayCount}, Pending: ${pendingCount}`)
-    
     // Counts updated - force update count displays immediately
     const freshButton = document.querySelector('[data-tab="fresh"] .count-display')
     const pendingButton = document.querySelector('[data-tab="pending"] .count-display')
     const todayButton = document.querySelector('[data-tab="today"] .count-display')
-    
+    const walkinButton = document.querySelector('[data-tab="walkin"] .count-display')
+
     if (freshButton) {
       freshButton.textContent = countsUpdating ? "..." : freshCount.toString()
     }
@@ -1523,7 +1616,10 @@ export default function PSDashboard() {
     if (todayButton) {
       todayButton.textContent = countsUpdating ? "..." : todayCount.toString()
     }
-  }, [freshCount, pendingCount, todayCount, countsUpdating])
+    if (walkinButton) {
+      walkinButton.textContent = countsUpdating ? "..." : walkinCount.toString()
+    }
+  }, [freshCount, pendingCount, todayCount, walkinCount, countsUpdating])
   
   // Get current PS user name for filtering
   const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
@@ -1603,29 +1699,48 @@ export default function PSDashboard() {
   }))
   const wonLostCount = wonLostList.length
 
-  const filteredFollowUps = (() => {
+  // CRITICAL: Wrap in useMemo to ensure React sees reference changes
+  const filteredFollowUps = useMemo(() => {
+    let result
     switch(activeTab){
-      case 'fresh': return freshList
-      case 'today': return todayList
-      case 'pending': return pendingList
+      case 'fresh':
+        result = freshList
+        break
+      case 'walkin':
+        result = walkinList
+        break
+      case 'today': 
+        result = todayList
+        break
+      case 'pending': 
+        result = pendingList
+        break
       case 'booked': 
         switch(activeSubTab) {
-          case 'requested': return bookedRequestedList
-          case 'approved': return bookedApprovedList
-          case 'rejected': return bookedRejectedList
-          default: return bookedRequestedList
+          case 'requested': result = bookedRequestedList; break
+          case 'approved': result = bookedApprovedList; break
+          case 'rejected': result = bookedRejectedList; break
+          default: result = bookedRequestedList; break
         }
+        break
       case 'retailed': 
         switch(activeSubTab) {
-          case 'requested': return retailedRequestedList
-          case 'approved': return retailedApprovedList
-          case 'rejected': return retailedRejectedList
-          default: return retailedRequestedList
+          case 'requested': result = retailedRequestedList; break
+          case 'approved': result = retailedApprovedList; break
+          case 'rejected': result = retailedRejectedList; break
+          default: result = retailedRequestedList; break
         }
-      case 'wonlost': return wonLostList
-      default: return freshList
+        break
+      case 'wonlost': 
+        result = wonLostList
+        break
+      default: 
+        result = freshList
+        break
     }
-  })()
+    
+    return result
+  }, [activeTab, activeSubTab, freshList, todayList, pendingList, bookedRequestedList, bookedApprovedList, bookedRejectedList, retailedRequestedList, retailedApprovedList, retailedRejectedList, wonLostList])
 
   const StatCard = ({ title, value, description, icon: Icon, color, bgColor }: any) => (
     <Card className={`${bgColor} border-0 shadow-lg rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 group`}>
@@ -1697,23 +1812,39 @@ export default function PSDashboard() {
                   <div
                     key={notification.id}
                     className={`p-4 rounded-2xl shadow-xl border-l-4 backdrop-blur-sm ${
-                      notification.type === 'approved' 
-                        ? 'bg-green-50/90 border-green-500 text-green-800' 
+                      notification.type === 'approved'
+                        ? 'bg-green-50/90 border-green-500 text-green-800'
+                        : notification.type === 'walkin'
+                        ? 'bg-blue-50/90 border-blue-500 text-blue-800'
                         : 'bg-red-50/90 border-red-500 text-red-800'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       {notification.type === 'approved' ? (
                         <CheckCircle className="w-5 h-5 text-green-600" />
+                      ) : notification.type === 'walkin' ? (
+                        <User className="w-5 h-5 text-blue-600" />
                       ) : (
                         <XCircle className="w-5 h-5 text-red-600" />
                       )}
                     <div>
                         <div className="font-medium">
-                          {notification.type === 'approved' ? 'Request Approved!' : 'Request Rejected'}
+                          {notification.type === 'approved'
+                            ? 'Request Approved!'
+                            : notification.type === 'walkin'
+                            ? notification.message?.includes('Meta') 
+                              ? 'New Meta Lead!'
+                              : notification.message?.includes('Digital')
+                              ? 'New Digital Lead!'
+                              : 'New Walk-in Lead!'
+                            : 'Request Rejected'
+                          }
                         </div>
                         <div className="text-sm">
-                          {notification.requestType === 'booking' ? 'Booking' : 'Retail'} request for {notification.leadUid}
+                          {notification.type === 'walkin'
+                            ? notification.message || `New walk-in lead assigned: ${notification.leadUid}`
+                            : `${notification.requestType === 'booking' ? 'Booking' : 'Retail'} request for ${notification.leadUid}`
+                          }
                         </div>
                       </div>
                     </div>
@@ -1845,6 +1976,16 @@ export default function PSDashboard() {
                   isActive={activeTab === 'pending'}
                   onClick={handleTabChange}
                 />
+
+                <TabButton
+                  key={`walkin-${walkinCount}-${forceRender}`}
+                  id="walkin"
+                  label="Walk-in Leads"
+                  count={countsUpdating ? "..." : walkinCount}
+                  icon={Users}
+                  isActive={activeTab === 'walkin'}
+                  onClick={handleTabChange}
+                />
                 <TabButton
                   key={`booked-${bookedCount}-${forceRender}`}
                   id="booked"
@@ -1889,6 +2030,7 @@ export default function PSDashboard() {
                       {activeTab === 'fresh' && 'Fresh Leads'}
                       {activeTab === 'today' && 'Today\'s Follow-ups'}
                       {activeTab === 'pending' && 'Pending Leads'}
+                      {activeTab === 'walkin' && 'Walk-in Leads'}
                       {activeTab === 'booked' && 'Booked Approval'}
                       {activeTab === 'retailed' && 'Retailed Approval'}
                       {activeTab === 'wonlost' && 'Won/Lost Leads'}
@@ -1898,6 +2040,7 @@ export default function PSDashboard() {
                     {activeTab === 'fresh' && 'Leads newly assigned to you'}
                     {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
                     {activeTab === 'pending' && 'Leads with final status Pending'}
+                    {activeTab === 'walkin' && 'Walk-in and digital leads captured by receptionists'}
                     {activeTab === 'booked' && 'Booked leads approval status'}
                     {activeTab === 'retailed' && 'Retailed leads approval status'}
                     {activeTab === 'wonlost' && 'Leads that are won or lost'}
@@ -1988,6 +2131,19 @@ export default function PSDashboard() {
                 </>
               )}
 
+              {activeTab === 'fresh' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Search:</label>
+                  <input
+                    type="text"
+                    value={freshSearch}
+                    onChange={(e) => setFreshSearch(e.target.value)}
+                    placeholder="Name, mobile or UID"
+                    className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-[200px]"
+                  />
+                </div>
+              )}
+
               {activeTab === 'today' && (
                 <div className="flex items-center gap-2">
                   <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Search:</label>
@@ -2001,9 +2157,34 @@ export default function PSDashboard() {
                 </div>
               )}
 
+              {/* Filters for Walk-in Leads */}
+              {activeTab === 'walkin' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Search:</label>
+                  <input
+                    type="text"
+                    value={walkinSearch}
+                    onChange={(e) => setWalkinSearch(e.target.value)}
+                    placeholder="Name, mobile or UID"
+                    className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-[200px]"
+                  />
+                </div>
+              )}
+
               {/* Filters for Pending Leads */}
-          {activeTab === 'pending' && (
+              {activeTab === 'pending' && (
                 <>
+                  {/* Search for Pending */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Search:</label>
+                    <input
+                      type="text"
+                      value={pendingSearch}
+                      onChange={(e) => setPendingSearch(e.target.value)}
+                      placeholder="Name, mobile or UID"
+                      className="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent min-w-[200px]"
+                    />
+                  </div>
                   {/* Lead Category Filter */}
                   <div className="flex items-center gap-1 md:gap-2">
                     <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Category:</label>
@@ -2117,6 +2298,18 @@ export default function PSDashboard() {
                               <Phone className="w-3 h-3 flex-shrink-0" />
                               <span className="truncate">{customerMobile}</span>
                             </div>
+                            {/* Source badge for walk-in leads */}
+                            {['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(item.source) && (
+                              <Badge
+                                className={`text-xs px-2 py-0.5 ${
+                                  item.source === 'Walk-in'
+                                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                }`}
+                              >
+                                {item.source === 'Walk-in' ? '🚶 Walk-in' : '💻 Digital'}
+                              </Badge>
+                            )}
                             {activeTab !== 'fresh' && (
                               <>
                                 <div className="text-xs text-gray-500 truncate">{leadUid}</div>
@@ -2199,31 +2392,45 @@ export default function PSDashboard() {
                         </div>
                         </td>
                         <td className="p-2 md:p-4">
-                          {isQualifiedLead ? (
-                            <div className="text-xs md:text-sm text-gray-500">
-                              {item.booking_status === 'Waiting for Approval' && 'Waiting for SM approval'}
-                              {item.retailed_status === 'Waiting for Approval' && 'Waiting for SM approval'}
-                              {item.booking_status === 'Approved' && '✅ Booking Approved'}
-                              {item.retailed_status === 'Approved' && '✅ Retail Approved'}
-                              {item.booking_status === 'Rejected' && '❌ Booking Rejected'}
-                              {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
-                            </div>
-                          ) : (
-                            <div className="flex flex-col md:flex-row gap-1 md:gap-2">
-                              <button
-                                onClick={() => openUpdateDialog(item)}
-                                className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-3 md:px-4 py-1 md:py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105 active:scale-95 whitespace-nowrap flex items-center gap-1"
-                              >
-                                <Edit3 className="w-3 h-3" />
-                                Update
-                              </button>
-                              {item.final_status === 'Lost Requested' && (
-                                <div className="text-xs text-orange-600 font-medium bg-orange-50 px-1 md:px-2 py-1 rounded-lg whitespace-nowrap">
-                                  Awaiting CRE Approval
-                                </div>
+                          <div className="flex flex-col gap-2">
+                            {/* Always show Update button */}
+                            <button
+                              onClick={() => openUpdateDialog(item)}
+                              disabled={isUpdatingLead}
+                              className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-3 md:px-4 py-1 md:py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105 active:scale-95 whitespace-nowrap flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                            >
+                              {isUpdatingLead ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Updating...
+                                </>
+                              ) : (
+                                <>
+                                  <Edit3 className="w-3 h-3" />
+                                  Update
+                                </>
                               )}
-                            </div>
-                          )}
+                            </button>
+                            
+                            {/* Show approval status for qualified leads */}
+                            {isQualifiedLead && (
+                              <div className="text-xs text-gray-600 font-medium text-center">
+                                {item.booking_status === 'Waiting for Approval' && '⏳ Waiting for SM approval'}
+                                {item.retailed_status === 'Waiting for Approval' && '⏳ Waiting for SM approval'}
+                                {item.booking_status === 'Approved' && '✅ Booking Approved'}
+                                {item.retailed_status === 'Approved' && '✅ Retail Approved'}
+                                {item.booking_status === 'Rejected' && '❌ Booking Rejected'}
+                                {item.retailed_status === 'Rejected' && '❌ Retail Rejected'}
+                              </div>
+                            )}
+                            
+                            {/* Show Lost Requested status */}
+                            {item.final_status === 'Lost Requested' && (
+                              <div className="text-xs text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded-lg text-center">
+                                Awaiting CRE Approval
+                              </div>
+                            )}
+                          </div>
                         </td>
                       </tr>
                       )
@@ -2252,6 +2459,9 @@ export default function PSDashboard() {
                     <Edit3 className="w-6 h-6 mr-3 text-orange-500" />
                     Update Follow-up
                   </DialogTitle>
+                  <DialogDescription>
+                    Update the follow-up status and details for this lead
+                  </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-6">
@@ -2565,10 +2775,20 @@ export default function PSDashboard() {
                     </Button>
                     <Button
                       onClick={handleUpdateFollowUp}
-                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg"
+                      disabled={isUpdatingLead}
+                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-2 rounded-xl font-medium shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Update Follow-up
+                      {isUpdatingLead ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Update Follow-up
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -2585,6 +2805,9 @@ export default function PSDashboard() {
                     <Car className="w-6 h-6 mr-3 text-orange-500" />
                     Trade-in Vehicle Details
                   </DialogTitle>
+                  <DialogDescription>
+                    View and manage trade-in vehicle information for this lead
+                  </DialogDescription>
                 </DialogHeader>
 
                 <div className="px-6 pb-6">

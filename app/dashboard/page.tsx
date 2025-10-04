@@ -24,9 +24,46 @@ export default function DashboardPage() {
     branches: 0,
     conversionRate: "0%"
   })
+
+  // Check if user is authenticated and has a role
+  useEffect(() => {
+    const checkAuth = () => {
+      const supabaseUserRaw = localStorage.getItem('supabase_user')
+      if (supabaseUserRaw) {
+        const user = JSON.parse(supabaseUserRaw)
+        if (user.role && user.role !== 'admin') {
+          // Redirect role-based users to their specific dashboards
+          const roleRoutes: { [key: string]: string } = {
+            'receptionist': '/receptionist/dashboard',
+            'ps': '/ps/dashboard',
+            'cre': '/cre/dashboard',
+            'cre_team_leader': '/cre-team-leader/dashboard',
+            'cre_icrop': '/cre-icrop/dashboard',
+            'branch_head': '/branch-head/dashboard',
+            'sales_manager': '/sales-manager/dashboard'
+          }
+          const redirectUrl = roleRoutes[user.role]
+          if (redirectUrl) {
+            console.log(`🔄 Redirecting ${user.role} to ${redirectUrl}`)
+            window.location.href = redirectUrl
+            return
+          }
+        }
+        // If user is admin or no role, continue to show main dashboard
+        setUser(user)
+      }
+      setLoading(false)
+    }
+
+    checkAuth()
+  }, [])
   const router = useRouter()
 
   const fetchDashboardData = async () => {
+    if (!user || user.role !== 'admin') {
+      return // Only load data for admin users
+    }
+
     try {
       const supabaseUserRaw = localStorage.getItem('supabase_user')
       const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null

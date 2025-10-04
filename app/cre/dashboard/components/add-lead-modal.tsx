@@ -44,6 +44,22 @@ const chennaiLocations = [
   "MOUNT ROAD", "CHINTHADRIPET", "EGMORE", "PUDHUPET", "CHETPET", "CHOOLAIMEDU", "NUNGAMBAKKAM", "KODAMBAKKAM", "VADAPALANI", "ANNASALAI", "ARUMBAKKAM", "ADYAR", "THIRUVANMIYUR", "VELACHERRY", "MEDAVAKKAM", "KILKATTALAI", "PERAMBAKKAM", "SHOLINGANALLUR", "PERUNGUDI", "NEELANGARAI", "SAIDAPET", "ST THOMAS MOUNT", "PAZHAVANTHANGAL", "PALLAVARAM", "MMDA COLONY", "MYLAPORE", "TRIPLICANE", "THOUSAND LIGHTS", "GREAMS ROAD", "ORMES ROAD", "ROYAPETTAH", "T NAGAR", "TEYNAMPET", "GUINDY", "MENAMBAKKAM", "TIRUSULAM", "ALWARPET", "R A PURAM", "AMINJIKARAI", "WEST MAMBALAM", "K K NAGAR", "ASHOK NAGAR", "EKKATUTHANGAL", "NANDANAM", "IIT", "KOTTURPURAM", "CHROMEPET", "SANITORIUM", "KELAMBAKKAM", "SELAIYUR", "KOVILAMBAKKAM", "SUNNAMBU KOLATHUR", "ASTHINAPURAM", "ANKAPUTTUR", "PAMMAL", "POZHICHALUR", "CHITLAPAKKAM", "VENGAIVASAL", "CHINMAYANAGAR", "VALASARAWALKAM", "VIRUGAMBAKKAM", "NESAPAKKAM", "MGR NAGAR", "JAFFERKHANPET", "FLOWERS ROAD", "GOPALAPURAM", "ALWARTHIRUNAGAR", "KOLAPAKKAM", "ADAMBAKKAM", "NANDAMBAKKAM", "MOULIVAKKAM", "RAMAPURAM", "MADIPAKKAM", "SALIGRAMAM", "KANDHANCHAVADI", "THARAMANI", "GOWRIVAKKAM", "TRUSTPURAM", "CIT NAGAR", "RANGARAJAPURAM", "ICE HOUSE", "JAM BAZAAR", "CENATOPH ROAD", "MRC NAGAR", "SANTHOME", "OKKIYAM", "NAVALUR", "THORAIPAKKAM", "GREENWAYS ROAD", "RAJAJI SALAI", "ECR", "OMR", "ABIRAMAPURAM", "MANDAVELI", "MUDICHUR", "IRUMBULIYUR", "PERUNGALATHUR", "VANDALUR", "URAPAKKAM", "KILAMBAKKAM", "GUDUVANCHERY", "MARAIMALAI NAGAR", "SP KOIL", "CHENGALPATTU", "VYSARPADI", "PURASAIWALKAM", "PERAMBUR", "CHOOLAI", "ANNANAGAR", "SHANTHI COLONY", "SHENOY NAGAR", "THIRUMANGALAM", "MUGAPPAIR", "NOLAMBUR", "AYANAVARAM", "VILLIVAKKAM", "PADI", "KORATTUR", "KOLATHUR", "MADHAVARAM", "KELLYS", "KILPAUK", "CENTRAL", "NERKUNDRAM", "MADURAVOYAL", "VELAPANCHAVADI", "IYYAPANTHANGAL", "POONAMALLEE", "THIRUMAZHISAI", "SRIPERUMBUTHUR", "PARRYS", "KANCHEEPURAM", "MANGADU", "SUNGUVARCHATIRAM", "REDHILLS", "CHOZHAVARAM", "KARANODAI", "PERIYAPALAYAM", "AMBATTUR", "THIRUMULLAIVOYAL", "AVADI", "PATTABIRAM", "THIRUNINRAVUR", "VEPPAMPATTU", "TIRUVALLUR", "ARAKONAM", "TIRUTHANI", "TIRUPATHI", "MINT", "WASHERMENPET", "TONDIARPET", "THIRUVOTRIYUR", "ENNORE", "MOOLAKADAI", "ERUKANCHERY", "MANALI", "GOOMIDIPOONDI", "PADAPPAI", "ORAGADAM", "KUNDRATHUR", "PORUR", "PARK TOWN", "VANAGARAM", "THIRUVERKADU", "MUGALIVAKKAM", "KATTUPAKKAM", "GERUGAMBAKKAM", "MADHURANTHANGAM", "MELMARUVATHUR", "AYAPAKKAM"
 ]
 
+// Toyota Models and Variants
+const toyotaModels: { [key: string]: string[] } = {
+  "Toyota Innova Crysta": ["G", "GX / GX+", "VX", "ZX"],
+  "Toyota Innova Hycross": ["G", "GX", "GX (O)", "VX", "VX (O)", "ZX", "ZX (O)"],
+  "Toyota Fortuner": ["4x2 MT", "4x2 AT", "4x4 MT", "4x4 AT", "GR-S 4x2 AT", "GR-S 4x4 AT"],
+  "Toyota Fortuner Legender": ["4x2 AT", "4x4 AT"],
+  "Toyota Camry": ["Hybrid"],
+  "Toyota Vellfire": ["Executive Lounge"],
+  "Toyota Land Cruiser 300 (LC 300)": ["VX", "ZX", "GR-S"],
+  "Toyota Hilux": ["Standard", "High"],
+  "Toyota Urban Cruiser Hyryder": ["E", "S", "G", "V"],
+  "Toyota Rumion": ["S MT", "S AT", "G MT", "G AT", "V MT", "V AT"],
+  "Toyota Glanza": ["E", "S", "G"],
+  "Toyota Urban Cruiser Taisor": ["E", "S", "S+", "V"]
+}
+
 export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps) {
   const [formData, setFormData] = useState({
     customer_name: "",
@@ -59,6 +75,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
     trade_in_year: "",
     trade_in_km: "",
     trade_in_ownership: "",
+    model_interested: "",
     variant: "",
     remarks: ""
   })
@@ -82,6 +99,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         trade_in_year: "",
         trade_in_km: "",
         trade_in_ownership: "",
+        model_interested: "",
         variant: "",
         remarks: ""
       })
@@ -146,6 +164,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         trade_in_year: formData.trade_in_year || null,
         trade_in_km: formData.trade_in_km || null,
         trade_in_ownership: formData.trade_in_ownership || null,
+        model_interested: formData.model_interested || null,
         variant: formData.variant || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -460,54 +479,45 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="variant" className="text-sm font-medium">
-                  Model Interested & Variant
-                </Label>
-                <Select onValueChange={(value) => setFormData(prev => ({ ...prev, variant: value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select model and variant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Toyota Innova Crysta */}
-                    <SelectItem value="Toyota Innova Crysta G">Toyota Innova Crysta - G</SelectItem>
-                    <SelectItem value="Toyota Innova Crysta GX / GX+">Toyota Innova Crysta - GX / GX+</SelectItem>
-                    <SelectItem value="Toyota Innova Crysta VX">Toyota Innova Crysta - VX</SelectItem>
-                    <SelectItem value="Toyota Innova Crysta ZX">Toyota Innova Crysta - ZX</SelectItem>
-                    
-                    {/* Toyota Innova Hycross */}
-                    <SelectItem value="Toyota Innova Hycross G">Toyota Innova Hycross - G</SelectItem>
-                    <SelectItem value="Toyota Innova Hycross GX / GX (O)">Toyota Innova Hycross - GX / GX (O)</SelectItem>
-                    <SelectItem value="Toyota Innova Hycross VX / VX (O)">Toyota Innova Hycross - VX / VX (O)</SelectItem>
-                    <SelectItem value="Toyota Innova Hycross ZX / ZX (O)">Toyota Innova Hycross - ZX / ZX (O)</SelectItem>
-                    
-                    {/* Toyota Hilux */}
-                    <SelectItem value="Toyota Hilux STD">Toyota Hilux - STD</SelectItem>
-                    <SelectItem value="Toyota Hilux High MT">Toyota Hilux - High MT</SelectItem>
-                    <SelectItem value="Toyota Hilux High AT">Toyota Hilux - High AT</SelectItem>
-                    
-                    {/* Toyota Fortuner Legender */}
-                    <SelectItem value="Toyota Fortuner Legender 4x2 AT Diesel">Toyota Fortuner Legender - 4x2 AT Diesel</SelectItem>
-                    <SelectItem value="Toyota Fortuner Legender 4x4 AT Diesel">Toyota Fortuner Legender - 4x4 AT Diesel</SelectItem>
-                    <SelectItem value="Toyota Fortuner Legender Neo Drive (48V mild hybrid)">Toyota Fortuner Legender - Neo Drive (48V mild hybrid)</SelectItem>
-                    
-                    {/* Toyota Vellfire */}
-                    <SelectItem value="Toyota Vellfire Hi">Toyota Vellfire - Hi</SelectItem>
-                    <SelectItem value="Toyota Vellfire VIP Executive Lounge">Toyota Vellfire - VIP Executive Lounge</SelectItem>
-                    
-                    {/* Toyota Camry */}
-                    <SelectItem value="Toyota Camry Elegance">Toyota Camry - Elegance</SelectItem>
-                    <SelectItem value="Toyota Camry Sprint">Toyota Camry - Sprint</SelectItem>
-                    
-                    {/* Toyota Land Cruiser 300 (LC 300) */}
-                    <SelectItem value="Toyota Land Cruiser 300 (LC 300) ZX">Toyota Land Cruiser 300 (LC 300) - ZX</SelectItem>
-                    <SelectItem value="Toyota Land Cruiser 300 (LC 300) GR-S">Toyota Land Cruiser 300 (LC 300) - GR-S</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500">
-                  Select the model and variant the customer is interested in
-                </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="model_interested" className="text-sm font-medium">
+                    Model Interested
+                  </Label>
+                  <Select onValueChange={(value) => setFormData(prev => ({ ...prev, model_interested: value, variant: '' }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.keys(toyotaModels).map((model) => (
+                        <SelectItem key={model} value={model}>{model}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="variant" className="text-sm font-medium">
+                    Variant
+                  </Label>
+                  <Select 
+                    disabled={!formData.model_interested} 
+                    value={formData.variant}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, variant: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={formData.model_interested ? "Select variant" : "Select model first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formData.model_interested && toyotaModels[formData.model_interested as keyof typeof toyotaModels]?.map((variant) => (
+                        <SelectItem key={variant} value={variant}>{variant}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+              <p className="text-xs text-gray-500">
+                Select the model and variant the customer is interested in
+              </p>
             </CardContent>
           </Card>
 

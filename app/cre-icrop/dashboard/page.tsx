@@ -84,8 +84,22 @@ export default function CREICROPDashboard() {
       })
       if (!response.ok) throw new Error('Failed to fetch qualified leads')
       const data = await response.json()
-      setLeads(data)
-      setFilteredLeads(data)
+      
+      // Sort: Pending leads (no icrop_id) at top, leads with icrop_id at bottom
+      const sortedData = data.sort((a: QualifiedLead, b: QualifiedLead) => {
+        const aHasIcrop = !!a.icrop_id
+        const bHasIcrop = !!b.icrop_id
+        
+        // Leads without icrop_id (pending) come first
+        if (!aHasIcrop && bHasIcrop) return -1
+        if (aHasIcrop && !bHasIcrop) return 1
+        
+        // Within same category, sort by created_at (newest first)
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+      
+      setLeads(sortedData)
+      setFilteredLeads(sortedData)
     } catch (error) {
       console.error('Error fetching qualified leads:', error)
       toast.error('Failed to fetch qualified leads')

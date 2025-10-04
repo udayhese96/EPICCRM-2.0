@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       const res = NextResponse.json(data)
       if (data.access_token) {
         res.cookies.set('access_token', data.access_token, {
-          httpOnly: true,
+          httpOnly: false, // Allow frontend to access the token
           sameSite: 'lax',
           path: '/',
           secure: false, // set true in production with HTTPS

@@ -42,6 +42,7 @@ export default function LoginPage() {
         username: data.user.username,
         email: data.user.email,
         role: data.user.role,
+        branch: data.user.branch,
         name: data.user.full_name || data.user.first_name || data.user.username,
         full_name: data.user.full_name || data.user.first_name || data.user.username,
         access_token: data.access_token
@@ -72,6 +73,9 @@ export default function LoginPage() {
           break
         case "sales_manager":
           redirectUrl = "/sales-manager/dashboard"
+          break
+        case "receptionist":
+          redirectUrl = "/receptionist/dashboard"
           break
         default:
           redirectUrl = "/dashboard"

@@ -482,6 +482,7 @@ const pendingReasons = [
 export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateModalProps) {
   const [selectedStatus, setSelectedStatus] = useState<"qualified" | "unqualified" | "pending" | null>(null)
   const today = new Date().toISOString().slice(0,10)
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0,10)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     model_interested: "",
@@ -679,7 +680,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Qualified",
           final_status: formData.sales_outcome === "Lost" ? "Lost" :
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Pending",
-          follow_up_date: formData.follow_up_date || today,
+          follow_up_date: formData.follow_up_date || tomorrow,
           followup_count: (lead?.followup_count || 0) + 1,
           call_status: formData.call_status,
           general_remarks: formData.general_remarks,
@@ -700,7 +701,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? "Pending" : "Pending",
           // Ensure follow up date exists only when needed
-          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : (formData.follow_up_date || undefined),
+          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
         }
@@ -713,7 +714,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     if (formData.call_status && isFollowUpWorkflow) {
       const normalized = formData.call_status.trim()
       if (normalized.toLowerCase() === "call me back") {
-        ;(updateData as any).follow_up_date = formData.follow_up_date || today
+        ;(updateData as any).follow_up_date = formData.follow_up_date || tomorrow
       } else if (!formData.follow_up_date) {
         delete (updateData as any).follow_up_date
       }
@@ -729,7 +730,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         ;(updateData as any).final_status = "Lost"
       }
       if (normalized.toLowerCase() === "call me back") {
-        ;(updateData as any).follow_up_date = formData.follow_up_date || today
+        ;(updateData as any).follow_up_date = formData.follow_up_date || tomorrow
       } else if (!formData.follow_up_date) {
         // Avoid sending empty string which breaks backend timestamp parsing
         delete (updateData as any).follow_up_date
@@ -1267,7 +1268,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                       <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date</Label>
                     <Input
                       type="date"
-                      value={formData.follow_up_date || today}
+                      value={formData.follow_up_date || tomorrow}
                       onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
                         className="h-10 text-sm"
                     />

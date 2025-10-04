@@ -30,6 +30,7 @@ import { createClient } from "@/lib/supabase/client"
 import { LeadUpdateModal } from "./components/lead-update-modal"
 import { AddLeadModal } from "./components/add-lead-modal"
 import { RemarksSync } from "./components/remarks-sync"
+import { toast } from "sonner"
 
 interface User {
   id: string
@@ -113,6 +114,7 @@ export default function CREDashboard() {
   const [redisWorkerStatus, setRedisWorkerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting')
   const [countsUpdating, setCountsUpdating] = useState(false)
+  const [notifications, setNotifications] = useState<Array<{id: string, type: 'walkin', leadUid: string, timestamp: Date, message?: string}>>([])
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -427,6 +429,37 @@ export default function CREDashboard() {
         setLeads(mapped)
         const after = computeCountsSnapshot(mapped)
         console.debug('[CRE fetch] new counts:', after)
+        
+        // Check for new walk-in leads and show notifications
+        if (before && after) {
+          const newWalkinLeads = mapped.filter(lead => 
+            ['Walk-in', 'Digital'].includes(lead.source) && 
+            lead.cre_name && 
+            lead.cre_name.toLowerCase() === (user?.first_name || user?.name || user?.username || '').toLowerCase()
+          )
+          
+          if (newWalkinLeads.length > 0) {
+            newWalkinLeads.forEach(lead => {
+              const notification = {
+                id: `walkin-${lead.uid}-${Date.now()}`,
+                type: 'walkin' as const,
+                leadUid: lead.uid,
+                timestamp: new Date(),
+                message: `New walk-in lead assigned: ${lead.customer_name} (${lead.uid})`
+              }
+              setNotifications(prev => [notification, ...prev.slice(0, 4)]) // Keep only 5 recent notifications
+              
+              // Show toast notification
+              toast.success(`🎉 New walk-in lead assigned: ${lead.customer_name}`)
+              
+              // Auto-remove notification after 5 seconds
+              setTimeout(() => {
+                setNotifications(prev => prev.filter(n => n.id !== notification.id))
+              }, 5000)
+            })
+          }
+        }
+        
         return { before, after }
       } else {
         console.error('API Error:', response.status, response.statusText)
@@ -685,13 +718,17 @@ export default function CREDashboard() {
         }))
         break
       case "walkin":
-        filteredLeads = []
+        // Filter to only show walk-in and digital leads
+        filteredLeads = leads.filter(lead =>
+          ['Walk-in', 'Digital'].includes(lead.source)
+        )
         break
       default:
         filteredLeads = leads
     }
 
     filteredLeads = filteredLeads.filter(withinDateFilter)
+
 
     // Filter by status within tab using business rules
     if (activeTab === "fresh") {
@@ -774,7 +811,7 @@ export default function CREDashboard() {
       lost: leads.filter(lead => lead.lead_status === 'Lost').length,
       lostRequested: leads.filter(lead => (lead.final_status || '').toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
-      walkin: 0
+      walkin: leads.filter(lead => ['Walk-in', 'Digital'].includes(lead.source)).length
     }
   }
 
@@ -819,6 +856,47 @@ export default function CREDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+            {/* Notifications */}
+            {notifications.length > 0 && (
+              <div className="relative">
+                <div className="flex items-center space-x-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-green-700 font-medium">
+                    {notifications.length} new walk-in lead{notifications.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                {/* Notification dropdown */}
+                <div className="absolute top-full right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                  <div className="p-3 border-b border-gray-200">
+                    <h3 className="font-medium text-gray-900">Recent Notifications</h3>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {notifications.map(notification => (
+                      <div
+                        key={notification.id}
+                        className="p-3 border-b border-gray-100 hover:bg-gray-50"
+                      >
+                        <div className="flex items-start space-x-3">
+                          <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">
+                              Walk-in Lead Assigned
+                            </p>
+                            <p className="text-sm text-gray-600">
+                              {notification.message || `New walk-in lead assigned: ${notification.leadUid}`}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {notification.timestamp.toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {/* Count Refresh Indicator */}
             {isRefreshing && (
               <div className="flex items-center space-x-2 text-blue-600">
@@ -1105,7 +1183,22 @@ export default function CREDashboard() {
                 <div>({tabCounts.qualified})</div>
               </div>
             </button>
-            <button 
+            <button
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
+                activeTab === "walkin"
+                  ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg border-blue-500"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-50 border-gray-200"
+              }`}
+              onClick={() => setActiveTab("walkin")}
+              aria-label="View walk-in leads"
+            >
+              <Users className="h-4 w-4" />
+              <div className="text-center leading-tight">
+                <div>Walk-in Leads</div>
+                <div>({tabCounts.walkin || 0})</div>
+              </div>
+            </button>
+            <button
               className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
                 activeTab === "wonlost" 
                   ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm" 
@@ -1135,21 +1228,6 @@ export default function CREDashboard() {
                 <div>({tabCounts.lostconfirm})</div>
               </div>
             </button>
-            <button 
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border transition-all duration-150 min-h-[44px] min-w-[44px] ${
-                activeTab === "walkin" 
-                  ? "bg-teal-100 text-teal-800 border-teal-300 shadow-sm" 
-                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-              }`}
-              onClick={() => setActiveTab("walkin")}
-              aria-label="View walk-in leads"
-            >
-              <User className="h-4 w-4" />
-              <div className="text-center leading-tight">
-                <div>Walk-in Leads</div>
-                <div>({tabCounts.walkin})</div>
-              </div>
-            </button>
           </div>
 
           {/* Dynamic Leads Section */}
@@ -1162,9 +1240,9 @@ export default function CREDashboard() {
                     {activeTab === "followup" && "Today's Follow-ups"}
                     {activeTab === "pending" && "Pending Leads"}
                     {activeTab === "qualified" && "Qualified Leads"}
+                    {activeTab === "walkin" && "Walk-in Leads"}
                     {activeTab === "wonlost" && "Won/Lost Leads"}
                     {activeTab === "lostconfirm" && "Lost Confirmation"}
-                    {activeTab === "walkin" && "Walk-in Leads"}
                     {" "}({filteredLeads.length})
                   </CardTitle>
                 </div>
