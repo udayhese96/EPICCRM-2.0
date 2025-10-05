@@ -3001,27 +3001,98 @@ async def get_ps_followups(
 
 @app.post("/api/ps/leads")
 async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
-    """Add a new PS lead to ps_followup_master and trade_in_master (if applicable)"""
+    """Add a new PS lead - works like receptionist lead creation"""
     try:
         current_time = now_ist_iso()
         
-        # Insert into ps_followup_master (WITHOUT trade-in fields)
+        # Generate lead UID if not provided
+        uid = lead_data.get('uid') or f"PS{int(time.time()) % 1000000:06d}"
+        
+        # Find CREs assigned to this branch for walk-in follow-ups
+        cre_assignments = []
+        try:
+            cre_response = supabase.table('users').select('id, full_name, walkin_assignments').eq('role', 'cre').eq('is_active', True).execute()
+            
+            for cre in cre_response.data or []:
+                walkin_assignments = cre.get('walkin_assignments', [])
+                if lead_data.get('ps_branch', 'GEM') in walkin_assignments:
+                    cre_assignments.append({
+                        'id': cre['id'],
+                        'name': cre['full_name']
+                    })
+        except Exception as e:
+            print(f"[PS Lead] Error finding CRE assignments: {e}")
+
+        # Randomly assign one CRE for walk-in follow-up if multiple CREs are available
+        assigned_cre = None
+        if cre_assignments:
+            import random
+            assigned_cre = random.choice(cre_assignments)
+            print(f"[PS Lead] Randomly assigned CRE: {assigned_cre['name']} for walk-in follow-up")
+
+        # Step 1: Insert into lead_master first (like receptionist does)
+        lead_master_data = {
+            "uid": uid,
+            "customer_name": lead_data['customer_name'],
+            "customer_mobile_number": lead_data['customer_mobile_number'],
+            "alternate_mobile_number": lead_data.get('alternate_mobile_number'),
+            "customer_location": "",
+            "profession": "",
+            "source": lead_data['source'],
+            "sub_source": "",
+            "campaign": None,
+            "model_interested": lead_data.get('model_interested'),
+            "variant": lead_data.get('variant'),
+            "buying_plan": None,
+            "ps_name": lead_data['ps_name'],
+            "ps_id": str(lead_data['ps_id']),
+            "cre_name": assigned_cre['name'] if assigned_cre else None,
+            "cre_id": assigned_cre['id'] if assigned_cre else None,
+            "branch": lead_data.get('ps_branch', 'GEM'),
+            "assigned": "Yes",
+            "lead_status": "Pending",
+            "final_status": "Pending",
+            "lead_category": "Hot",
+            "follow_up_date": lead_data.get('follow_up_date') if lead_data.get('follow_up_date') else None,
+            "out_of_station_location": None,
+            "date": current_time,
+            "created_at": current_time,
+            "updated_at": current_time,
+            "test_drive_type": None,
+            "trade_in": None,
+            "sixth_call_date": None,
+            "sixth_remark": None,
+            "metadata": {
+                "created_by": "ps",
+                "assigned_cre": assigned_cre['name'] if assigned_cre else None
+            }
+        }
+
+        # Insert into lead_master
+        lead_response = supabase.table('lead_master').insert(lead_master_data).execute()
+        if not lead_response.data:
+            raise HTTPException(status_code=500, detail="Failed to create lead in lead_master")
+        
+        # Get the actual UID from the inserted lead
+        actual_uid = lead_response.data[0]['uid']
+        
+        # Step 2: Insert into ps_followup_master
         ps_followup_data = {
-            'lead_uid': lead_data['uid'],
+            'lead_uid': actual_uid,
             'ps_name': lead_data['ps_name'],
             'ps_id': lead_data['ps_id'],
-            'ps_branch': lead_data['ps_branch'],
+            'ps_branch': lead_data.get('ps_branch', 'GEM'),
             'customer_name': lead_data['customer_name'],
             'customer_mobile_number': lead_data['customer_mobile_number'],
             'alternate_mobile_number': lead_data.get('alternate_mobile_number'),
             'source': lead_data['source'],
-            'cre_name': lead_data.get('cre_name'),
-            'cre_id': lead_data.get('cre_id'),
-            'lead_category': lead_data.get('lead_category'),
+            'cre_name': assigned_cre['name'] if assigned_cre else None,
+            'cre_id': assigned_cre['id'] if assigned_cre else None,
+            'lead_category': 'Hot',
             'model_interested': lead_data.get('model_interested'),
             'variant': lead_data.get('variant'),
-            'follow_up_date': lead_data['follow_up_date'],
-            'lead_status': lead_data.get('lead_status', ''),
+            'follow_up_date': lead_data.get('follow_up_date') if lead_data.get('follow_up_date') else None,
+            'lead_status': lead_data.get('lead_status', 'Pending'),
             'final_status': lead_data.get('final_status', 'Pending'),
             'test_drive_done': False,
             'created_at': current_time,
@@ -3030,28 +3101,50 @@ async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
         }
         
         ps_response = supabase.table('ps_followup_master').insert(ps_followup_data).execute()
+        if not ps_response.data:
+            # Rollback lead_master insertion if followup fails
+            supabase.table('lead_master').delete().eq('uid', actual_uid).execute()
+            raise HTTPException(status_code=500, detail="Failed to create lead in ps_followup_master")
         
-        # Insert trade-in details into trade_in_master if provided (optional)
+        # Step 3: Queue trade-in details for background processing if provided
         if any([lead_data.get('trade_in_make'), lead_data.get('trade_in_model'), 
                 lead_data.get('trade_in_year'), lead_data.get('trade_in_km')]):
-            trade_in_data = {
-                'lead_uid': lead_data['uid'],
-                'customer_name': lead_data['customer_name'],
-                'customer_mobile_number': lead_data['customer_mobile_number'],
-                'trade_in_make': lead_data.get('trade_in_make'),
-                'trade_in_model': lead_data.get('trade_in_model'),
-                'trade_in_year': lead_data.get('trade_in_year'),
-                'trade_in_km': lead_data.get('trade_in_km'),
-                'trade_in_ownership': lead_data.get('trade_in_ownership'),
-                'created_at': current_time,
-                'updated_at': current_time
-            }
-            
-            trade_in_response = supabase.table('trade_in_master').upsert(trade_in_data).execute()
-            if not trade_in_response.data:
-                print(f"Warning: Failed to insert trade-in data for {lead_data['uid']}")
+            # Queue trade-in data for background worker processing
+            try:
+                from .queue_system import QueueManager, LeadUpdatePayload
+                queue_manager = QueueManager(supabase)
+                
+                trade_in_payload = LeadUpdatePayload(
+                    uid=actual_uid,
+                    trade_in_make=lead_data.get('trade_in_make'),
+                    trade_in_model=lead_data.get('trade_in_model'),
+                    trade_in_year=lead_data.get('trade_in_year'),
+                    trade_in_km=lead_data.get('trade_in_km'),
+                    trade_in_ownership=lead_data.get('trade_in_ownership'),
+                    customer_name=lead_data['customer_name'],
+                    customer_mobile_number=lead_data['customer_mobile_number']
+                )
+                
+                # Create batch task for trade-in processing
+                batch_task = queue_manager.create_batch_task([trade_in_payload])
+                queue_manager.enqueue_task(batch_task)
+                
+                print(f"[PS Lead] Trade-in data queued for background processing: {actual_uid}")
+                print(f"[PS Lead] Trade-in payload: {trade_in_payload.__dict__}")
+            except Exception as e:
+                print(f"[PS Lead] Warning: Failed to queue trade-in data for background processing: {e}")
         
-        return JSONResponse(content={"message": "Lead added successfully", "lead_uid": lead_data['uid']})
+        return JSONResponse(content={
+            "message": "Lead added successfully", 
+            "lead_uid": actual_uid,
+            "assigned_cre": assigned_cre['name'] if assigned_cre else None,
+            "synced": {
+                "lead_master": True,
+                "ps_followup_master": True,
+                "trade_in_queued": any([lead_data.get('trade_in_make'), lead_data.get('trade_in_model'), 
+                                       lead_data.get('trade_in_year'), lead_data.get('trade_in_km')])
+            }
+        })
         
     except Exception as e:
         print(f"[PS Lead] Error adding lead: {e}")
@@ -3974,6 +4067,7 @@ class RecentCaptureResponse(BaseModel):
     interested_model: str
     ps_name: str
     created_at: str
+    created_at_epoch: int
     time_ago: str
 
 # ========================================
@@ -4260,7 +4354,7 @@ async def get_receptionist_stats(current_user=Depends(get_current_user)):
         # Get current IST date
         ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
         today_start = ist_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = ist_now - timedelta(days=ist_now.weekday())
+        week_start = (ist_now - timedelta(days=ist_now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         month_start = ist_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         # Get counts for different time periods - only walk-in and digital leads captured by receptionists
@@ -4270,11 +4364,7 @@ async def get_receptionist_stats(current_user=Depends(get_current_user)):
         week_count = supabase.table('lead_master').select('id', count='exact').eq('branch', current_user.branch_id).in_('source', ['Walk-in', 'Digital']).gte('created_at', week_start.isoformat()).execute()
         month_count = supabase.table('lead_master').select('id', count='exact').eq('branch', current_user.branch_id).in_('source', ['Walk-in', 'Digital']).gte('created_at', month_start.isoformat()).execute()
         
-        # For now, let's return 0 counts to fix the immediate issue
-        # TODO: Clean up database and remove this override
-        today_count.count = 0
-        week_count.count = 0
-        month_count.count = 0
+        # Use actual counts from database
 
         print(f"[DEBUG] Today count: {today_count.count}")
         print(f"[DEBUG] Week count: {week_count.count}")
@@ -4337,23 +4427,25 @@ async def get_recent_captures(
         print(f"[DEBUG] Found {len(response.data or [])} recent captures")
         for i, lead in enumerate(response.data or []):
             print(f"[DEBUG] Lead {i}: {lead.get('customer_name', 'Unknown')} - {lead.get('source', 'Unknown')} - {lead.get('created_at', 'Unknown')}")
-        
-        # For now, return empty results to fix the immediate issue
-        # TODO: Clean up database and remove this override
-        response.data = []
 
         recent_captures = []
         for lead in response.data or []:
             try:
-                # Calculate time ago
+                # Get created_at and calculate epoch timestamp
                 created_at_str = lead.get('created_at', '')
                 if not created_at_str:
                     print(f"[DEBUG] Lead {lead.get('customer_name', 'Unknown')} has no created_at")
                     continue
                     
+                # Parse the timestamp and convert to IST epoch
                 created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
-                time_diff = now - created_at.replace(tzinfo=timezone.utc)
+                # Convert to IST and then to epoch milliseconds
+                ist_created_at = created_at.astimezone(ZoneInfo("Asia/Kolkata"))
+                created_at_epoch = int(ist_created_at.timestamp() * 1000)
+                
+                # Calculate time ago using IST
+                ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+                time_diff = ist_now - ist_created_at.replace(tzinfo=None)
             except Exception as e:
                 print(f"[DEBUG] Error parsing date for lead {lead.get('customer_name', 'Unknown')}: {e}")
                 continue
@@ -4377,6 +4469,7 @@ async def get_recent_captures(
                     interested_model=lead.get('model_interested'),
                     ps_name=lead.get('ps_name'),
                     created_at=lead.get('created_at'),
+                    created_at_epoch=created_at_epoch,
                     time_ago=time_ago
                 ))
             except Exception as e:

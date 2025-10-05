@@ -11,16 +11,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { toast } from "sonner"
-import { 
-  Calendar, 
-  Phone, 
-  MessageSquare, 
-  CheckCircle, 
-  XCircle, 
-  Star, 
-  Info, 
-  Users, 
+import { toast, Toaster } from "sonner"
+import {
+  Calendar,
+  Phone,
+  MessageSquare,
+  CheckCircle,
+  XCircle,
+  Star,
+  Info,
+  Users,
   Trophy,
   RefreshCw,
   Clock,
@@ -37,7 +37,9 @@ import {
   DollarSign,
   MapPin,
   Zap,
-  Loader2
+  Loader2,
+  LayoutGrid,
+  Table as TableIcon
 } from "lucide-react"
 
 // Toyota models and variants data (matching CRE dashboard)
@@ -129,39 +131,55 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
       const session = typeof window !== 'undefined' ? (localStorage.getItem('supabase_user') || localStorage.getItem('user')) : null
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
+      // Derive PS branch from user profile; fallback to username-based heuristic
+      let psBranch = parsed?.branch || parsed?.ps_branch || parsed?.branch_name
+      if (!psBranch && parsed?.username) {
+        // Example: ps_mount_road -> Mount Road
+        const uname = String(parsed.username)
+        const m = uname.match(/ps[_-](.*)$/i)
+        if (m && m[1]) {
+          psBranch = m[1].replace(/[_-]/g, ' ').replace(/\b\w/g, (ch: string) => ch.toUpperCase())
+        }
+      }
+      // Final fallback to Mount Road to avoid hardcoded GEM
+      if (!psBranch) psBranch = 'Mount Road'
 
-    const leadData = {
-      uid,
-      customer_name: formData.customer_name,
-      customer_mobile_number: formData.customer_mobile_number,
-      alternate_mobile_number: formData.alternate_mobile_number || null,
-      source: formData.source,
-      follow_up_date: formData.follow_up_date ? new Date(formData.follow_up_date + 'T00:00:00').toISOString() : null,
-      ps_name: parsed?.name || parsed?.username || '',
-      ps_id: parsed?.id || null,
-      ps_branch: 'GEM', // Default branch for PS dashboard
-      cre_name: null, // Empty for PS leads
-      cre_id: null, // Empty for PS leads
-      lead_category: null,
-      model_interested: formData.model_interested || null,
-      variant: formData.variant || null,
-      trade_in_make: formData.trade_in_make === 'Other' ? (formData.trade_in_make_other || null) : (formData.trade_in_make || null),
-      trade_in_model: formData.trade_in_model === 'Other' ? (formData.trade_in_model_other || null) : (formData.trade_in_model || null),
-      trade_in_year: formData.trade_in_year || null,
-      trade_in_km: formData.trade_in_km || null,
-      lead_status: "", // Empty for fresh leads
-      final_status: "Pending",
-      first_call_date: null, // No first call date for fresh leads
-      first_call_remark: null, // No remarks for fresh leads
-      first_call_lead_status: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      ps_assigned_at: new Date().toISOString()
-    }
+      // First, create the lead in lead_master table (like walkin leads)
+      const leadData = {
+        uid,
+        customer_name: formData.customer_name,
+        customer_mobile_number: formData.customer_mobile_number,
+        alternate_mobile_number: formData.alternate_mobile_number || null,
+        source: formData.source,
+        follow_up_date: formData.follow_up_date || null,
+        ps_name: parsed?.name || parsed?.username || '',
+        ps_id: parsed?.id || null,
+        ps_branch: psBranch,
+        cre_name: null, // Empty for PS leads
+        cre_id: null, // Empty for PS leads
+        lead_category: null,
+        model_interested: formData.model_interested || null,
+        variant: formData.variant || null,
+        trade_in_make: formData.trade_in_make === 'Other' ? (formData.trade_in_make_other || null) : (formData.trade_in_make || null),
+        trade_in_model: formData.trade_in_model === 'Other' ? (formData.trade_in_model_other || null) : (formData.trade_in_model || null),
+        trade_in_year: formData.trade_in_year || null,
+        trade_in_km: formData.trade_in_km || null,
+        lead_status: "Pending", // For fresh leads
+        final_status: "Pending",
+        first_call_date: null, // No first call date for fresh leads
+        first_call_remark: null, // No remarks for fresh leads
+        first_call_lead_status: null
+        // Timestamps will be handled by backend using now_ist_iso()
+      }
 
-      // PS Lead - Sending data
-
-      const response = await fetch('/api/ps/leads', {
+      // Create lead using PS API - this will:
+      // 1. Insert into lead_master
+      // 2. Assign to CRE randomly (based on CRE team leader setup)
+      // 3. Insert into ps_followup_master
+      // 4. Handle trade-in details
+      // 5. CRE will see it in walkin leads section
+      // 6. PS will see it in walkin leads section
+      const leadResponse = await fetch('/api/ps/leads', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -170,9 +188,18 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
         body: JSON.stringify(leadData)
       })
 
-      if (response.ok) {
-        const result = await response.json()
-        // Lead added successfully
+      if (leadResponse.ok) {
+        const leadResult = await leadResponse.json()
+        console.log('✅ [PS Lead] Lead created and assigned to CRE:', leadResult)
+        
+        // Show success message
+        toast.success(`Lead submitted successfully! Lead ID: ${leadResult.lead_uid}`)
+        
+        // Lead added successfully:
+        // - CRE will see it in walkin leads section
+        // - PS will see it in walkin leads section  
+        // - Both can take follow-ups
+        // - When CRE qualifies, it goes to qualified_leads automatically
         
         // Wait for UI refresh to complete before closing form
         onAdd(leadData)
@@ -183,13 +210,13 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
         // Only close form after successful insertion and refresh
         onClose()
       } else {
-        const error = await response.text()
-        console.error('❌ [PS Lead] Failed to add lead:', error)
-        alert("Failed to add lead. Please try again.")
+        const error = await leadResponse.text()
+        console.error('❌ [PS Lead] Failed to create lead:', error)
+        toast.error("Failed to create lead. Please try again.")
       }
     } catch (error) {
       console.error('Error adding lead:', error)
-      alert("Error adding lead. Please try again.")
+      toast.error("Error adding lead. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -253,7 +280,7 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
                 <SelectValue placeholder="Select source" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Walkin">Walkin</SelectItem>
+                <SelectItem value="Walk-in">Walk-in</SelectItem>
                 <SelectItem value="Referral">Referral</SelectItem>
               </SelectContent>
             </Select>
@@ -410,11 +437,11 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="follow_up_date" className="text-sm font-medium">
-              Follow-up Date *
+              Follow-up Date & Time *
             </Label>
             <Input
               id="follow_up_date"
-              type="date"
+              type="datetime-local"
               value={formData.follow_up_date}
               onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
               required
@@ -520,6 +547,39 @@ interface PSFollowUp {
   is_pending?: boolean
 }
 
+const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => {
+  // Tab button rendering with count
+  return (
+  <button
+    data-tab={id}
+    onClick={() => onClick(id)}
+    className={`relative flex flex-col items-center justify-center gap-1 px-2 py-2 md:px-3 md:py-3 rounded-xl font-medium transition-all duration-300 whitespace-nowrap min-w-0 flex-1 ${
+      isActive
+        ? 'bg-white/80 backdrop-blur-md text-orange-700 shadow-lg border border-white/20'
+        : 'text-gray-600 hover:text-gray-800 hover:bg-white/40 hover:backdrop-blur-sm'
+    }`}
+    style={isActive ? {
+      boxShadow: '0 8px 32px rgba(234, 88, 12, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1)',
+      background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%)'
+    } : {}}
+  >
+    <Icon className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
+    <span className="text-xs md:text-sm font-semibold leading-tight text-center break-words max-w-full">
+      {label.split(' ').map((word: string, index: number) => (
+        <span key={index} className="block">
+          {word}
+        </span>
+      ))}
+    </span>
+    <span className={`count-display px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
+      isActive ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
+    }`}>
+      {count}
+    </span>
+  </button>
+)
+}
+
 export default function PSDashboard() {
   // Render count for debugging
   const renderCount = useRef(0)
@@ -581,7 +641,7 @@ export default function PSDashboard() {
   const [tradeInOpen, setTradeInOpen] = useState(false)
   const [tradeInLoading, setTradeInLoading] = useState(false)
   const [tradeInData, setTradeInData] = useState<any | null>(null)
-  const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'booked'|'retailed'|'wonlost'>('fresh')
+  const [activeTab, setActiveTab] = useState<'fresh'|'today'|'pending'|'walkin'|'booked'|'retailed'|'wonlost'>('fresh')
   const [activeSubTab, setActiveSubTab] = useState<'requested'|'approved'|'rejected'>('requested')
   const [notifications, setNotifications] = useState<Array<{id: string, type: 'approved'|'rejected'|'walkin', leadUid: string, requestType?: 'booking'|'retailed', timestamp: Date, message?: string}>>([])
   const [bookingId, setBookingId] = useState('')
@@ -607,6 +667,26 @@ export default function PSDashboard() {
   const [pendingSearch, setPendingSearch] = useState('')
   const [walkinSearch, setWalkinSearch] = useState('')
   const [pendingStatusFilter, setPendingStatusFilter] = useState<'all'|'pending'|'booked'>('all')
+
+  // View toggle state - default to card on mobile, table on desktop
+  const [viewMode, setViewMode] = useState<'table'|'card'>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 ? 'card' : 'table'
+    }
+    return 'table'
+  })
+
+  // Responsive view mode - switch to card view on mobile
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768 && viewMode === 'table') {
+        setViewMode('card')
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [viewMode])
 
   // Reset filters when switching tabs
   const handleTabChange = (tab: 'fresh'|'today'|'pending'|'walkin'|'booked'|'retailed'|'wonlost') => {
@@ -1271,7 +1351,7 @@ export default function PSDashboard() {
             case 'hot':
               return <Badge className="bg-gradient-to-r from-red-100 to-red-200 text-red-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />🔥 Hot</Badge>
             case 'warm':
-              return <Badge className="bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />🔥 Warm</Badge>
+              return <Badge className="bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />☀️ Warm</Badge>
             case 'cold':
               return <Badge className="bg-gradient-to-r from-blue-100 to-blue-200 text-blue-700 border-0 font-medium px-3 py-1"><Clock className="w-3 h-3 mr-1" />❄️ Cold</Badge>
           }
@@ -1759,41 +1839,11 @@ export default function PSDashboard() {
     </Card>
   )
 
-  const TabButton = ({ id, label, count, icon: Icon, isActive, onClick }: any) => {
-    // Tab button rendering with count
-    return (
-    <button
-      data-tab={id}
-      onClick={() => onClick(id)}
-      className={`relative flex flex-col items-center justify-center gap-1 px-2 py-2 md:px-3 md:py-3 rounded-xl font-medium transition-all duration-300 whitespace-nowrap min-w-0 flex-1 ${
-        isActive
-          ? 'bg-white/80 backdrop-blur-md text-orange-700 shadow-lg border border-white/20'
-          : 'text-gray-600 hover:text-gray-800 hover:bg-white/40 hover:backdrop-blur-sm'
-      }`}
-      style={isActive ? {
-        boxShadow: '0 8px 32px rgba(234, 88, 12, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1)',
-        background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%)'
-      } : {}}
-    >
-      <Icon className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
-      <span className="text-xs md:text-sm font-semibold leading-tight text-center break-words max-w-full">
-        {label.split(' ').map((word: string, index: number) => (
-          <span key={index} className="block">
-            {word}
-          </span>
-        ))}
-      </span>
-      <span className={`count-display px-1.5 py-0.5 rounded-full text-xs font-bold min-w-[20px] text-center ${
-        isActive ? 'bg-orange-100 text-orange-700' : 'bg-gray-200 text-gray-600'
-      }`}>
-        {count}
-      </span>
-    </button>
-    )
-  }
-
+  // Main component return statement
   return (
-    <DashboardLayout>
+    <>
+      <Toaster position="top-right" richColors />
+      <DashboardLayout>
       {/* Modern Background */}
       <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100/20 relative overflow-hidden">
         {/* Decorative Elements */}
@@ -1854,55 +1904,56 @@ export default function PSDashboard() {
             )}
             
             {/* Modern Header */}
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl rounded-2xl overflow-hidden mb-6">
-              <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-8 py-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                      <Zap className="w-6 h-6 text-white" />
+            <Card className="bg-gradient-to-r from-orange-500 to-orange-600 border-0 shadow-xl rounded-2xl overflow-hidden mb-4 md:mb-6">
+              <div className="px-3 md:px-6 py-3 md:py-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
+                  <div className="flex items-center space-x-2 md:space-x-3">
+                    <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-lg md:rounded-xl flex items-center justify-center backdrop-blur-sm flex-shrink-0">
+                      <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
                     </div>
-                    <div>
-                      <h1 className="text-3xl font-bold text-white tracking-tight">
+                    <div className="min-w-0">
+                      <h1 className="text-lg md:text-2xl font-bold text-white tracking-tight">
                         GEM Dashboard
                       </h1>
-                      <p className="text-orange-100 mt-1 font-medium">
+                      <p className="text-orange-100 text-xs md:text-sm font-medium">
                         Manage your assigned leads and follow-ups
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3">
                     {lastRefreshTime && (
-                      <div className="text-xs text-orange-100 text-right">
+                      <div className="text-xs text-orange-100 text-left md:text-right">
                         Last updated: {lastRefreshTime}
                       </div>
                     )}
-                    <div className="flex gap-3">
-             <Button
-               onClick={() => setAddLeadModalOpen(true)}
-               className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white border-0 shadow-lg font-medium px-6 py-2 rounded-xl transition-all duration-300"
-             >
-               <User className="w-4 h-4 mr-2" />
-               Add Lead
-             </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => setAddLeadModalOpen(true)}
+                        className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white border-0 shadow-lg font-medium px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl transition-all duration-300 text-xs md:text-sm"
+                      >
+                        <User className="w-3 h-3 md:w-4 md:h-4 mr-1" />
+                        <span className="text-xs md:text-sm">Add Lead</span>
+                      </Button>
                       <Button
                         onClick={() => {
                           loadFollowUps(true)
                         }}
                         disabled={isLoading || isRefreshing}
-                        className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-6 py-2 rounded-xl transition-all duration-300"
-                    >
-                      {(isLoading || isRefreshing) ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          {isRefreshing ? 'Syncing...' : 'Loading...'}
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Refresh Data
-                        </>
-                      )}
-                    </Button>
+                        className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm font-medium px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl transition-all duration-300 text-xs md:text-sm"
+                        title="Refresh Data"
+                      >
+                        {(isLoading || isRefreshing) ? (
+                          <>
+                            <Loader2 className="w-3 h-3 md:w-4 md:h-4 mr-1 animate-spin" />
+                            <span className="text-xs md:text-sm">{isRefreshing ? 'Syncing...' : 'Loading...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3 h-3 md:w-4 md:h-4 mr-1" />
+                            <span className="text-xs md:text-sm">Refresh Data</span>
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -2023,76 +2074,106 @@ export default function PSDashboard() {
                 boxShadow: '0 8px 32px rgba(234, 88, 12, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
               }}>
                 <div className="absolute inset-0 bg-gradient-to-r from-white/10 via-white/5 to-white/10 backdrop-blur-lg"></div>
-                <div className="relative">
-                  <h2 className="text-base md:text-lg font-semibold flex items-center gap-2">
-                    <Star className="w-4 h-4 text-white/90" />
-                    <span className="text-sm md:text-base text-white/95">
-                      {activeTab === 'fresh' && 'Fresh Leads'}
-                      {activeTab === 'today' && 'Today\'s Follow-ups'}
-                      {activeTab === 'pending' && 'Pending Leads'}
-                      {activeTab === 'walkin' && 'Walk-in Leads'}
-                      {activeTab === 'booked' && 'Booked Approval'}
-                      {activeTab === 'retailed' && 'Retailed Approval'}
-                      {activeTab === 'wonlost' && 'Won/Lost Leads'}
-                    </span>
-                  </h2>
-                  <p className="text-white/80 text-xs md:text-sm mt-1 leading-relaxed">
-                    {activeTab === 'fresh' && 'Leads newly assigned to you'}
-                    {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
-                    {activeTab === 'pending' && 'Leads with final status Pending'}
-                    {activeTab === 'walkin' && 'Walk-in and digital leads captured by receptionists'}
-                    {activeTab === 'booked' && 'Booked leads approval status'}
-                    {activeTab === 'retailed' && 'Retailed leads approval status'}
-                    {activeTab === 'wonlost' && 'Leads that are won or lost'}
-                  </p>
-                </div>
-                
-                {/* Subsection tabs for booked and retailed */}
-                {(activeTab === 'booked' || activeTab === 'retailed') && (
-                  <div className="flex flex-wrap gap-2 mt-4">
-                    <button
-                      onClick={() => setActiveSubTab('requested')}
-                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                        activeSubTab === 'requested'
-                          ? 'bg-white/25 text-white shadow-lg border-white/40'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      <span className="hidden md:inline">Requested</span>
-                      <span className="md:hidden">Req</span>
-                      <span className="ml-1">({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})</span>
-            </button>
-                    <button
-                      onClick={() => setActiveSubTab('approved')}
-                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                        activeSubTab === 'approved'
-                          ? 'bg-green-500/30 text-white shadow-lg border-green-400/40'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      <span className="hidden md:inline">Approved</span>
-                      <span className="md:hidden">App</span>
-                      <span className="ml-1">({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})</span>
-            </button>
-                    <button
-                      onClick={() => setActiveSubTab('rejected')}
-                      className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
-                        activeSubTab === 'rejected'
-                          ? 'bg-red-500/30 text-white shadow-lg border-red-400/40'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      <span className="hidden md:inline">Rejected</span>
-                      <span className="md:hidden">Rej</span>
-                      <span className="ml-1">({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})</span>
-            </button>
+                <div className="relative flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Star className="w-4 h-4 text-white/90 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <h2 className="text-base md:text-lg font-semibold text-white/95 flex items-center gap-2">
+                        <span className="text-sm md:text-base text-white/95">
+                          {activeTab === 'fresh' && 'Fresh Leads'}
+                          {activeTab === 'today' && 'Today\'s Follow-ups'}
+                          {activeTab === 'pending' && 'Pending Leads'}
+                          {activeTab === 'booked' && 'Booking requests'}
+                          {activeTab === 'retailed' && 'Retail requests'}
+                          {activeTab === 'wonlost' && 'Won or lost'}
+                        </span>
+                      </h2>
+                      <p className="text-white/80 text-xs md:text-sm mt-1 leading-relaxed">
+                        {activeTab === 'fresh' && 'Leads newly assigned to you'}
+                        {activeTab === 'today' && 'Leads with follow-up scheduled for today (including overdue)'}
+                        {activeTab === 'pending' && 'Leads with final status Pending'}
+                        {activeTab === 'booked' && 'Booked leads approval status'}
+                        {activeTab === 'retailed' && 'Retailed leads approval status'}
+                        {activeTab === 'wonlost' && 'Leads that are won or lost'}
+                      </p>
+                    </div>
                   </div>
-                )}
-          </div>
+
+                  {/* Subsection pill tabs for booked and retailed */}
+                  {(activeTab === 'booked' || activeTab === 'retailed') && (
+                    <div className="flex flex-wrap gap-1.5 md:gap-2">
+                      <button
+                        onClick={() => setActiveSubTab('requested')}
+                        className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                          activeSubTab === 'requested'
+                            ? 'bg-white/25 text-white shadow-lg border-white/40'
+                            : 'bg-white/10 text-white/80 hover:bg-white/20'
+                        }`}
+                      >
+                        <span className="hidden md:inline">Requested</span>
+                        <span className="md:hidden">Req</span>
+                        <span className="ml-1">({activeTab === 'booked' ? bookedRequestedList.length : retailedRequestedList.length})</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveSubTab('approved')}
+                        className={`px-3 py-2 rounded-xl text-xs md:text-sm font-medium transition-all duration-300 backdrop-blur-sm border border-white/30 ${
+                          activeSubTab === 'approved'
+                            ? 'bg-green-500/30 text-white shadow-lg border-green-400/40'
+                            : 'bg-white/10 text-white/80 hover:bg-white/20'
+                        }`}
+                      >
+                        <span className="hidden sm:inline">Approved</span>
+                        <span className="sm:hidden">App</span>
+                        <span className="ml-1">({activeTab === 'booked' ? bookedApprovedList.length : retailedApprovedList.length})</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveSubTab('rejected')}
+                        className={`px-2.5 md:px-3 py-1 md:py-1.5 rounded-full text-[11px] md:text-xs font-medium transition-all duration-200 whitespace-nowrap ${
+                          activeSubTab === 'rejected'
+                            ? 'bg-red-500 text-white shadow-md'
+                            : 'bg-white/10 text-white/80 hover:bg-white/20 border border-white/20'
+                        }`}
+                      >
+                        <span className="hidden sm:inline">Rejected</span>
+                        <span className="sm:hidden">Rej</span>
+                        <span className="ml-1">({activeTab === 'booked' ? bookedRejectedList.length : retailedRejectedList.length})</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
 
           {/* Filters Section */}
           <div className="bg-gray-50/80 backdrop-blur-sm p-3 md:p-4 border-b border-gray-200/50">
             <div className="flex flex-wrap gap-2 md:gap-4 items-center text-xs md:text-sm">
+              {/* View Toggle */}
+              <div className="flex items-center gap-1 border border-gray-300 rounded-lg p-0.5 bg-white">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium transition-all ${
+                    viewMode === 'table'
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  aria-label="Table View"
+                >
+                  <TableIcon className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                  <span className="hidden md:inline">Table</span>
+                </button>
+                <button
+                  onClick={() => setViewMode('card')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium transition-all ${
+                    viewMode === 'card'
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  aria-label="Card View"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                  <span className="hidden md:inline">Card</span>
+                </button>
+              </div>
+
               {/* Date Range Filters for Today, Won/Lost sections */}
               {(activeTab === 'wonlost') && (
                 <>
@@ -2267,17 +2348,20 @@ export default function PSDashboard() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-gray-50/80 border-b border-gray-200">
-                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Lead Info</th>
-                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm hidden md:table-cell">Vehicle Details</th>
-                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Status</th>
-                      {activeTab !== 'fresh' && (
-                        <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Next Call</th>
-                      )}
-                      <th className="text-left p-2 md:p-4 font-semibold text-gray-700 text-xs md:text-sm">Actions</th>
+          {/* Table View */}
+          {viewMode === 'table' && (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600">
+                    <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm">Lead Info</th>
+                    <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm hidden md:table-cell">Vehicle Details</th>
+                    <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm">Status</th>
+                    <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm hidden md:table-cell">ICROP ID</th>
+                    {activeTab !== 'fresh' && (
+                      <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm">Next Call</th>
+                    )}
+                    <th className="text-left p-2 md:p-4 font-semibold text-white text-xs md:text-sm">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2353,20 +2437,21 @@ export default function PSDashboard() {
                                 )}
                         </div>
                             ) : (
-                              <>
-                                {getStatusBadge(item.final_status, item)}
-                                {item.icrop_id && (
-                                  <Badge className="bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 border-0 font-medium px-3 py-1">
-                                    {item.icrop_id}
-                        </Badge>
-                                )}
-                              </>
+                              getStatusBadge(item.final_status, item)
                             )}
                         </div>
                         </td>
-                        <td className="p-4">
-                          <div className="space-y-1">
-                            {isQualifiedLead ? (
+                        <td className="p-2 md:p-4 hidden md:table-cell">
+                          {!isQualifiedLead && item.icrop_id && (
+                            <Badge className="bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 border-0 font-medium px-3 py-1">
+                              {item.icrop_id}
+                            </Badge>
+                          )}
+                        </td>
+                        {activeTab !== 'fresh' && (
+                          <td className="p-4">
+                            <div className="space-y-1">
+                              {isQualifiedLead ? (
                               <div className="text-sm text-gray-500">
                                 {item.booking_requested_at && (
                                   <div>Booking: {formatDate(item.booking_requested_at)}</div>
@@ -2389,8 +2474,9 @@ export default function PSDashboard() {
                                 })()}
                               </>
                             )}
-                        </div>
-                        </td>
+                            </div>
+                          </td>
+                        )}
                         <td className="p-2 md:p-4">
                           <div className="flex flex-col gap-2">
                             {/* Always show Update button */}
@@ -2436,24 +2522,165 @@ export default function PSDashboard() {
                       )
                     })}
                   </tbody>
-                </table>
-                {filteredFollowUps.length === 0 && (
-                  <div className="text-center py-12">
-                    <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Star className="w-6 h-6 text-orange-400" />
-                    </div>
-                    <p className="text-gray-500 text-lg font-medium">No leads found</p>
-                    <p className="text-gray-400 text-sm mt-1">Try adjusting your filters or refresh the data</p>
+              </table>
+              {filteredFollowUps.length === 0 && (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Star className="w-6 h-6 text-orange-400" />
                   </div>
-                )}
-              </div>
+                  <p className="text-gray-500 text-lg font-medium">No leads found</p>
+                  <p className="text-gray-400 text-sm mt-1">Try adjusting your filters or refresh the data</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Card View */}
+          {viewMode === 'card' && (
+            <div className="transition-all duration-300 ease-in-out">
+              {filteredFollowUps.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Star className="w-6 h-6 text-orange-400" />
+                  </div>
+                  <p className="text-gray-500 text-lg font-medium">No leads found</p>
+                  <p className="text-gray-400 text-sm mt-1">Try adjusting your filters or refresh the data</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+                  {filteredFollowUps.map((item: any) => {
+                    const isQualifiedLead = item.booking_id || item.retailed_id
+                    const customerName = item.customer_name
+                    const customerMobile = item.customer_mobile_number
+                    const leadUid = item.lead_uid
+                    const assignedDate = isQualifiedLead ? item.created_at : item.ps_assigned_at
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => !isQualifiedLead && openUpdateDialog(item)}
+                        role={!isQualifiedLead ? "button" : undefined}
+                        tabIndex={!isQualifiedLead ? 0 : undefined}
+                        aria-label={!isQualifiedLead ? `Update lead for ${customerName}` : undefined}
+                        onKeyDown={(e) => {
+                          if (!isQualifiedLead && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault()
+                            openUpdateDialog(item)
+                          }
+                        }}
+                        className={`relative bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 border border-gray-200 ${
+                          !isQualifiedLead ? 'cursor-pointer hover:scale-[1.02] focus:ring-2 focus:ring-orange-500 focus:outline-none' : ''
+                        }`}
+                      >
+                        {/* Status Badge - Top Right */}
+                        <div className="absolute top-3 right-3 z-10">
+                          {isQualifiedLead ? (
+                            <div className="space-y-1">
+                              {item.booking_status && (
+                                <Badge className={`${item.booking_status === 'Approved' ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700' : item.booking_status === 'Rejected' ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-700' : 'bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700'} border-0 font-medium px-2 py-1 text-xs`}>
+                                  {item.booking_status === 'Approved' ? '✓ Booked' : item.booking_status === 'Rejected' ? '✗ Rejected' : '⏳ Pending'}
+                                </Badge>
+                              )}
+                              {item.retailed_status && (
+                                <Badge className={`${item.retailed_status === 'Approved' ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700' : item.retailed_status === 'Rejected' ? 'bg-gradient-to-r from-red-100 to-red-200 text-red-700' : 'bg-gradient-to-r from-orange-100 to-yellow-100 text-orange-700'} border-0 font-medium px-2 py-1 text-xs`}>
+                                  {item.retailed_status === 'Approved' ? '✓ Retailed' : item.retailed_status === 'Rejected' ? '✗ Rejected' : '⏳ Pending'}
+                                </Badge>
+                              )}
+                            </div>
+                          ) : (
+                            getStatusBadge(item.final_status, item)
+                          )}
+                        </div>
+
+                        {/* Card Content */}
+                        <div className="p-4 space-y-4">
+                          {/* Customer Info */}
+                          <div className="space-y-2 pr-24">
+                            <h3 className="font-bold text-gray-900 text-lg leading-tight">{customerName}</h3>
+                            <div className="flex items-center gap-2 text-gray-600 text-sm">
+                              <Phone className="w-4 h-4 flex-shrink-0" />
+                              <span>{customerMobile}</span>
+                            </div>
+                            {activeTab !== 'fresh' && leadUid && (
+                              <div className="text-xs text-gray-500 font-mono">{leadUid}</div>
+                            )}
+                            {isQualifiedLead && item.booking_id && (
+                              <div className="text-xs text-blue-600 font-medium">Booking ID: {item.booking_id}</div>
+                            )}
+                            {isQualifiedLead && item.retailed_id && (
+                              <div className="text-xs text-green-600 font-medium">Retail ID: {item.retailed_id}</div>
+                            )}
+                          </div>
+
+                          {/* Vehicle Details Block */}
+                          <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 border border-gray-100">
+                            <div className="flex items-start gap-2">
+                              <Car className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-900 text-sm truncate">
+                                  {item.model_interested || 'Model not specified'}
+                                </div>
+                                <div className="text-xs text-gray-600 truncate">{item.variant || 'Variant not specified'}</div>
+                              </div>
+                            </div>
+                            {(item.buying_plan || item.finance_option) && (
+                              <div className="text-xs text-gray-500 space-y-0.5 pt-1 border-t border-gray-200">
+                                {item.buying_plan && <div>Plan: {item.buying_plan}</div>}
+                                {item.finance_option && <div>Finance: {item.finance_option}</div>}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Next Call Row */}
+                          {activeTab !== 'fresh' && !isQualifiedLead && (
+                            <div className="flex items-center justify-between py-2 px-3 bg-blue-50 rounded-lg border border-blue-100">
+                              <div className="flex items-center gap-2">
+                                <Clock className="w-4 h-4 text-blue-600" />
+                                <div>
+                                  <div className="text-xs font-semibold text-blue-900">Call #{getNextCallNumber(item)}</div>
+                                  <div className="text-xs text-blue-700">{formatDate(item.follow_up_date)}</div>
+                                </div>
+                              </div>
+                              {activeTab === 'today' && (() => {
+                                const overdueDays = getOverdueDays(item.follow_up_date)
+                                return overdueDays > 0 && (
+                                  <Badge className="bg-gradient-to-r from-red-500 to-red-600 text-white border-0 font-medium text-xs px-2 py-1">
+                                    {overdueDays}d overdue
+                                  </Badge>
+                                )
+                              })()}
+                            </div>
+                          )}
+
+                          {/* ICROP ID Badge - if present */}
+                          {!isQualifiedLead && item.icrop_id && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500 font-medium">ICROP:</span>
+                              <Badge className="bg-gradient-to-r from-purple-100 to-purple-200 text-purple-700 border-0 font-medium px-3 py-1 text-xs">
+                                {item.icrop_id}
+                              </Badge>
+                            </div>
+                          )}
+
+                          {/* Lost Requested Status */}
+                          {!isQualifiedLead && item.final_status === 'Lost Requested' && (
+                            <div className="text-xs text-orange-600 font-medium bg-orange-50 px-3 py-2 rounded-lg text-center border border-orange-200">
+                              Awaiting CRE Approval
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           </Card>
 
           {/* Update Modal */}
           <Dialog open={updateDialog} onOpenChange={setUpdateDialog}>
               <DialogContent className="max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border-0">
-                <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-1 rounded-t-2xl -mt-[1px]"></div>
-
                 <DialogHeader className="pb-4 pt-6 px-6">
                   <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
                     <Edit3 className="w-6 h-6 mr-3 text-orange-500" />
@@ -2880,8 +3107,6 @@ export default function PSDashboard() {
             {/* Add Lead Modal */}
             <Dialog open={addLeadModalOpen} onOpenChange={setAddLeadModalOpen}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border-0">
-                <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-1 rounded-t-2xl -mt-[1px]"></div>
-
                 <DialogHeader className="pb-4 pt-6 px-6">
                   <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center">
                     <User className="w-6 h-6 mr-3 text-orange-500" />
@@ -2921,6 +3146,6 @@ export default function PSDashboard() {
         </div>
       </div>
     </DashboardLayout>
+    </>
   )
 }
-

@@ -432,14 +432,14 @@ export default function CREDashboard() {
         
         // Check for new walk-in leads and show notifications
         if (before && after) {
-          const newWalkinLeads = mapped.filter(lead => 
-            ['Walk-in', 'Digital'].includes(lead.source) && 
+          const newWalkinLeads = mapped.filter((lead: any) => 
+            ['Walk-in', 'Digital', 'Referral'].includes(lead.source) && 
             lead.cre_name && 
             lead.cre_name.toLowerCase() === (user?.first_name || user?.name || user?.username || '').toLowerCase()
           )
           
           if (newWalkinLeads.length > 0) {
-            newWalkinLeads.forEach(lead => {
+            newWalkinLeads.forEach((lead: any) => {
               const notification = {
                 id: `walkin-${lead.uid}-${Date.now()}`,
                 type: 'walkin' as const,
@@ -718,9 +718,9 @@ export default function CREDashboard() {
         }))
         break
       case "walkin":
-        // Filter to only show walk-in and digital leads
+        // Filter to only show walk-in, digital, and referral leads
         filteredLeads = leads.filter(lead =>
-          ['Walk-in', 'Digital'].includes(lead.source)
+          ['Walk-in', 'Digital', 'Referral'].includes(lead.source)
         )
         break
       default:
@@ -811,7 +811,7 @@ export default function CREDashboard() {
       lost: leads.filter(lead => lead.lead_status === 'Lost').length,
       lostRequested: leads.filter(lead => (lead.final_status || '').toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
-      walkin: leads.filter(lead => ['Walk-in', 'Digital'].includes(lead.source)).length
+      walkin: leads.filter(lead => ['Walk-in', 'Digital', 'Referral'].includes(lead.source)).length
     }
   }
 

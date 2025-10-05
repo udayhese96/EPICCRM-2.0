@@ -20,6 +20,17 @@ const plusJakarta = Plus_Jakarta_Sans({
   variable: '--font-plus-jakarta'
 })
 
+function DisableConsoleInProd() {
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+    // Silence noisy browser logs in production
+    console.log = () => {}
+    console.info = () => {}
+    console.debug = () => {}
+    console.warn = () => {}
+  }
+  return null
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -32,6 +43,8 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`} style={{ fontFamily: 'var(--font-sans)' }}>
+        {/* Disable console noise in production */}
+        <DisableConsoleInProd />
         {children}
         {/* <Analytics /> */}
       </body>
