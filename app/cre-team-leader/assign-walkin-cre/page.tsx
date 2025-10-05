@@ -12,7 +12,9 @@ import {
   Building2,
   Save,
   RefreshCw,
-  Loader2
+  Loader2,
+  Plus,
+  X
 } from 'lucide-react'
 
 interface CREUser {
@@ -233,8 +235,11 @@ export default function AssignWalkinCREPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50">
+          <div className="flex flex-col items-center space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-200 border-t-orange-500"></div>
+            <p className="text-gray-600 font-medium">Loading...</p>
+          </div>
         </div>
       </DashboardLayout>
     )
@@ -242,14 +247,17 @@ export default function AssignWalkinCREPage() {
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen bg-gray-50 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50 p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">
+            <div className="inline-block p-3 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl mb-4 shadow-lg">
+              <Building2 className="h-8 w-8 text-white" />
+            </div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-600 to-orange-500 bg-clip-text text-transparent">
               Walk-in CRE Assignment
             </h1>
-            <p className="text-gray-600 mt-2">
+            <p className="text-gray-600 mt-3 text-lg">
               Assign CREs to branches for walk-in follow-up responsibilities
             </p>
           </div>
@@ -257,26 +265,36 @@ export default function AssignWalkinCREPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Available CREs */}
             <div className="lg:col-span-1">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <User className="h-5 w-5 mr-2" />
+              <Card className="border-0 shadow-xl rounded-3xl bg-white/80 backdrop-blur-sm">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center text-gray-800">
+                    <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl mr-3">
+                      <User className="h-5 w-5 text-white" />
+                    </div>
                     Available CREs
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   {creUsers.length === 0 ? (
-                    <p className="text-gray-500 text-center py-4">No active CREs found</p>
+                    <div className="text-center py-12">
+                      <div className="inline-block p-4 bg-gray-100 rounded-2xl mb-3">
+                        <User className="h-8 w-8 text-gray-400" />
+                      </div>
+                      <p className="text-gray-500">No active CREs found</p>
+                    </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                       {creUsers.map((cre) => (
-                        <div key={cre.id} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg">
-                          <div className={`w-3 h-3 rounded-full ${cre.is_active ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                          <div className="flex-1">
-                            <p className="font-medium text-sm">{cre.full_name}</p>
-                            <p className="text-xs text-gray-500">{cre.username}</p>
+                        <div 
+                          key={cre.id} 
+                          className="group flex items-center space-x-3 p-4 border-0 bg-gradient-to-br from-gray-50 to-white rounded-2xl hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
+                        >
+                          <div className={`w-3 h-3 rounded-full shadow-lg ${cre.is_active ? 'bg-gradient-to-br from-green-400 to-green-500' : 'bg-gradient-to-br from-red-400 to-red-500'}`}></div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-gray-800 truncate">{cre.full_name}</p>
+                            <p className="text-xs text-gray-500 truncate">{cre.username}</p>
                             {cre.branch && (
-                              <Badge variant="secondary" className="text-xs mt-1">
+                              <Badge className="text-xs mt-2 rounded-full bg-gradient-to-r from-orange-100 to-orange-50 text-orange-700 border-0">
                                 {cre.branch}
                               </Badge>
                             )}
@@ -291,10 +309,12 @@ export default function AssignWalkinCREPage() {
 
             {/* Branch Assignments */}
             <div className="lg:col-span-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Building2 className="h-5 w-5 mr-2" />
+              <Card className="border-0 shadow-xl rounded-3xl bg-white/80 backdrop-blur-sm">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center text-gray-800">
+                    <div className="p-2 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl mr-3">
+                      <Building2 className="h-5 w-5 text-white" />
+                    </div>
                     Branch Assignments
                   </CardTitle>
                 </CardHeader>
@@ -305,23 +325,29 @@ export default function AssignWalkinCREPage() {
                       console.log(`[DEBUG] Branch ${branch} assigned CREs:`, assignedCREs)
 
                       return (
-                        <div key={branch} className="border border-gray-200 rounded-lg p-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="font-medium text-gray-900">{branch}</h3>
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                              {assignedCREs.length} CRE{assignedCREs.length !== 1 ? 's' : ''} assigned
+                        <div key={branch} className="border-0 bg-gradient-to-br from-gray-50 to-white rounded-3xl p-6 shadow-md hover:shadow-xl transition-shadow duration-300">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center space-x-3">
+                              <div className="p-2 bg-gradient-to-br from-orange-400 to-orange-500 rounded-xl">
+                                <Building2 className="h-5 w-5 text-white" />
+                              </div>
+                              <h3 className="font-bold text-lg text-gray-900">{branch}</h3>
+                            </div>
+                            <Badge className="rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 px-4 py-1 shadow-md">
+                              {assignedCREs.length} CRE{assignedCREs.length !== 1 ? 's' : ''}
                             </Badge>
                           </div>
 
                           <div className="space-y-4">
                             {/* Add New CRE */}
                             <div>
-                              <label className="text-sm font-medium text-gray-700 mb-2 block">
+                              <label className="text-sm font-semibold text-gray-700 mb-3 block flex items-center">
+                                <Plus className="h-4 w-4 mr-2 text-orange-500" />
                                 Add CRE to {branch}
                               </label>
                               <div className="flex space-x-2">
                                 <select
-                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="flex-1 px-4 py-3 border-0 bg-white rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-500 shadow-sm text-gray-700 font-medium transition-all duration-200 hover:shadow-md"
                                   value=""
                                   onChange={(e) => {
                                     if (e.target.value) {
@@ -344,31 +370,40 @@ export default function AssignWalkinCREPage() {
 
                             {/* Current Assignments */}
                             {assignedCREs.length > 0 && (
-                              <div className="space-y-2">
-                                <h4 className="text-sm font-medium text-gray-700">Currently Assigned CREs:</h4>
+                              <div className="space-y-3">
+                                <h4 className="text-sm font-semibold text-gray-700 flex items-center">
+                                  <UserCheck className="h-4 w-4 mr-2 text-green-500" />
+                                  Currently Assigned CREs:
+                                </h4>
                                 {assignedCREs.map((assignedCRE) => {
                                   const cre = creUsers.find(c => c.id === assignedCRE.cre_id)
                                   console.log('[DEBUG] Assigned CRE:', assignedCRE)
                                   console.log('[DEBUG] Found CRE in creUsers:', cre)
                                   console.log('[DEBUG] All creUsers:', creUsers)
                                   return (
-                                    <div key={assignedCRE.cre_id} className="p-3 bg-green-50 border border-green-200 rounded-md">
+                                    <div key={assignedCRE.cre_id} className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 border-0 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200">
                                       <div className="flex items-center justify-between">
-                                        <div>
-                                          <p className="font-medium text-green-900">
-                                            {assignedCRE.cre_name || 'Unknown CRE'}
-                                          </p>
-                                          <p className="text-sm text-green-700">
-                                            Assigned on: {new Date(assignedCRE.assigned_at).toLocaleDateString()}
-                                          </p>
+                                        <div className="flex items-center space-x-3 flex-1">
+                                          <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl">
+                                            <UserCheck className="h-4 w-4 text-white" />
+                                          </div>
+                                          <div>
+                                            <p className="font-semibold text-green-900">
+                                              {assignedCRE.cre_name || 'Unknown CRE'}
+                                            </p>
+                                            <p className="text-sm text-green-700">
+                                              Assigned: {new Date(assignedCRE.assigned_at).toLocaleDateString()}
+                                            </p>
+                                          </div>
                                         </div>
                                         <Button
                                           size="sm"
                                           variant="outline"
                                           onClick={() => handleRemoveCREFromBranch(branch, assignedCRE.cre_id)}
                                           disabled={saving}
-                                          className="text-red-600 border-red-300 hover:bg-red-50"
+                                          className="border-0 bg-white text-red-600 hover:bg-red-50 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 px-4"
                                         >
+                                          <X className="h-4 w-4 mr-1" />
                                           Remove
                                         </Button>
                                       </div>
@@ -379,8 +414,11 @@ export default function AssignWalkinCREPage() {
                             )}
 
                             {assignedCREs.length === 0 && (
-                              <div className="p-3 bg-gray-50 border border-gray-200 rounded-md text-center">
-                                <p className="text-gray-500 text-sm">No CREs assigned to this branch</p>
+                              <div className="p-6 bg-gradient-to-br from-gray-100 to-gray-50 border-0 rounded-2xl text-center">
+                                <div className="inline-block p-3 bg-white rounded-2xl mb-3">
+                                  <User className="h-6 w-6 text-gray-400" />
+                                </div>
+                                <p className="text-gray-500 text-sm font-medium">No CREs assigned to this branch</p>
                               </div>
                             )}
                           </div>
@@ -390,7 +428,7 @@ export default function AssignWalkinCREPage() {
                   </div>
 
                   {/* Refresh Button */}
-                  <div className="mt-6 flex justify-center">
+                  <div className="mt-8 flex justify-center">
                     <Button
                       variant="outline"
                       onClick={() => {
@@ -398,8 +436,9 @@ export default function AssignWalkinCREPage() {
                         loadAssignments()
                       }}
                       disabled={loading}
+                      className="border-0 bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 px-8 py-6 text-base font-semibold"
                     >
-                      <RefreshCw className="w-4 h-4 mr-2" />
+                      <RefreshCw className="w-5 h-5 mr-2" />
                       Refresh Data
                     </Button>
                   </div>
@@ -409,6 +448,23 @@ export default function AssignWalkinCREPage() {
           </div>
         </div>
       </div>
+
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: linear-gradient(to bottom, #fb923c, #f97316);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(to bottom, #f97316, #ea580c);
+        }
+      `}</style>
     </DashboardLayout>
   )
 }

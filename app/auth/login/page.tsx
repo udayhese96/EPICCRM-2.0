@@ -5,19 +5,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Lock, User, Zap } from "lucide-react"
 
 export default function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
@@ -187,20 +186,6 @@ export default function LoginPage() {
                 )}
               </Button>
 
-              <div className="flex items-center justify-center space-x-6 text-sm">
-                <Link 
-                  href="/auth/register" 
-                  className="text-blue-600 hover:text-blue-500 transition-colors hover:underline"
-                >
-                  Don't have an account?
-                </Link>
-                <Link 
-                  href="/auth/forgot-password" 
-                  className="text-blue-600 hover:text-blue-500 transition-colors hover:underline"
-                >
-                  Forgot password?
-                </Link>
-              </div>
             </div>
           </CardContent>
         </Card>

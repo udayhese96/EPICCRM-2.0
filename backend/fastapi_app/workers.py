@@ -50,11 +50,14 @@ class LeadBatchProcessor:
     def process_lead_batch(self, task_id: str):
         """Main worker function - processes a batch of lead updates"""
         try:
+            logger.info(f"Processing task {task_id}")
             # Get task from database
             task = self.queue_manager.get_task_by_id(task_id)
             if not task:
                 logger.error(f"Task {task_id} not found")
                 return
+            
+            logger.info(f"Task {task_id} found with {len(task.payload)} leads")
             
             # Update status to processing
             self.queue_manager.update_task_status(task_id, TaskStatus.PROCESSING)
@@ -280,7 +283,8 @@ class LeadBatchProcessor:
             self.upsert_ps_followup(cur, lead)
         
         # Update trade_in_master if trade-in details provided
-        if lead.trade_in == "Yes" and any([lead.trade_in_make, lead.trade_in_model, lead.trade_in_year]):
+        if any([lead.trade_in_make, lead.trade_in_model, lead.trade_in_year, lead.trade_in_km]):
+            logger.info(f"Processing trade-in data for lead {lead.uid}: make={lead.trade_in_make}, model={lead.trade_in_model}, year={lead.trade_in_year}")
             self.upsert_trade_in(cur, lead)
     
     def upsert_qualified_lead(self, cur, lead: LeadUpdatePayload):

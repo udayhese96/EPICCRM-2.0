@@ -21,7 +21,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast, Toaster } from 'sonner'
 
 interface LeadCaptureFormData {
   customer_name: string
@@ -171,7 +171,7 @@ export default function ReceptionistDashboard() {
           // Extract branch from username (e.g., "reception_cuddalore" -> "Cuddalore")
           const username = userData.username
           if (username.startsWith('reception_')) {
-            const branchName = username.replace('reception_', '').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
+            const branchName = username.replace('reception_', '').replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
             userData.branch = branchName
           }
         }
@@ -213,16 +213,7 @@ export default function ReceptionistDashboard() {
       }
 
       // Load recent captures
-      const recentResponse = await fetch('/api/receptionist/recent-captures?limit=10', {
-        headers: { 'Authorization': `Bearer ${user.access_token}` }
-      })
-      if (recentResponse.ok) {
-        const recentData = await recentResponse.json()
-        console.log('Recent captures loaded:', recentData.length)
-        setRecentCaptures(recentData)
-      } else {
-        console.error('Failed to load recent captures:', recentResponse.status, recentResponse.statusText)
-      }
+      await loadRecentCaptures()
 
       // Load PS users for branch
       const psResponse = await fetch('/api/receptionist/ps-users', {
@@ -241,6 +232,50 @@ export default function ReceptionistDashboard() {
       toast.error('Failed to load dashboard data')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Separate function to load only recent captures
+  const loadRecentCaptures = async () => {
+    if (!user || user.role !== 'receptionist') {
+      return
+    }
+
+    try {
+      const recentResponse = await fetch('/api/receptionist/recent-captures?limit=10', {
+        headers: { 'Authorization': `Bearer ${user.access_token}` }
+      })
+      if (recentResponse.ok) {
+        const recentData = await recentResponse.json()
+        console.log('Recent captures refreshed:', recentData.length)
+        setRecentCaptures(recentData)
+      } else {
+        console.error('Failed to load recent captures:', recentResponse.status, recentResponse.statusText)
+      }
+    } catch (error) {
+      console.error('Error loading recent captures:', error)
+    }
+  }
+
+  // Separate function to load only stats
+  const loadStats = async () => {
+    if (!user || user.role !== 'receptionist') {
+      return
+    }
+
+    try {
+      const statsResponse = await fetch('/api/receptionist/stats', {
+        headers: { 'Authorization': `Bearer ${user.access_token}` }
+      })
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json()
+        console.log('Stats refreshed:', statsData)
+        setStats(statsData)
+      } else {
+        console.error('Failed to load stats:', statsResponse.status, statsResponse.statusText)
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error)
     }
   }
 
@@ -309,8 +344,9 @@ export default function ReceptionistDashboard() {
         setDuplicateCheck(null)
         setShowDuplicateWarning(false)
 
-        // Refresh data
-        loadDashboardData()
+        // Refresh both recent captures and stats for real-time updates
+        await loadRecentCaptures()
+        await loadStats()
       } else if (response.status === 409) {
         const error = await response.json()
         toast.error(error.detail || 'Duplicate mobile number')
@@ -379,7 +415,9 @@ export default function ReceptionistDashboard() {
   }
 
   return (
-    <DashboardLayout>
+    <>
+      <Toaster position="top-right" richColors />
+      <DashboardLayout>
       <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-pink-50 p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
@@ -816,5 +854,6 @@ export default function ReceptionistDashboard() {
         </div>
       </div>
     </DashboardLayout>
+    </>
   )
 }
