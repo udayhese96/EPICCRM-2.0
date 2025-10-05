@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
@@ -11,22 +17,37 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const limit = searchParams.get('limit') || '10'
     
-    // Forward to FastAPI backend
-    const response = await fetch(`${process.env.FASTAPI_URL || 'http://localhost:8000'}/api/receptionist/recent-captures?limit=${limit}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+    // Forward to FastAPI backend with timeout and better error handling
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+    
+    try {
+      const response = await fetch(`${FASTAPI_URL}/api/receptionist/recent-captures?limit=${limit}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        console.error(`FastAPI error: ${response.status} ${response.statusText}`)
+        // Return empty array instead of error
+        return NextResponse.json([])
       }
-    })
 
-    if (!response.ok) {
-      const error = await response.text()
-      return NextResponse.json({ error: 'Failed to fetch recent captures' }, { status: response.status })
+      const data = await response.json()
+      return NextResponse.json(data)
+    } catch (fetchError) {
+      clearTimeout(timeoutId)
+      console.error('FastAPI connection error:', fetchError)
+      
+      // Return empty array when FastAPI is not available
+      return NextResponse.json([])
     }
-
-    const data = await response.json()
-    return NextResponse.json(data)
   } catch (error) {
     console.error('Error fetching recent captures:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
