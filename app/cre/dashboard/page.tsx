@@ -43,24 +43,24 @@ interface User {
 }
 
 // Snapshot helpers to detect meaningful UI changes after a fetch
-const normalizeStatus = (s?: string) => (s || "").trim().toLowerCase()
+const normalizeStatus = (s?: string | null) => (s || "").toString().trim().toLowerCase()
 const computeCountsSnapshot = (leads: any[]) => {
   const isFinalizedWon = (l: any) => {
-    const fs = (l.final_status || '').toLowerCase()
+    const fs = (l?.final_status || '').toString().toLowerCase()
     return fs === 'booked' || fs === 'retailed'
   }
   const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
   
   // Fresh leads: all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
   const fresh = leads.filter(l => {
-    const leadStatus = (l.lead_status || '').toLowerCase()
+    const leadStatus = (l?.lead_status || '').toString().toLowerCase()
     return leadStatus !== 'qualified' && !isFinalizedWon(l)
   }).length
   
-  const called = leads.filter(l => calledSet.has(normalizeStatus(l.lead_status)) && !isFinalizedWon(l)).length
-  const followUp = leads.filter(l => normalizeStatus(l.lead_status) === 'call me back' && !isFinalizedWon(l)).length
-  const qualified = leads.filter(l => (l.lead_status === 'Qualified') && ((l.final_status || '').toLowerCase() === 'pending') && !isFinalizedWon(l)).length
-  const pending = leads.filter(l => ((l.final_status || '').toLowerCase() === 'pending') && !!(l.first_call_date) && !isFinalizedWon(l)).length
+  const called = leads.filter(l => calledSet.has(normalizeStatus(l?.lead_status)) && !isFinalizedWon(l)).length
+  const followUp = leads.filter(l => normalizeStatus(l?.lead_status) === 'call me back' && !isFinalizedWon(l)).length
+  const qualified = leads.filter(l => (l?.lead_status === 'Qualified') && ((l?.final_status || '').toString().toLowerCase() === 'pending') && !isFinalizedWon(l)).length
+  const pending = leads.filter(l => ((l?.final_status || '').toString().toLowerCase() === 'pending') && !!(l?.first_call_date) && !isFinalizedWon(l)).length
   return { total: leads.length, fresh, called, followUp, qualified, pending }
 }
 
@@ -127,7 +127,9 @@ export default function CREDashboard() {
     // Listen for immediate refresh events after modal submits
     const immediateRefresh = async () => {
       setIsRefreshing(true)
-      console.log('🔄 [Event] Lead master updated event triggered')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔄 [Event] Lead master updated event triggered')
+      }
       const result = await fetchAssignedLeads(true)
       fetchLostRequests()
       // If counts didn't change yet, retry once after 1s to cover propagation lag
@@ -141,7 +143,9 @@ export default function CREDashboard() {
     
     // Listen for lead status changes specifically
     const handleLeadStatusChange = async () => {
-      console.log('🔄 [Event] Lead status change event triggered')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔄 [Event] Lead status change event triggered')
+      }
       setIsRefreshing(true)
       // Multiple rapid refreshes to catch status changes
       fetchAssignedLeads(true)
@@ -160,7 +164,9 @@ export default function CREDashboard() {
     // Primary polling system (more reliable than real-time)
     const primaryPolling = setInterval(() => {
       if (!isLoading && !isRefreshing) {
-        console.log('🔄 [Primary] Automatic refresh...')
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔄 [Primary] Automatic refresh...')
+        }
         fetchAssignedLeads()
         fetchLostRequests()
       }
@@ -169,7 +175,9 @@ export default function CREDashboard() {
     // Secondary polling for count updates
     const countPolling = setInterval(() => {
       if (!isLoading && !isRefreshing) {
-        console.log('📊 [Count] Checking for count updates...')
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📊 [Count] Checking for count updates...')
+        }
         fetchAssignedLeads()
         fetchLostRequests()
       }
@@ -223,14 +231,16 @@ export default function CREDashboard() {
             return
           }
 
-          console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
-          console.log('🔄 [Real-time] Lead status change:', {
-            old_status: (payload.old as any)?.lead_status,
-            new_status: (payload.new as any)?.lead_status,
-            old_remark: (payload.old as any)?.lead_remark,
-            new_remark: (payload.new as any)?.lead_remark
-          })
-          console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
+            console.log('🔄 [Real-time] Lead status change:', {
+              old_status: (payload.old as any)?.lead_status,
+              new_status: (payload.new as any)?.lead_status,
+              old_remark: (payload.old as any)?.lead_remark,
+              new_remark: (payload.new as any)?.lead_remark
+            })
+            console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
+          }
           setCountsUpdating(true)
           // Immediate refresh for status changes
           fetchAssignedLeads(true)
@@ -242,10 +252,13 @@ export default function CREDashboard() {
         }
       )
       .subscribe((status) => {
-        console.log('📡 [Real-time] Lead master subscription status:', status)
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ [Real-time] Lead master subscription active')
-        } else if (status === 'CHANNEL_ERROR') {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📡 [Real-time] Lead master subscription status:', status)
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ [Real-time] Lead master subscription active')
+          }
+        }
+        if (status === 'CHANNEL_ERROR') {
           console.error('❌ [Real-time] Lead master subscription error')
         }
       })
@@ -270,12 +283,14 @@ export default function CREDashboard() {
           }
 
           // Qualified leads changes always affect counts, so refresh immediately
-          console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
-          console.log('🔄 [Real-time] Qualified leads status change:', {
-            old_status: (payload.old as any)?.lead_status,
-            new_status: (payload.new as any)?.lead_status
-          })
-          console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 [Real-time] Qualified leads change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+            console.log('🔄 [Real-time] Qualified leads status change:', {
+              old_status: (payload.old as any)?.lead_status,
+              new_status: (payload.new as any)?.lead_status
+            })
+            console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
+          }
           setCountsUpdating(true)
           // Immediate refresh for qualified leads changes
           fetchAssignedLeads(true)
@@ -303,8 +318,10 @@ export default function CREDashboard() {
         }, 
         (payload) => {
           // Refresh leads data when ICROP IDs are updated
-          console.log('🔄 [Real-time] Follow-up change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
-          console.log('🔄 [Real-time] Refreshing leads data due to follow-up change')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 [Real-time] Follow-up change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+            console.log('🔄 [Real-time] Refreshing leads data due to follow-up change')
+          }
           fetchAssignedLeads()
         }
       )
@@ -331,7 +348,9 @@ export default function CREDashboard() {
       // Fallback to polling if real-time fails
       const fallbackInterval = setInterval(() => {
         if (!isLoading && !isRefreshing) {
-          console.log('🔄 [Fallback] Polling for updates...')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 [Fallback] Polling for updates...')
+          }
           fetchAssignedLeads()
         }
       }, 30000) // 30 seconds fallback
@@ -385,50 +404,66 @@ export default function CREDashboard() {
       const cacheBuster = Date.now().toString()
       qs.append('_t', cacheBuster)
       
-      console.debug('[CRE fetch] requesting /api/cre-assigned with _t=', cacheBuster)
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[CRE fetch] requesting /api/cre-assigned with _t=', cacheBuster)
+      }
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
       
       if (response.ok) {
         const raw = await response.json()
         const data = Array.isArray(raw) ? raw : (Array.isArray(raw?.leads) ? raw.leads : [])
         const before = computeCountsSnapshot(leads)
-        console.debug('[CRE fetch] received', (data || []).length, 'leads. Prev counts:', before, { sample: (data || [])[0] })
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[CRE fetch] received', (data || []).length, 'leads. Prev counts:', before, { sample: (data || [])[0] })
+        }
         
-        // Map API lead_master fields to UI fields
-        const mapped = (data || []).map((l: any) => ({
-          id: l.id || l.uid,
-          uid: l.uid,
-          customer_name: l.customer_name,
-          customer_mobile_number: l.customer_mobile_number,
-          source: l.source,
-          campaign: l.sub_source || l.model_interested || '',
-          date: (l.created_at || '').slice(0,10),
-          lead_status: (l.lead_status || '').trim(),
-          final_status: (l.final_status || '').trim(),
-          lead_category: l.lead_category || 'Warm',
-          followup_count: l.followup_count || 0,
-          follow_up_date: l.follow_up_date,
-          first_call_date: l.first_call_date || l.first_call_done_date,
-          branch: l.branch,
-          ps_name: l.ps_name,
-          ps_id: l.ps_id,
-          icrop_id: l.icrop_id, // Add ICROP ID mapping
-          lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
-          pending_reason: l.pending_reason || '',
-          // Previous call history
-          second_call_date: l.second_call_date,
-          second_remark: l.second_remark,
-          third_call_date: l.third_call_date,
-          third_remark: l.third_remark,
-          fourth_call_date: l.fourth_call_date,
-          fourth_remark: l.fourth_remark,
-          fifth_call_date: l.fifth_call_date,
-          fifth_remark: l.fifth_remark
-        }))
+        // Map API lead_master fields to UI fields with enhanced null safety
+        const mapped = (data || []).map((l: any) => {
+          // Only log critical errors in production
+          if (!l.uid && process.env.NODE_ENV === 'development') {
+            console.warn('[CRE fetch] Lead missing uid:', l)
+          }
+          if (!l.customer_name && process.env.NODE_ENV === 'development') {
+            console.warn('[CRE fetch] Lead missing customer_name:', l)
+          }
+          
+          return {
+            id: l.id || l.uid || '',
+            uid: l.uid || '',
+            customer_name: l.customer_name || '',
+            customer_mobile_number: l.customer_mobile_number || '',
+            source: l.source || '',
+            campaign: l.sub_source || l.model_interested || '',
+            date: (l.created_at || '').slice(0,10) || '',
+            lead_status: (l.lead_status || '').toString().trim(),
+            final_status: (l.final_status || '').toString().trim(),
+            lead_category: l.lead_category || 'Warm',
+            followup_count: l.followup_count || 0,
+            follow_up_date: l.follow_up_date || '',
+            first_call_date: l.first_call_date || l.first_call_done_date || '',
+            branch: l.branch || '',
+            ps_name: l.ps_name || '',
+            ps_id: l.ps_id || '',
+            icrop_id: l.icrop_id || '', // Add ICROP ID mapping
+            lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
+            pending_reason: l.pending_reason || '',
+            // Previous call history
+            second_call_date: l.second_call_date || '',
+            second_remark: l.second_remark || '',
+            third_call_date: l.third_call_date || '',
+            third_remark: l.third_remark || '',
+            fourth_call_date: l.fourth_call_date || '',
+            fourth_remark: l.fourth_remark || '',
+            fifth_call_date: l.fifth_call_date || '',
+            fifth_remark: l.fifth_remark || ''
+          }
+        })
         
         setLeads(mapped)
         const after = computeCountsSnapshot(mapped)
-        console.debug('[CRE fetch] new counts:', after)
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[CRE fetch] new counts:', after)
+        }
         
         // Check for new walk-in leads and show notifications
         if (before && after) {
@@ -498,7 +533,9 @@ export default function CREDashboard() {
   }
 
   const handleUpdateLead = (leadData: any) => {
-    console.log("🔄 [UI Sync] Lead update initiated; syncing from lead_master", leadData)
+    if (process.env.NODE_ENV === 'development') {
+      console.log("🔄 [UI Sync] Lead update initiated; syncing from lead_master", leadData)
+    }
     
     // Strict server-sync: refetch from lead_master (single source of truth)
     setIsRefreshing(true)
@@ -605,7 +642,8 @@ export default function CREDashboard() {
 
   // Filter leads based on active tab and status
   const getFilteredLeads = () => {
-    let filteredLeads = leads
+    try {
+      let filteredLeads = leads
 
     const todayIso = new Date().toISOString().slice(0,10)
     const startOfWeek = (() => {
@@ -634,7 +672,7 @@ export default function CREDashboard() {
     }
 
     const isFinalizedWon = (lead: any) => {
-      const fs = (lead.final_status || '').toLowerCase()
+      const fs = (lead?.final_status || '').toString().toLowerCase()
       return fs === 'booked' || fs === 'retailed'
     }
 
@@ -645,7 +683,7 @@ export default function CREDashboard() {
         // Include all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
         filteredLeads = leads.filter(l => {
           if (isFinalizedWon(l)) return false
-          const leadStatus = (l.lead_status ?? "").toLowerCase()
+          const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
           return leadStatus !== "qualified"
         })
         break
@@ -664,9 +702,13 @@ export default function CREDashboard() {
         break
       case "pending":
         // Pending = final_status Pending AND first call done
-        console.log('Filtering pending leads:', leads.length, 'total leads')
-        const pendingCandidates = leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead))
-        console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Filtering pending leads:', leads.length, 'total leads')
+        }
+        const pendingCandidates = leads.filter(lead => ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !!(lead?.first_call_date) && !isFinalizedWon(lead))
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
+        }
         filteredLeads = pendingCandidates
         if (pendingCategory !== "all") {
           filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
@@ -674,15 +716,19 @@ export default function CREDashboard() {
         break
       case "qualified":
         // Qualified tab: lead_status = Qualified AND final_status = Pending
-        console.log('Filtering qualified leads:', leads.length, 'total leads')
-        const qualifiedCandidates = leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead))
-        console.log('Qualified candidates:', qualifiedCandidates.length, qualifiedCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status })))
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Filtering qualified leads:', leads.length, 'total leads')
+        }
+        const qualifiedCandidates = leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead))
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Qualified candidates:', qualifiedCandidates.length, qualifiedCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status })))
+        }
         filteredLeads = qualifiedCandidates
         break
       case "wonlost":
         filteredLeads = leads.filter(lead => {
-          const fs = (lead.final_status || '').toLowerCase()
-          const isLost = fs === 'lost' || lead.lead_status === 'Lost'
+          const fs = (lead?.final_status || '').toString().toLowerCase()
+          const isLost = fs === 'lost' || lead?.lead_status === 'Lost'
           const isLostRequested = fs === 'lost requested'
           const isBooked = fs === 'booked'
           const isRetailed = fs === 'retailed'
@@ -735,17 +781,17 @@ export default function CREDashboard() {
       if (activeStatus === "Fresh") {
         // Untouched: lead_status is null/empty OR "Pending" (for admin-assigned leads) AND final_status is Pending
         filteredLeads = filteredLeads.filter(lead => {
-          const leadStatus = (lead.lead_status ?? "").toLowerCase()
-          const finalStatus = (lead.final_status ?? "").toLowerCase()
+          const leadStatus = (lead?.lead_status ?? "").toString().toLowerCase()
+          const finalStatus = (lead?.final_status ?? "").toString().toLowerCase()
           return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
         })
       } else if (activeStatus === "Called") {
         // Called: any of the non-CMB call outcomes
         const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
-        filteredLeads = filteredLeads.filter(lead => calledSet.has((lead.lead_status ?? "").toLowerCase()))
+        filteredLeads = filteredLeads.filter(lead => calledSet.has((lead?.lead_status ?? "").toString().toLowerCase()))
       } else if (activeStatus === "Follow Up") {
         // Follow Up: explicit 'Call me back'
-        filteredLeads = filteredLeads.filter(lead => (lead.lead_status ?? "").toLowerCase() === "call me back")
+        filteredLeads = filteredLeads.filter(lead => (lead?.lead_status ?? "").toString().toLowerCase() === "call me back")
       } else {
         // Fallback to equality for any other status values
         filteredLeads = filteredLeads.filter(lead => lead.lead_status === activeStatus)
@@ -755,34 +801,46 @@ export default function CREDashboard() {
     // Filter by search term
     if (searchTerm) {
       filteredLeads = filteredLeads.filter(lead => 
-        lead.uid.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.customer_mobile_number.includes(searchTerm)
+        (lead.uid || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (lead.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (lead.customer_mobile_number || '').includes(searchTerm)
       )
     }
 
-    return filteredLeads
+      return filteredLeads
+    } catch (error) {
+      console.error('Error in getFilteredLeads:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Leads data:', leads)
+        console.error('Search term:', searchTerm)
+        console.error('Active tab:', activeTab)
+        console.error('Active status:', activeStatus)
+      }
+      // Return empty array to prevent crash
+      return []
+    }
   }
 
   const getTabCounts = () => {
-    const today = new Date().toISOString().slice(0,10)
+    try {
+      const today = new Date().toISOString().slice(0,10)
     const isFinalizedWon = (l: Lead) => {
-      const fs = (l.final_status || '').toLowerCase()
+      const fs = (l?.final_status || '').toString().toLowerCase()
       return fs === 'booked' || fs === 'retailed'
     }
     const isUntouched = (l: Lead) => {
-      const leadStatus = (l.lead_status ?? "").toLowerCase()
-      const finalStatus = (l.final_status ?? "").toLowerCase()
+      const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+      const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
       return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
     }
     const isCalled = (l: Lead) => {
-      const s = (l.lead_status ?? "").toLowerCase()
+      const s = (l?.lead_status ?? "").toString().toLowerCase()
       return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"].includes(s)
     }
-    const isFollowUp = (l: Lead) => (l.lead_status ?? "").toLowerCase() === "call me back"
+    const isFollowUp = (l: Lead) => (l?.lead_status ?? "").toString().toLowerCase() === "call me back"
     return {
       fresh: leads.filter(l => {
-        const leadStatus = (l.lead_status || '').toLowerCase()
+        const leadStatus = (l?.lead_status || '').toString().toLowerCase()
         return leadStatus !== 'qualified' && !isFinalizedWon(l)
       }).length,
       followup: leads.filter(lead => {
@@ -793,52 +851,122 @@ export default function CREDashboard() {
         return followUpDate <= today && !isFinalizedWon(lead)
       }).length,
       // Pending = final_status Pending AND first call done
-      pending: leads.filter(lead => ((lead.final_status ?? "").toLowerCase() === "pending") && !!(lead.first_call_date) && !isFinalizedWon(lead)).length,
+      pending: leads.filter(lead => ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !!(lead?.first_call_date) && !isFinalizedWon(lead)).length,
       // Qualified = lead_status Qualified AND final_status Pending
-      qualified: leads.filter(lead => (lead.lead_status === "Qualified") && ((lead.final_status ?? "").toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
+      qualified: leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
       wonlost: leads.filter(lead => {
-        const fs = (lead.final_status || '').toLowerCase()
-        const isLost = fs === 'lost' || lead.lead_status === 'Lost'
+        const fs = (lead?.final_status || '').toString().toLowerCase()
+        const isLost = fs === 'lost' || lead?.lead_status === 'Lost'
         const isLostRequested = fs === 'lost requested'
         const isBooked = fs === 'booked'
         const isRetailed = fs === 'retailed'
         return isLost || isLostRequested || isBooked || isRetailed
       }).length,
       won: leads.filter(lead => {
-        const fs = (lead.final_status || '').toLowerCase()
+        const fs = (lead?.final_status || '').toString().toLowerCase()
         return fs === 'booked' || fs === 'retailed'
       }).length,
-      lost: leads.filter(lead => lead.lead_status === 'Lost').length,
-      lostRequested: leads.filter(lead => (lead.final_status || '').toLowerCase() === 'lost requested').length,
+      lost: leads.filter(lead => lead?.lead_status === 'Lost').length,
+      lostRequested: leads.filter(lead => (lead?.final_status || '').toString().toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
       walkin: leads.filter(lead => ['Walk-in', 'Digital', 'Referral'].includes(lead.source)).length
+    }
+    } catch (error) {
+      console.error('Error in getTabCounts:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Leads data:', leads)
+      }
+      // Return zero counts to prevent crash
+      return {
+        fresh: 0,
+        followup: 0,
+        pending: 0,
+        qualified: 0,
+        wonlost: 0,
+        won: 0,
+        lost: 0,
+        lostRequested: 0,
+        lostconfirm: 0,
+        walkin: 0
+      }
     }
   }
 
   const getStatusCounts = () => {
-    const freshLeadsUntouched = leads.filter(l => {
-      const leadStatus = (l.lead_status ?? "").toLowerCase()
-      const finalStatus = (l.final_status ?? "").toLowerCase()
+    try {
+      const freshLeadsUntouched = leads.filter(l => {
+      const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+      const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
       return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
     })
     const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
-    const freshLeadsCalled = leads.filter(l => calledSet.has((l.lead_status ?? "").toLowerCase()))
-    const freshLeadsFollowUp = leads.filter(l => (l.lead_status ?? "").toLowerCase() === "call me back")
-    return {
-      untouched: freshLeadsUntouched.length,
-      called: freshLeadsCalled.length,
-      followup: freshLeadsFollowUp.length
+    const freshLeadsCalled = leads.filter(l => calledSet.has((l?.lead_status ?? "").toString().toLowerCase()))
+      const freshLeadsFollowUp = leads.filter(l => (l?.lead_status ?? "").toString().toLowerCase() === "call me back")
+      return {
+        untouched: freshLeadsUntouched.length,
+        called: freshLeadsCalled.length,
+        followup: freshLeadsFollowUp.length
+      }
+    } catch (error) {
+      console.error('Error in getStatusCounts:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Leads data:', leads)
+      }
+      // Return zero counts to prevent crash
+      return {
+        untouched: 0,
+        called: 0,
+        followup: 0
+      }
     }
   }
 
   const userName = user?.first_name || user?.name || user?.username || "Kumari"
   
   const filteredLeads = useMemo(() => {
-    return getFilteredLeads()
+    try {
+      return getFilteredLeads()
+    } catch (error) {
+      console.error('Error in filteredLeads useMemo:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Dependencies:', { leads: leads.length, activeTab, activeStatus, searchTerm, pendingCategory, startDate })
+      }
+      return []
+    }
   }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate])
   
-  const tabCounts = useMemo(() => getTabCounts(), [leads])
-  const statusCounts = useMemo(() => getStatusCounts(), [leads])
+  const tabCounts = useMemo(() => {
+    try {
+      return getTabCounts()
+    } catch (error) {
+      console.error('Error in tabCounts useMemo:', error)
+      return {
+        fresh: 0,
+        followup: 0,
+        pending: 0,
+        qualified: 0,
+        wonlost: 0,
+        won: 0,
+        lost: 0,
+        lostRequested: 0,
+        lostconfirm: 0,
+        walkin: 0
+      }
+    }
+  }, [leads])
+  
+  const statusCounts = useMemo(() => {
+    try {
+      return getStatusCounts()
+    } catch (error) {
+      console.error('Error in statusCounts useMemo:', error)
+      return {
+        untouched: 0,
+        called: 0,
+        followup: 0
+      }
+    }
+  }, [leads])
 
   return (
     <DashboardLayout>
@@ -921,7 +1049,9 @@ export default function CREDashboard() {
             <button 
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl text-sm border bg-white text-gray-800 hover:shadow-sm focus:ring-2 focus:ring-blue-100 transition-all duration-150 min-h-[44px] min-w-[44px]" 
               onClick={() => {
-                console.log('🔄 [Manual] Manual refresh triggered')
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('🔄 [Manual] Manual refresh triggered')
+                }
                 fetchAssignedLeads()
                 fetchLostRequests()
               }}

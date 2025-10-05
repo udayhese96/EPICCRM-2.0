@@ -103,7 +103,17 @@ import os
 from decouple import config
 from .auth import get_current_user, admin_required, admin_or_branch_head, can_manage_leads
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+    ZONEINFO_AVAILABLE = True
+except ImportError:
+    # Fallback for Python < 3.9 or systems without zoneinfo
+    try:
+        from backports.zoneinfo import ZoneInfo
+        ZONEINFO_AVAILABLE = True
+    except ImportError:
+        ZONEINFO_AVAILABLE = False
+        print("Warning: zoneinfo not available, using UTC timezone")
 from .models import (UserCreate, UserUpdate, UserResponse, LoginRequest, LoginResponse, ChangePasswordRequest,
                     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, ActivityCreate, ActivityResponse,
                     BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics, PSAssignmentCreate, 
@@ -160,8 +170,12 @@ security = HTTPBearer()
 def now_ist_iso() -> str:
     """Return current timestamp in Asia/Kolkata (IST) as ISO string WITH timezone."""
     try:
-        # Return IST timestamp WITH timezone info for TIMESTAMPTZ columns
-        return datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        if ZONEINFO_AVAILABLE:
+            # Return IST timestamp WITH timezone info for TIMESTAMPTZ columns
+            return datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        else:
+            # Fallback: return UTC with timezone if IST not available
+            return datetime.now(timezone.utc).isoformat()
     except Exception:
         # Fallback: return UTC with timezone if IST not available
         return datetime.now(timezone.utc).isoformat()
@@ -4131,7 +4145,8 @@ async def get_ps_users_by_branch(current_user=Depends(get_current_user)):
         raise
     except Exception as e:
         print(f"Error getting PS users: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty array instead of 500 error
+        return []
 
 @app.post("/api/receptionist/leads")
 async def create_receptionist_lead(
@@ -4352,7 +4367,10 @@ async def get_receptionist_stats(current_user=Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="Receptionist user has no branch assigned")
 
         # Get current IST date
-        ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        if ZONEINFO_AVAILABLE:
+            ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        else:
+            ist_now = datetime.now(timezone.utc)
         today_start = ist_now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = (ist_now - timedelta(days=ist_now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         month_start = ist_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -4404,7 +4422,15 @@ async def get_receptionist_stats(current_user=Depends(get_current_user)):
         raise
     except Exception as e:
         print(f"Error getting receptionist stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return fallback data instead of 500 error
+        return ReceptionistStatsResponse(
+            today=0,
+            this_week=0,
+            this_month=0,
+            by_source={},
+            by_model={},
+            by_ps={}
+        )
 
 @app.get("/api/receptionist/recent-captures")
 async def get_recent_captures(
@@ -4440,11 +4466,15 @@ async def get_recent_captures(
                 # Parse the timestamp and convert to IST epoch
                 created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
                 # Convert to IST and then to epoch milliseconds
-                ist_created_at = created_at.astimezone(ZoneInfo("Asia/Kolkata"))
+                if ZONEINFO_AVAILABLE:
+                    ist_created_at = created_at.astimezone(ZoneInfo("Asia/Kolkata"))
+                    ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+                else:
+                    ist_created_at = created_at.astimezone(timezone.utc)
+                    ist_now = datetime.now(timezone.utc)
                 created_at_epoch = int(ist_created_at.timestamp() * 1000)
                 
                 # Calculate time ago using IST
-                ist_now = datetime.now(ZoneInfo("Asia/Kolkata"))
                 time_diff = ist_now - ist_created_at.replace(tzinfo=None)
             except Exception as e:
                 print(f"[DEBUG] Error parsing date for lead {lead.get('customer_name', 'Unknown')}: {e}")
@@ -4482,7 +4512,8 @@ async def get_recent_captures(
         raise
     except Exception as e:
         print(f"Error getting recent captures: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty array instead of 500 error
+        return []
 
 # ========================================
 # CRE TEAM LEADER WALK-IN ASSIGNMENT ENDPOINTS
