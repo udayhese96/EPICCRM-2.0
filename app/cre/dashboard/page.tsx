@@ -49,7 +49,7 @@ const computeCountsSnapshot = (leads: any[]) => {
     const fs = (l?.final_status || '').toString().toLowerCase()
     return fs === 'booked' || fs === 'retailed'
   }
-  const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+  const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"]) 
   
   // Fresh leads: all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
   const fresh = leads.filter(l => {
@@ -84,6 +84,12 @@ interface Lead {
   customer_location?: string
   remarks?: string
   lead_remark?: string
+  // Per-step follow-up statuses (set post-qualification)
+  second_call_lead_status?: string
+  third_call_lead_status?: string
+  fourth_call_lead_status?: string
+  fifth_call_lead_status?: string
+  sixth_call_lead_status?: string
   branch?: string
   ps_name?: string
   ps_id?: string
@@ -455,7 +461,13 @@ export default function CREDashboard() {
             fourth_call_date: l.fourth_call_date || '',
             fourth_remark: l.fourth_remark || '',
             fifth_call_date: l.fifth_call_date || '',
-            fifth_remark: l.fifth_remark || ''
+            fifth_remark: l.fifth_remark || '',
+            // Per-step follow-up statuses
+            second_call_lead_status: l.second_call_lead_status || '',
+            third_call_lead_status: l.third_call_lead_status || '',
+            fourth_call_lead_status: l.fourth_call_lead_status || '',
+            fifth_call_lead_status: l.fifth_call_lead_status || '',
+            sixth_call_lead_status: l.sixth_call_lead_status || ''
           }
         })
         
@@ -787,7 +799,7 @@ export default function CREDashboard() {
         })
       } else if (activeStatus === "Called") {
         // Called: any of the non-CMB call outcomes
-        const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+        const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"]) 
         filteredLeads = filteredLeads.filter(lead => calledSet.has((lead?.lead_status ?? "").toString().toLowerCase()))
       } else if (activeStatus === "Follow Up") {
         // Follow Up: explicit 'Call me back'
@@ -835,7 +847,7 @@ export default function CREDashboard() {
     }
     const isCalled = (l: Lead) => {
       const s = (l?.lead_status ?? "").toString().toLowerCase()
-      return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"].includes(s)
+      return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"].includes(s)
     }
     const isFollowUp = (l: Lead) => (l?.lead_status ?? "").toString().toLowerCase() === "call me back"
     return {
@@ -899,7 +911,7 @@ export default function CREDashboard() {
       const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
       return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
     })
-    const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service"]) 
+    const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"]) 
     const freshLeadsCalled = leads.filter(l => calledSet.has((l?.lead_status ?? "").toString().toLowerCase()))
       const freshLeadsFollowUp = leads.filter(l => (l?.lead_status ?? "").toString().toLowerCase() === "call me back")
       return {
@@ -1706,20 +1718,28 @@ export default function CREDashboard() {
                           </td>
                           {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
                             <td className="p-3">
-                              <Badge 
-                                variant="outline"
-                                className={`rounded-full ${
-                                  (lead.lead_status === "Fresh" ? "bg-blue-100 text-blue-800" :
-                                   lead.lead_status === "Called" ? "bg-green-100 text-green-800" :
-                                   lead.lead_status === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
-                                   lead.lead_status === "Qualified" ? "bg-purple-100 text-purple-800" :
-                                   lead.lead_status === "Won" ? "bg-green-100 text-green-800" :
-                                   lead.lead_status === "Lost" ? "bg-red-100 text-red-800" :
-                                   "bg-gray-100 text-gray-800")
-                                }`}
-                              >
-                                {lead.lead_status}
-                              </Badge>
+                              {/* Show Qualified + latest follow-up status if available */}
+                              {(() => {
+                                const latestFollowUpStatus = lead.sixth_call_lead_status || lead.fifth_call_lead_status || lead.fourth_call_lead_status || lead.third_call_lead_status || lead.second_call_lead_status || ''
+                                const primary = (lead.lead_status || '').toString()
+                                const label = primary === 'Qualified' && latestFollowUpStatus ? `Qualified + ${latestFollowUpStatus}` : primary
+                                return (
+                                  <Badge 
+                                    variant="outline"
+                                    className={`rounded-full ${
+                                      (primary === "Fresh" ? "bg-blue-100 text-blue-800" :
+                                       primary === "Called" ? "bg-green-100 text-green-800" :
+                                       primary === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
+                                       primary === "Qualified" ? "bg-purple-100 text-purple-800" :
+                                       primary === "Won" ? "bg-green-100 text-green-800" :
+                                       primary === "Lost" ? "bg-red-100 text-red-800" :
+                                       "bg-gray-100 text-gray-800")
+                                    }`}
+                                  >
+                                    {label}
+                                  </Badge>
+                                )
+                              })()}
                               {activeTab === "followup" && overdueDays > 0 && (
                                 <Badge variant="secondary" className="ml-2 bg-red-600 text-white rounded-full">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
                               )}

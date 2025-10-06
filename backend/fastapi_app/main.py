@@ -267,6 +267,12 @@ class LeadUpdate(BaseModel):
     followup_note: Optional[str] = None
     # New: allow updating final_status (Won/Lost/Pending)
     final_status: Optional[str] = None
+    # Per-step follow-up lead status fields (F1..F5)
+    second_call_lead_status: Optional[str] = None
+    third_call_lead_status: Optional[str] = None
+    fourth_call_lead_status: Optional[str] = None
+    fifth_call_lead_status: Optional[str] = None
+    sixth_call_lead_status: Optional[str] = None
 
 class ActivityCreate(BaseModel):
     activity_type: str
@@ -1510,6 +1516,18 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
         if lead_data.call_status is not None:
             update_data["lead_status"] = lead_data.call_status
 
+        # Per-step follow-up outcome fields
+        if lead_data.second_call_lead_status is not None:
+            update_data["second_call_lead_status"] = lead_data.second_call_lead_status
+        if lead_data.third_call_lead_status is not None:
+            update_data["third_call_lead_status"] = lead_data.third_call_lead_status
+        if lead_data.fourth_call_lead_status is not None:
+            update_data["fourth_call_lead_status"] = lead_data.fourth_call_lead_status
+        if lead_data.fifth_call_lead_status is not None:
+            update_data["fifth_call_lead_status"] = lead_data.fifth_call_lead_status
+        if lead_data.sixth_call_lead_status is not None:
+            update_data["sixth_call_lead_status"] = lead_data.sixth_call_lead_status
+
         # Debug: show final update data
         try:
             print("[lead.update] update_data:", update_data)
@@ -1636,6 +1654,18 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                     update_data["follow_up_date"] = f"{fud}T{current_time}"
                 else:
                     update_data["follow_up_date"] = fud
+
+        # Per-step follow-up outcome fields
+        if lead_data.second_call_lead_status is not None:
+            update_data["second_call_lead_status"] = lead_data.second_call_lead_status
+        if lead_data.third_call_lead_status is not None:
+            update_data["third_call_lead_status"] = lead_data.third_call_lead_status
+        if lead_data.fourth_call_lead_status is not None:
+            update_data["fourth_call_lead_status"] = lead_data.fourth_call_lead_status
+        if lead_data.fifth_call_lead_status is not None:
+            update_data["fifth_call_lead_status"] = lead_data.fifth_call_lead_status
+        if lead_data.sixth_call_lead_status is not None:
+            update_data["sixth_call_lead_status"] = lead_data.sixth_call_lead_status
 
         # Handle follow-up notes - pass to background worker for proper follow-up logic
         if (lead_data.followup_note or "").strip():
@@ -2293,14 +2323,15 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 'uid', 'customer_name', 'first_remark', 'second_remark', 'third_remark', 
                 'fourth_remark', 'fifth_remark', 'sixth_remark', 'first_call_date', 'second_call_date', 
                 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date', 
-                'lead_status', 'cre_name'
+                'lead_status', 'cre_name',
+                'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
             ).eq('uid', lead_uid).execute()
             
             if cre_response.data:
                 lead_data = cre_response.data[0]
                 cre_remarks = []
                 
-                # Collect CRE remarks (only showing Call #1 for now, which is first_remark + lead_status)
+                # Collect CRE remarks with per-step statuses
                 call_fields = [
                     ('first_remark', 'first_call_date'),
                     ('second_remark', 'second_call_date'),
@@ -2309,14 +2340,29 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                     ('fifth_remark', 'fifth_call_date'),
                     ('sixth_remark', 'sixth_call_date')
                 ]
+                status_fields = [
+                    None,  # Call #1 is qualification
+                    'second_call_lead_status',
+                    'third_call_lead_status',
+                    'fourth_call_lead_status',
+                    'fifth_call_lead_status',
+                    'sixth_call_lead_status'
+                ]
                 
-                for remark_field, date_field in call_fields:
+                for idx, (remark_field, date_field) in enumerate(call_fields, start=1):
                     if lead_data.get(remark_field):
+                        # Build status: Qualified for first call; for later calls show "Qualified + <latest>" when available
+                        if idx == 1:
+                            status_value = 'Qualified'
+                        else:
+                            step_status_key = status_fields[idx - 1]
+                            step_status_val = lead_data.get(step_status_key) if step_status_key else None
+                            status_value = f"Qualified + {step_status_val}" if step_status_val else 'Qualified'
                         cre_remarks.append({
                             'type': 'CRE',
                             'call_number': len(cre_remarks) + 1,
                             'remark': lead_data[remark_field],
-                            'lead_status': lead_data.get('lead_status', ''),
+                            'lead_status': status_value,
                             'date': lead_data.get(date_field),
                             'user': lead_data.get('cre_name', 'CRE')
                         })
