@@ -388,14 +388,19 @@ interface Lead {
   // Prior follow-up fields for display
   second_call_date?: string
   second_remark?: string
+  second_call_lead_status?: string
   third_call_date?: string
   third_remark?: string
+  third_call_lead_status?: string
   fourth_call_date?: string
   fourth_remark?: string
+  fourth_call_lead_status?: string
   fifth_call_date?: string
   fifth_remark?: string
+  fifth_call_lead_status?: string
   sixth_call_date?: string
   sixth_remark?: string
+  sixth_call_lead_status?: string
 }
 
 interface LeadUpdateModalProps {
@@ -709,10 +714,21 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     // NOTE: Do NOT use worker for lead_master updates. Worker is used only
     // for inserting into qualified_leads (and trade-in) after direct update succeeds.
 
-    // Qualified follow-up: do NOT change lead_status away from "Qualified".
-    // Only handle special case for next follow-up date when Call Me Back is selected.
+    // Qualified follow-up: record outcome in per-step status column without changing main lead_status.
+    // F1 -> second_call_lead_status, F2 -> third_call_lead_status, ... F5 -> sixth_call_lead_status
     if (formData.call_status && isFollowUpWorkflow) {
       const normalized = formData.call_status.trim()
+      const stepToStatusColumn: Record<number, string> = {
+        1: 'second_call_lead_status',
+        2: 'third_call_lead_status',
+        3: 'fourth_call_lead_status',
+        4: 'fifth_call_lead_status',
+        5: 'sixth_call_lead_status'
+      }
+      const statusColumn = stepToStatusColumn[nextFollowupNumber]
+      if (statusColumn) {
+        ;(updateData as any)[statusColumn] = normalized
+      }
       if (normalized.toLowerCase() === "call me back") {
         ;(updateData as any).follow_up_date = formData.follow_up_date || tomorrow
       } else if (!formData.follow_up_date) {
@@ -774,7 +790,13 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         test_drive_type: formSnapshot.test_drive_type,
         follow_up_date: (updateData as any).follow_up_date ?? (formSnapshot.follow_up_date || undefined),
         customer_location: formSnapshot.customer_location,
-        followup_note: isFollowUpWorkflow ? formSnapshot.general_remarks : undefined
+        followup_note: isFollowUpWorkflow ? formSnapshot.general_remarks : undefined,
+        // Per-step follow-up status capture (only one will be set per save)
+        second_call_lead_status: (updateData as any).second_call_lead_status,
+        third_call_lead_status: (updateData as any).third_call_lead_status,
+        fourth_call_lead_status: (updateData as any).fourth_call_lead_status,
+        fifth_call_lead_status: (updateData as any).fifth_call_lead_status,
+        sixth_call_lead_status: (updateData as any).sixth_call_lead_status
       })
     })
     .then(resp => {
@@ -996,20 +1018,20 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 <div className="text-xs font-semibold text-blue-900 mb-2">Previous Calls</div>
                 <div className="text-xs text-gray-700 space-y-1 leading-tight">
                   <div>Qualified: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.lead_remark || lead.remarks || '—'}</div>
-                  {lead.second_remark && (
-                    <div>F1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_remark}</div>
+                  {(lead.second_remark || lead.second_call_lead_status) && (
+                    <div>F1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.second_call_lead_status}</Badge>) : null}{lead.second_remark}</div>
                   )}
                   {lead.third_remark && (
-                    <div>F2: <span className="font-medium">{(lead.third_call_date || '').slice(0,10)}</span> · {lead.third_remark}</div>
+                    <div>F2: <span className="font-medium">{(lead.third_call_date || '').slice(0,10)}</span> · {lead.third_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.third_call_lead_status}</Badge>) : null}{lead.third_remark}</div>
                   )}
                   {lead.fourth_remark && (
-                    <div>F3: <span className="font-medium">{(lead.fourth_call_date || '').slice(0,10)}</span> · {lead.fourth_remark}</div>
+                    <div>F3: <span className="font-medium">{(lead.fourth_call_date || '').slice(0,10)}</span> · {lead.fourth_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.fourth_call_lead_status}</Badge>) : null}{lead.fourth_remark}</div>
                   )}
                   {lead.fifth_remark && (
-                    <div>F4: <span className="font-medium">{(lead.fifth_call_date || '').slice(0,10)}</span> · {lead.fifth_remark}</div>
+                    <div>F4: <span className="font-medium">{(lead.fifth_call_date || '').slice(0,10)}</span> · {lead.fifth_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.fifth_call_lead_status}</Badge>) : null}{lead.fifth_remark}</div>
                   )}
                   {lead.sixth_remark && (
-                    <div>F5: <span className="font-medium">{(lead.sixth_call_date || '').slice(0,10)}</span> · {lead.sixth_remark}</div>
+                    <div>F5: <span className="font-medium">{(lead.sixth_call_date || '').slice(0,10)}</span> · {lead.sixth_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.sixth_call_lead_status}</Badge>) : null}{lead.sixth_remark}</div>
                   )}
                 </div>
               </div>
