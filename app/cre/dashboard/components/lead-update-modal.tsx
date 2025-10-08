@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calendar, Phone, Mail, MapPin, Building, User, Car, Clock, DollarSign, Home, Users, CheckCircle2, Lock, Circle, X, AlertTriangle, CheckCircle, Star, Thermometer, Snowflake, Flame, Search, ChevronDown } from "lucide-react"
+import { Calendar, Phone, Mail, MapPin, Building, User, Car, Clock, DollarSign, Home, Users, CheckCircle2, Lock, Circle, X, AlertTriangle, CheckCircle, Star, Thermometer, Snowflake, Flame, Search, ChevronDown, FileText } from "lucide-react"
+import { toast } from "sonner"
 
 // Car make and model data
 const CAR_DATA = {
@@ -384,6 +385,7 @@ interface Lead {
   customer_location?: string
   remarks?: string
   lead_remark?: string
+  first_call_remark?: string
   first_call_date?: string
   // Prior follow-up fields for display
   second_call_date?: string
@@ -401,6 +403,16 @@ interface Lead {
   sixth_call_date?: string
   sixth_remark?: string
   sixth_call_lead_status?: string
+  // Pending reasons for pending leads (JSONB array) - multiple attempts
+  pending_reasons?: Array<{
+    attempt: number
+    reason: string
+    status: string
+    date: string
+    user?: string
+  }>
+  // Existing remarks for unqualified/lost leads
+  existing_remarks?: string
 }
 
 interface LeadUpdateModalProps {
@@ -505,7 +517,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     trade_in_year: "",
     trade_in_km: "",
     trade_in_ownership: "",
-    follow_up_date: "",
+    follow_up_date: tomorrow,
     lead_category: "",
     lost_reason: "",
     pending_reason: "",
@@ -579,6 +591,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       const kmError = validateTradeInKm(formData.trade_in_km)
       if (kmError) errors.trade_in_km = kmError
     }
+
     
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
@@ -605,7 +618,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       trade_in_year: "",
       trade_in_km: "",
       trade_in_ownership: "",
-      follow_up_date: "",
+      follow_up_date: tomorrow,
       lead_category: "",
       lost_reason: "",
       pending_reason: "",
@@ -659,23 +672,156 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   }
 
   const handleSubmit = async () => {
-    // Validate form before submission
+    // DEBUG: Log all state before processing
+    console.log('========== SUBMIT DEBUG START ==========')
+    console.log('selectedStatus:', selectedStatus)
+    console.log('formData.pending_reason:', formData.pending_reason)
+    console.log('formData.general_remarks:', formData.general_remarks)
+    console.log('lead?.lead_status:', lead?.lead_status)
+    console.log('lead?.pending_reasons:', lead?.pending_reasons)
+    console.log('========================================')
+    
+    // Validate form before submission (only trade-in validations)
     if (!validateForm()) {
       console.log('❌ [Validation] Form validation failed:', validationErrors)
       return
     }
 
+    // Prevent empty updates during follow-up workflow (lead already qualified, no new status selected)
+    const currentStatus = (lead?.lead_status || "").trim()
+    const isClosed = currentStatus === "Won" || currentStatus === "Lost"
+    const isFollowUpWorkflow = !isClosed && currentStatus !== "" && !selectedStatus
+    if (isFollowUpWorkflow) {
+      const hasAnyInput = Boolean(
+        (formData.call_status && String(formData.call_status).trim()) ||
+        (formData.sales_outcome && String(formData.sales_outcome).trim()) ||
+        (formData.general_remarks && String(formData.general_remarks).trim())
+      )
+      if (!hasAnyInput) {
+        toast.error("Add at least one detail: Call Outcome, Sales Outcome, or Remarks.")
+        return
+      }
+    }
+
+    // Main validation for all scenarios
+    if (currentStatus === "Qualified" && !formData.follow_up_date) {
+      toast.error("Please select a follow-up date before submitting.")
+      return
+    }
+
+    if (selectedStatus === "qualified") {
+      const missingFields = []
+      if (!formData.model_interested) missingFields.push("Model Interested")
+      if (!formData.variant) missingFields.push("Variant")
+      if (!formData.profession) missingFields.push("Profession")
+      if (!formData.buying_plan) missingFields.push("Buying Plan")
+      if (!formData.finance_option) missingFields.push("Finance Option")
+      if (!formData.follow_up_date) missingFields.push("Follow-up Date")
+      if (formData.trade_in === "Yes") {
+        if (!formData.trade_in_make) missingFields.push("Trade-in Make")
+        if (!formData.trade_in_model) missingFields.push("Trade-in Model")
+        if (!formData.trade_in_year) missingFields.push("Trade-in Year")
+        if (!formData.trade_in_km) missingFields.push("Trade-in KM")
+        if (!formData.trade_in_ownership) missingFields.push("Trade-in Ownership")
+      }
+      
+      if (missingFields.length > 0) {
+        toast.error(`Please fill in all required fields: ${missingFields.join(", ")}`)
+        return
+      }
+    }
+
+    if (selectedStatus === "pending") {
+      const missingFields = []
+      if (!formData.pending_reason) missingFields.push("Pending Reason")
+      if (!formData.general_remarks) missingFields.push("Remarks")
+      if (formData.pending_reason === "Call me back" && !formData.follow_up_date) {
+        missingFields.push("Follow-up Date")
+      }
+      
+      if (missingFields.length > 0) {
+        toast.error(`Please fill in all required fields: ${missingFields.join(", ")}`)
+        return
+      }
+    }
+
+    if (selectedStatus === "unqualified") {
+      const missingFields = []
+      if (!formData.lost_reason) missingFields.push("Lost Reason")
+      if (!formData.general_remarks) missingFields.push("Remarks")
+      
+      if (missingFields.length > 0) {
+        toast.error(`Please fill in all required fields: ${missingFields.join(", ")}`)
+        return
+      }
+    }
+
+    // Validation for normal update (no status selected) - should have some field filled
+    if (!selectedStatus && currentStatus !== "Qualified") {
+      const hasAnyFieldFilled = Boolean(
+        (formData.model_interested && String(formData.model_interested).trim()) ||
+        (formData.variant && String(formData.variant).trim()) ||
+        (formData.profession && String(formData.profession).trim()) ||
+        (formData.buying_plan && String(formData.buying_plan).trim()) ||
+        (formData.finance_option && String(formData.finance_option).trim()) ||
+        (formData.general_remarks && String(formData.general_remarks).trim()) ||
+        (formData.customer_location && String(formData.customer_location).trim())
+      )
+      if (!hasAnyFieldFilled) {
+        toast.error("Please fill at least one field or select a lead status to update.")
+        return
+      }
+    }
+
     // Take a snapshot of the current form values BEFORE closing/unmounting
     const formSnapshot = { ...formData }
 
-    const leadStatus = (lead?.lead_status || "").trim()
-    const isClosed = leadStatus === "Won" || leadStatus === "Lost"
-    // For qualified leads, always treat as follow-up workflow
-    const isFollowUpWorkflow = !isClosed && leadStatus === "Qualified"
-    console.log('🔍 [Debug] isFollowUpWorkflow:', isFollowUpWorkflow, 'leadStatus:', leadStatus, 'isClosed:', isClosed)
+    const leadStatus = currentStatus
+    // Reuse isClosed and isFollowUpWorkflow computed above
     // For Pending flow: lead_status must match the exact pending reason chosen.
     // In Fresh tab routing, "Call me back" => Follow Up queue; all others => Called queue.
     const pendingExactStatus = formData.pending_reason || "Called"
+    // Build pending_reasons array for pending status
+    const buildPendingReasons = () => {
+      // Check if we're adding a new pending reason (either new pending or updating existing pending)
+      const isNewPending = selectedStatus === "pending" && formData.pending_reason
+      const isExistingPendingUpdate = lead?.lead_status && ["RNR", "DND", "Busy", "Call me back", "Not Reachable", "Switched Off", "Disconnecting the call", "Temporary out of Service", "Incoming call facility not available", "Out of Network"].includes(lead.lead_status) && formData.pending_reason
+      
+      console.log('🔍 buildPendingReasons debug:', {
+        selectedStatus,
+        pending_reason: formData.pending_reason,
+        general_remarks: formData.general_remarks,
+        lead_status: lead?.lead_status,
+        isNewPending,
+        isExistingPendingUpdate,
+        existingReasonsCount: lead?.pending_reasons?.length || 0,
+        willAddPendingReason: isNewPending || isExistingPendingUpdate
+      })
+      
+      if (isNewPending || isExistingPendingUpdate) {
+        const existingReasons = lead?.pending_reasons || []
+        const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+        const parsed = session ? JSON.parse(session) : null
+        const userName = parsed?.user?.name || parsed?.name || "CRE"
+        
+        const newAttempt = {
+          attempt: existingReasons.length + 1,
+          reason: formData.general_remarks || "",
+          status: formData.pending_reason || "",
+          date: new Date().toISOString(),
+          user: userName
+        }
+        
+        const result = [...existingReasons, newAttempt]
+        console.log('✅ Adding new attempt:', newAttempt)
+        console.log('✅ Final pending_reasons:', result)
+        return result
+      }
+      
+      console.log('❌ No pending reason update needed, returning undefined to avoid sending null')
+      return undefined // Return undefined instead of empty array to avoid sending it in the payload
+    }
+
     const updateData = isFollowUpWorkflow
       ? {
           leadId: lead?.id,
@@ -694,23 +840,48 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       : {
           leadId: lead?.id,
           uid: lead?.uid,
-          status: selectedStatus,
           ...formData,
           updated_at: new Date().toISOString(),
-          // Lead status mapping per business rules
+          // Lead status mapping per business rules - MUST come after formData spread
+          status: selectedStatus,
           lead_status: selectedStatus === "qualified" ? "Qualified" : 
-                       selectedStatus === "unqualified" ? "Lost" : 
+                       selectedStatus === "unqualified" ? (formData.lost_reason || "Lost") : 
                        selectedStatus === "pending" ? (formData.pending_reason === "Call me back" ? "Call me back" : formData.pending_reason || "Called") : null,
           // Final status mapping - when qualified, final_status should be Pending
           final_status: selectedStatus === "qualified" ? "Pending" :
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? "Pending" : "Pending",
           // Ensure follow up date exists only when needed
-          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : (formData.follow_up_date || undefined),
+          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : 
+                         selectedStatus === "pending" && formData.pending_reason === "Call me back" ? (formData.follow_up_date || tomorrow) : 
+                         selectedStatus === "pending" ? undefined : // No follow-up date for RNR, DND, Busy, etc.
+                         (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
-          needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back"
+          needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back",
+          // Add pending_reasons for pending status
+          pending_reasons: (() => {
+            const result = buildPendingReasons()
+            console.log('🚀 Final payload pending_reasons:', result)
+            console.log('🚀 Debug info:', {
+              selectedStatus,
+              pending_reason: formData.pending_reason,
+              general_remarks: formData.general_remarks,
+              lead_status: lead?.lead_status
+            })
+            return result
+          })(),
+          // For unqualified leads, store remark in first_remark
+          first_remark: selectedStatus === "unqualified" ? formData.general_remarks : undefined
         }
 
+    // DEBUG: Log the constructed payload
+    console.log('========== PAYLOAD DEBUG ==========')
+    console.log('updateData:', JSON.stringify(updateData, null, 2))
+    console.log('updateData.lead_status:', (updateData as any).lead_status)
+    console.log('updateData.pending_reasons:', (updateData as any).pending_reasons)
+    console.log('updateData.follow_up_date:', (updateData as any).follow_up_date)
+    console.log('===================================')
+    
     // NOTE: Do NOT use worker for lead_master updates. Worker is used only
     // for inserting into qualified_leads (and trade-in) after direct update succeeds.
 
@@ -772,9 +943,13 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       body: JSON.stringify({
         // map modal fields to backend
         status: (updateData as any).lead_status,
+        lead_status: (updateData as any).lead_status, // ADD: Lead status field for backend
         final_status: (updateData as any).final_status,
+        pending_reasons: (updateData as any).pending_reasons, // ADD: Pending reasons array
         // first_remark should only be sent during Qualify (first call). For follow-ups, we send followup_note instead
-        first_remark: isFollowUpWorkflow ? undefined : formSnapshot.general_remarks,
+        // For pending/unqualified first calls, use first_call_remark instead of first_remark
+        first_remark: isFollowUpWorkflow ? undefined : (selectedStatus === "qualified" ? formSnapshot.general_remarks : undefined),
+        first_call_remark: isFollowUpWorkflow ? undefined : (selectedStatus === "pending" || selectedStatus === "unqualified" ? formSnapshot.general_remarks : undefined),
         profession: formSnapshot.profession,
         variant: formSnapshot.variant,
         model_interested: formSnapshot.model_interested,
@@ -809,9 +984,11 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     .then(data => {
       // 🔍 Enhanced Debug Logging
       const payloadSent = {
-        first_remark: isFollowUpWorkflow ? undefined : formSnapshot.general_remarks,
+        first_remark: isFollowUpWorkflow ? undefined : (selectedStatus === "qualified" ? formSnapshot.general_remarks : undefined),
+        first_call_remark: isFollowUpWorkflow ? undefined : (selectedStatus === "pending" || selectedStatus === "unqualified" ? formSnapshot.general_remarks : undefined),
         followup_note: isFollowUpWorkflow ? formSnapshot.general_remarks : undefined,
-        isFollowUpWorkflow: isFollowUpWorkflow
+        isFollowUpWorkflow: isFollowUpWorkflow,
+        selectedStatus: selectedStatus
       }
       
       console.log('🔍 [Frontend Debug] Request body analysis:', {
@@ -825,7 +1002,9 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         followup_note_value: payloadSent.followup_note,
         followup_note_truthy: !!payloadSent.followup_note,
         first_remark_present: 'first_remark' in payloadSent,
-        first_remark_value: payloadSent.first_remark
+        first_remark_value: payloadSent.first_remark,
+        first_call_remark_present: 'first_call_remark' in payloadSent,
+        first_call_remark_value: payloadSent.first_call_remark
       })
       
       console.log('✅ [Direct API] Lead master updated successfully!')
@@ -859,6 +1038,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
             model_interested: formSnapshot.model_interested || '',
             variant: formSnapshot.variant || '',
             first_remark: formSnapshot.general_remarks || '',
+            first_call_remark: formSnapshot.general_remarks || '',
             profession: formSnapshot.profession || '',
             buying_plan: formSnapshot.buying_plan || '',
             finance_option: formSnapshot.finance_option || '',
@@ -904,8 +1084,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   if (!lead) return null
   const currentStatus = (lead.lead_status || "").trim()
   const isClosedStatus = currentStatus === "Won" || currentStatus === "Lost"
-  // Show follow-up ONLY after qualification: non-empty initial remark (lead_remark) and not closed
-  const hasInitialRemark = !!(lead.lead_remark && String(lead.lead_remark).trim())
+  // Show follow-up ONLY after qualification: non-empty initial remark (lead_remark or first_call_remark) and not closed
+  const hasInitialRemark = !!(lead.lead_remark && String(lead.lead_remark).trim()) || !!(lead.first_call_remark && String(lead.first_call_remark).trim())
   const shouldShowFollowUp = !isClosedStatus && hasInitialRemark
 
   // Derive completed follow-ups from stored remarks (second..sixth)
@@ -928,11 +1108,19 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           <div className="flex items-center justify-between">
             <div>
               <DialogTitle className="text-lg font-semibold text-gray-900 leading-tight">
-            Update Lead - {lead.uid}
-          </DialogTitle>
+             Update Lead - {lead.uid}
+           </DialogTitle>
+                <div className="mt-1 space-x-2">
+                  {(lead.final_status === 'Won' || lead.lead_status === 'Won') && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Won</span>
+                  )}
+                  {(lead.final_status === 'Lost' || lead.lead_status === 'Lost') && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Lost</span>
+                  )}
+                </div>
               <DialogDescription className="text-sm text-gray-500 mt-1">
-            Update lead information and call history
-          </DialogDescription>
+             Update lead information and call history
+           </DialogDescription>
             </div>
             <button
               onClick={onClose}
@@ -1013,11 +1201,57 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </div>
               </div>
 
+              {/* Pending Reasons - Multiple attempts */}
+              {lead.pending_reasons && lead.pending_reasons.length > 0 && (
+                <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-amber-50/80 to-orange-50/60 border border-amber-200/40 backdrop-blur-sm">
+                  <div className="text-xs font-semibold text-amber-900 mb-2 flex items-center gap-1">
+                    <FileText className="w-3 h-3" />
+                    Pending Attempts ({lead.pending_reasons.length})
+                  </div>
+                  <div className="space-y-2">
+                    {lead.pending_reasons.map((reason, index) => (
+                      <div key={index} className="bg-white/60 rounded-md p-2 border border-amber-200/60">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-amber-800">Attempt #{reason.attempt}</span>
+                            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded">
+                              {reason.status}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-500">{(reason.date || '').slice(0,10)}</span>
+                        </div>
+                        <div className="text-xs text-gray-700 leading-relaxed">
+                          {reason.reason}
+                        </div>
+                        {reason.user && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            by {reason.user}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Existing Remarks - Unqualified/Lost leads */}
+              {lead.existing_remarks && (
+                <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-red-50/80 to-pink-50/60 border border-red-200/40 backdrop-blur-sm">
+                  <div className="text-xs font-semibold text-red-900 mb-2 flex items-center gap-1">
+                    <FileText className="w-3 h-3" />
+                    Lost/Unqualified Reason
+                  </div>
+                  <div className="text-xs text-gray-700 leading-relaxed">
+                    {lead.existing_remarks}
+                  </div>
+                </div>
+              )}
+
               {/* Previous Calls - Compact */}
               <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200/40 backdrop-blur-sm">
                 <div className="text-xs font-semibold text-blue-900 mb-2">Previous Calls</div>
                 <div className="text-xs text-gray-700 space-y-1 leading-tight">
-                  <div>Qualified: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.lead_remark || lead.remarks || '—'}</div>
+                  <div>First Call: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.first_call_remark || lead.lead_remark || lead.remarks || '—'}</div>
                   {(lead.second_remark || lead.second_call_lead_status) && (
                     <div>F1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.second_call_lead_status}</Badge>) : null}{lead.second_remark}</div>
                   )}
@@ -1287,7 +1521,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                        </div>
                     </div>
                     <div>
-                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date</Label>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date *</Label>
                     <Input
                       type="date"
                       value={formData.follow_up_date || tomorrow}
@@ -1450,7 +1684,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Profession</Label>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Profession *</Label>
                     <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Profession options">
                           {professions.map((profession) => (
                         <button
@@ -1503,7 +1737,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Buying Plan</Label>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Buying Plan *</Label>
                     <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Buying Plan options">
                           {buyingPlan.map((plan) => (
                         <button
@@ -1537,7 +1771,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Finance Option</Label>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Finance Option *</Label>
                     <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Finance Option options">
                           {financeOptions.map((option) => (
                         <button
@@ -1663,7 +1897,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 
                 <div className="space-y-4">
                   <div>
-                    <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date</Label>
+                    <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date *</Label>
                     <Input 
                       type="date"
                       value={formData.follow_up_date}
@@ -1672,7 +1906,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     />
                   </div>
                   <div>
-                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                    <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks *</Label>
                     <Textarea
                       placeholder="Add qualification/notes"
                       value={formData.general_remarks}
@@ -1799,7 +2033,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks</Label>
+                  <Label className="text-xs font-medium text-gray-600 mb-2 block">Remarks *</Label>
                   <Textarea
                     placeholder="Add reason/remark for loss"
                     value={formData.general_remarks}
@@ -1844,11 +2078,29 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                               ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
                               : "border-gray-200 bg-white hover:bg-gray-50"
                           }`}
-                          onClick={() => setFormData(prev => ({ ...prev, pending_reason: reason }))}
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, pending_reason: reason }))
+                            setSelectedStatus("pending") // Auto-set status to pending when reason is selected
+                          }}
                         >
                           {reason}
                         </button>
                       ))}
+                  </div>
+                  
+                  {/* Pending Reason Remark Input */}
+                  <div>
+                    <Label htmlFor="pending_remark" className="text-xs font-medium text-gray-600 mb-2 block">
+                      Remark for Pending Reason *
+                    </Label>
+                    <Textarea
+                      id="pending_remark"
+                      placeholder="Enter detailed remark for this pending reason..."
+                      value={formData.general_remarks}
+                      onChange={(e) => setFormData(prev => ({ ...prev, general_remarks: e.target.value }))}
+                      className="min-h-[80px] text-sm"
+                      required
+                    />
                   </div>
                   </div>
                 </div>
@@ -1866,7 +2118,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                   
                   <div className="space-y-4">
                     <div>
-                      <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date</Label>
+                      <Label htmlFor="follow_up_date" className="text-xs font-medium text-gray-600">Follow Up Date *</Label>
                       <Input 
                         type="date"
                         value={formData.follow_up_date}
@@ -1901,12 +2153,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
             {!(lead.lead_status === "Won" || lead.lead_status === "Lost") && (
                 <button
                 onClick={handleSubmit}
-                  disabled={
-                    isSubmitting ||
-                    (lead.lead_status !== "Qualified" && !selectedStatus) || 
-                    (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) ||
-                    (selectedStatus === "qualified" && (!formData.model_interested || !formData.variant))
-                  }
+                  disabled={isSubmitting}
                   className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 min-h-[44px] backdrop-blur-[6px] ${
                     selectedStatus === "unqualified" 
                       ? "bg-gradient-to-br from-red-100/90 to-red-200/70 text-red-800 border border-red-300/30 shadow-md" 
@@ -1958,7 +2205,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="space-y-3">
-              <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make</Label>
+              <Label htmlFor="trade_in_make" className="text-sm font-medium mb-2 block">Make *</Label>
               <SearchableSelect
                 value={formData.trade_in_make}
                 onValueChange={(value) => {
@@ -1974,7 +2221,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               />
             </div>
             <div className="space-y-3">
-              <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model</Label>
+              <Label htmlFor="trade_in_model" className="text-sm font-medium mb-2 block">Model *</Label>
               <Select 
                 value={formData.trade_in_model} 
                 onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_model: value }))}
@@ -1991,7 +2238,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               </Select>
             </div>
             <div className="space-y-3">
-              <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year</Label>
+              <Label htmlFor="trade_in_year" className="text-sm font-medium mb-2 block">Year *</Label>
               <Input 
                 type="text"
                 placeholder="Manufacturing Year (e.g., 2020)"
@@ -2026,7 +2273,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               )}
             </div>
             <div className="space-y-3">
-              <Label htmlFor="trade_in_km" className="text-sm font-medium mb-2 block">KM Driven</Label>
+              <Label htmlFor="trade_in_km" className="text-sm font-medium mb-2 block">KM Driven *</Label>
               <Input 
                 type="number"
                 placeholder="KM Driven (0-1,000,000)"
@@ -2049,7 +2296,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               )}
             </div>
             <div className="space-y-3">
-              <Label htmlFor="trade_in_ownership" className="text-sm font-medium mb-2 block">Ownership Type</Label>
+              <Label htmlFor="trade_in_ownership" className="text-sm font-medium mb-2 block">Ownership Type *</Label>
               <Select onValueChange={(value) => setFormData(prev => ({ ...prev, trade_in_ownership: value }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Ownership" />

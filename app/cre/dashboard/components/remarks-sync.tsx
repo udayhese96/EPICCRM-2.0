@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { MessageSquare, User, Calendar, RefreshCw } from "lucide-react"
+import { MessageSquare, User, Calendar, RefreshCw, FileText } from "lucide-react"
 
 interface Remark {
   type: 'CRE' | 'PS'
@@ -25,6 +25,16 @@ interface RemarksSyncProps {
 
 export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksSyncProps) {
   const [remarks, setRemarks] = useState<Remark[]>([])
+  const [pendingReasons, setPendingReasons] = useState<Array<{
+    attempt: number
+    reason: string
+    status: string
+    date: string
+    user?: string
+  }>>([])
+  const [existingRemarks, setExistingRemarks] = useState<string | null>(null)
+  const [overallFinalStatus, setOverallFinalStatus] = useState<string>('')
+  const [overallLeadStatus, setOverallLeadStatus] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,6 +59,10 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
       if (response.ok) {
         const data = await response.json()
         setRemarks(data.remarks || [])
+        setPendingReasons(data.pending_reasons || [])
+        setExistingRemarks(data.existing_remarks || null)
+        setOverallFinalStatus(data.overall_final_status || '')
+        setOverallLeadStatus(data.overall_lead_status || '')
       } else {
         const errorData = await response.json()
         setError(errorData.error || 'Failed to fetch remarks')
@@ -140,20 +154,92 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                 </Button>
               </div>
             </div>
-          ) : remarks.length === 0 ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-center">
-                <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <h3 className="text-sm font-semibold text-gray-600 mb-1">No Remarks Found</h3>
-                <p className="text-xs text-gray-500">
-                  No call remarks have been recorded for this lead yet.
-                </p>
-              </div>
-            </div>
           ) : (
             <ScrollArea className="h-[60vh] pr-4">
               <div className="space-y-4">
-                {remarks.map((remark, index) => (
+                {/* Overall status badge */}
+                {(overallFinalStatus || overallLeadStatus) && (
+                  <div className="border rounded-lg p-3 bg-white">
+                    {overallFinalStatus && (
+                      <Badge className={overallFinalStatus === 'Won' ? 'bg-green-100 text-green-800' : overallFinalStatus === 'Lost' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}>
+                        {overallFinalStatus}
+                      </Badge>
+                    )}
+                    {!overallFinalStatus && overallLeadStatus && (
+                      <Badge className="bg-gray-100 text-gray-800">{overallLeadStatus}</Badge>
+                    )}
+                  </div>
+                )}
+                {/* Pending Reasons Section - Multiple attempts */}
+                {pendingReasons.length > 0 && (
+                  <div className="border rounded-lg p-4 border-l-4 border-l-amber-500 bg-amber-50">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText className="h-4 w-4 text-amber-600" />
+                      <Badge className="bg-amber-100 text-amber-800">
+                        📝 Pending Attempts ({pendingReasons.length})
+                      </Badge>
+                    </div>
+                    <div className="space-y-3">
+                      {pendingReasons.map((reason, index) => (
+                        <div key={index} className="bg-white rounded-lg p-3 border border-amber-200">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                Attempt #{reason.attempt}
+                              </Badge>
+                              <Badge className="text-xs bg-orange-100 text-orange-800">
+                                {reason.status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <Calendar className="h-3 w-3" />
+                              {formatDate(reason.date)}
+                            </div>
+                          </div>
+                          <div className="text-sm text-gray-700 leading-relaxed">
+                            {reason.reason}
+                          </div>
+                          {reason.user && (
+                            <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
+                              <User className="h-3 w-3" />
+                              {reason.user}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing Remarks Section - Unqualified/Lost leads */}
+                {existingRemarks && (
+                  <div className="border rounded-lg p-4 border-l-4 border-l-red-500 bg-red-50">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className="h-4 w-4 text-red-600" />
+                      <Badge className="bg-red-100 text-red-800">
+                        ❌ Lost/Unqualified Reason
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-gray-700 leading-relaxed">
+                      {existingRemarks}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Show "No Remarks Found" only if no pending reasons, no existing remarks AND no regular remarks */}
+                {pendingReasons.length === 0 && !existingRemarks && remarks.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="text-center">
+                      <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">No Remarks Found</h3>
+                      <p className="text-xs text-gray-500">
+                        No call remarks have been recorded for this lead yet.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {remarks.map((remark, index) => (
                   <div
                     key={index}
                     className={`border rounded-lg p-4 ${
@@ -197,6 +283,8 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                     </div>
                   </div>
                 ))}
+                  </>
+                )}
               </div>
             </ScrollArea>
           )}

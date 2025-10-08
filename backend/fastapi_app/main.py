@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
@@ -251,6 +251,7 @@ class LeadUpdate(BaseModel):
     buying_plan: Optional[str] = None
     finance_option: Optional[str] = None
     first_remark: Optional[str] = None
+    first_call_remark: Optional[str] = None
     profession: Optional[str] = None
     trade_in: Optional[str] = None
     trade_in_make: Optional[str] = None
@@ -263,10 +264,16 @@ class LeadUpdate(BaseModel):
     call_status: Optional[str] = None
     # New: location field to store into lead_master.customer_location
     customer_location: Optional[str] = None
+    # Pending reasons for pending leads (JSONB array) - multiple attempts
+    pending_reasons: Optional[List[dict]] = None
+    # Existing remarks from previous interactions (for unqualified/lost leads)
+    existing_remarks: Optional[str] = None
     # New: follow-up note for qualified workflow (maps to second..fifth remarks)
     followup_note: Optional[str] = None
     # New: allow updating final_status (Won/Lost/Pending)
     final_status: Optional[str] = None
+    # New: allow updating lead_status (Qualified/Not interested/RNR/etc.)
+    lead_status: Optional[str] = None
     # Per-step follow-up lead status fields (F1..F5)
     second_call_lead_status: Optional[str] = None
     third_call_lead_status: Optional[str] = None
@@ -1377,24 +1384,38 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
                 
             except Exception as e:
                 print(f"Warning: Failed to enqueue background task: {e}")
-                # Fallback: insert directly
+                # Fallback: insert directly ONLY if lead is qualified
                 try:
-                    qualified_lead_data = {
-                        "lead_uid": lead_uid,
-                        "customer_name": lead_data.customer_name,
-                        "customer_mobile_number": lead_data.customer_mobile_number,
-                        "source": lead_data.source,
-                        "sub_source": lead_data.sub_source,
-                        "cre_name": lead_data.cre_name,
-                        "first_remark": lead_data.remarks,
-                        "created_at": now_ist_iso(),
-                        "updated_at": now_ist_iso()
-                    }
+                    # Check if lead is actually qualified before inserting into qualified_leads
+                    lead_check = supabase.table('lead_master').select('lead_status, final_status').eq('uid', lead_uid).execute()
                     
-                    # Insert qualified lead
-                    qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
-                    if not qualified_response.data:
-                        print(f"Warning: Failed to insert qualified lead for {lead_uid}")
+                    if lead_check.data:
+                        lead = lead_check.data[0]
+                        lead_status = lead.get('lead_status', '')
+                        final_status = lead.get('final_status', '')
+                        
+                        # Only insert into qualified_leads if lead is actually qualified
+                        if lead_status == 'Qualified':
+                            print(f"Lead {lead_uid} is qualified - inserting into qualified_leads (fallback)")
+                            
+                            qualified_lead_data = {
+                                "lead_uid": lead_uid,
+                                "customer_name": lead_data.customer_name,
+                                "customer_mobile_number": lead_data.customer_mobile_number,
+                                "source": lead_data.source,
+                                "sub_source": lead_data.sub_source,
+                                "cre_name": lead_data.cre_name,
+                                "first_remark": lead_data.remarks,
+                                "created_at": now_ist_iso(),
+                                "updated_at": now_ist_iso()
+                            }
+                            
+                            # Insert qualified lead
+                            qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+                            if not qualified_response.data:
+                                print(f"Warning: Failed to insert qualified lead for {lead_uid}")
+                        else:
+                            print(f"Lead {lead_uid} is not qualified (status: {lead_status}, final: {final_status}) - skipping qualified_leads insertion (fallback)")
                     
                     # Insert into trade_in_master if trade-in details provided
                     if any([lead_data.trade_in_make, lead_data.trade_in_model, lead_data.trade_in_year, lead_data.trade_in_km, lead_data.trade_in_ownership]):
@@ -1470,8 +1491,12 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["first_remark"] = lead_data.first_remark
         elif lead_data.notes:
             update_data["first_remark"] = lead_data.notes
+        
+        # Handle first_call_remark for pending/unqualified leads
+        if lead_data.first_call_remark is not None:
+            update_data["first_call_remark"] = lead_data.first_call_remark
         # Auto-stamp first call date (now uses TIMESTAMP)
-        if ("first_remark" in update_data) and not (existing_lead.get("first_call_date")):
+        if (("first_remark" in update_data) or ("first_call_remark" in update_data)) and not (existing_lead.get("first_call_date")):
             update_data["first_call_date"] = now_ist_iso()
         # Additional mapped fields
         if lead_data.variant is not None:
@@ -1527,6 +1552,34 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             update_data["fifth_call_lead_status"] = lead_data.fifth_call_lead_status
         if lead_data.sixth_call_lead_status is not None:
             update_data["sixth_call_lead_status"] = lead_data.sixth_call_lead_status
+
+        # Handle pending_reasons for pending leads (multiple attempts)
+        if lead_data.pending_reasons is not None:
+            # Ensure each pending reason has IST timestamp and status
+            current_time = now_ist_iso()
+            processed_reasons = []
+            for reason in lead_data.pending_reasons:
+                if isinstance(reason, dict):
+                    # Ensure timestamp is set to current IST time if not provided
+                    if 'date' not in reason or not reason['date']:
+                        reason['date'] = current_time
+                    # Ensure status is included
+                    if 'status' not in reason and 'reason' in reason:
+                        reason['status'] = reason['reason']
+                    processed_reasons.append(reason)
+            update_data["pending_reasons"] = processed_reasons
+        
+        # Handle existing_remarks for unqualified/lost leads
+        if lead_data.existing_remarks is not None:
+            update_data["first_remark"] = lead_data.existing_remarks
+        
+        # Handle lead_status updates (Qualified/Not interested/RNR/etc.)
+        if lead_data.lead_status is not None:
+            update_data["lead_status"] = lead_data.lead_status
+        
+        # Handle final_status updates (Won/Lost/Pending)
+        if lead_data.final_status is not None:
+            update_data["final_status"] = lead_data.final_status
 
         # Debug: show final update data
         try:
@@ -1654,6 +1707,19 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                     update_data["follow_up_date"] = f"{fud}T{current_time}"
                 else:
                     update_data["follow_up_date"] = fud
+
+        # Handle pending_reasons for pending leads (multiple attempts)
+        if lead_data.pending_reasons is not None:
+            current_time = now_ist_iso()
+            processed_reasons = []
+            for reason in lead_data.pending_reasons:
+                if isinstance(reason, dict):
+                    if 'date' not in reason or not reason['date']:
+                        reason['date'] = current_time
+                    if 'status' not in reason and 'reason' in reason:
+                        reason['status'] = reason['reason']
+                    processed_reasons.append(reason)
+            update_data["pending_reasons"] = processed_reasons
 
         # Per-step follow-up outcome fields
         if lead_data.second_call_lead_status is not None:
@@ -2323,13 +2389,16 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 'uid', 'customer_name', 'first_remark', 'second_remark', 'third_remark', 
                 'fourth_remark', 'fifth_remark', 'sixth_remark', 'first_call_date', 'second_call_date', 
                 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date', 
-                'lead_status', 'cre_name',
+                'lead_status', 'final_status', 'cre_name', 'pending_reasons',
                 'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
             ).eq('uid', lead_uid).execute()
             
             if cre_response.data:
                 lead_data = cre_response.data[0]
                 cre_remarks = []
+                overall_final_status = (lead_data.get('final_status') or '').strip()
+                overall_lead_status = (lead_data.get('lead_status') or '').strip()
+                existing_remarks_value = (lead_data.get('first_remark') or '').strip()
                 
                 # Collect CRE remarks with per-step statuses
                 call_fields = [
@@ -2423,10 +2492,19 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
         # Sort remarks by date
         remarks.sort(key=lambda x: x['date'] if x['date'] else '1900-01-01')
         
+        # Get pending_reasons from lead data
+        pending_reasons = []
+        if cre_response.data:
+            pending_reasons = cre_response.data[0].get('pending_reasons', [])
+        
         return {
             'lead_uid': lead_uid,
             'remarks': remarks,
-            'total_remarks': len(remarks)
+            'total_remarks': len(remarks),
+            'pending_reasons': pending_reasons,
+            'overall_final_status': overall_final_status if 'overall_final_status' in locals() else '',
+            'overall_lead_status': overall_lead_status if 'overall_lead_status' in locals() else '',
+            'existing_remarks': existing_remarks_value if 'existing_remarks_value' in locals() else ''
         }
         
     except Exception as e:
@@ -2780,6 +2858,7 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     "customer_name": lead_data['customer_name'],
                     "customer_mobile_number": lead_data['customer_mobile_number'],
                     "source": lead_data['source'],
+                    "sub_source": lead_data.get('sub_source'),
                     "cre_name": lead_data['cre_name'],
                     "lead_category": lead_data['lead_category'],
                     "model_interested": lead_data['model_interested'],
@@ -3002,7 +3081,7 @@ async def get_ps_followups(
             # Admin and branch heads can see all follow-ups
             pass
 
-        # Apply source filtering for walk-in leads
+        # Apply source filtering if requested
         if source:
             if source == 'walk-in':
                 # Show only walk-in and digital leads (receptionist captured)
@@ -3010,9 +3089,7 @@ async def get_ps_followups(
             else:
                 # Show specific source
                 query = query.eq('source', source)
-        else:
-            # Default: Show only receptionist-created leads (Walk-in and Digital)
-            query = query.in_('source', ['Walk-in', 'Digital'])
+        # No else clause - show all sources by default for PS users
         
         # Execute query with ordering
         response = query.order('follow_up_date', desc=False).execute()
@@ -3146,6 +3223,7 @@ async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
             'customer_mobile_number': lead_data['customer_mobile_number'],
             'alternate_mobile_number': lead_data.get('alternate_mobile_number'),
             'source': lead_data['source'],
+            'sub_source': lead_data.get('sub_source', ''),
             'cre_name': assigned_cre['name'] if assigned_cre else None,
             'cre_id': assigned_cre['id'] if assigned_cre else None,
             'lead_category': 'Hot',
@@ -4315,6 +4393,7 @@ async def create_receptionist_lead(
             "customer_mobile_number": lead_data.customer_mobile_number,
             "alternate_mobile_number": None,
             "source": lead_data.source,
+            "sub_source": lead_data.sub_source,
             "cre_name": assigned_cre['name'] if assigned_cre else None,
             "cre_id": assigned_cre['id'] if assigned_cre else None,
             "lead_category": "Hot",  # Walk-in leads are typically hot
@@ -4776,6 +4855,245 @@ async def get_queue_stats():
 
 # Include optimized endpoints
 app.include_router(optimized_router)
+
+# ========================================
+# WACTO WHATSAPP WEBHOOK ENDPOINTS
+# ========================================
+
+def normalize_phone_number(phone: str) -> str:
+    """Normalize phone to 10-digit format"""
+    if not phone:
+        return ""
+    digits = ''.join(filter(str.isdigit, str(phone)))
+    if digits.startswith('91') and len(digits) == 12:
+        digits = digits[2:]
+    elif digits.startswith('0') and len(digits) == 11:
+        digits = digits[1:]
+    return digits[-10:] if len(digits) >= 10 else digits
+
+@app.post("/webhook/wacto")
+async def wacto_webhook(
+    request: Request,
+    x_webhook_signature: Optional[str] = Header(None)
+):
+    """
+    Webhook endpoint to receive WhatsApp CTA leads from Wacto
+    Source: Whatsapp | Sub-source: Wacto
+    """
+    try:
+        # Get webhook secret from environment
+        WACTO_WEBHOOK_SECRET = os.environ.get('WACTO_WEBHOOK_SECRET')
+        
+        # Verify webhook signature (optional but recommended)
+        if WACTO_WEBHOOK_SECRET and x_webhook_signature:
+            if x_webhook_signature != WACTO_WEBHOOK_SECRET:
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        
+        # Parse webhook payload
+        payload = await request.json()
+        print(f"📩 [Wacto] Received webhook: {payload}")
+        
+        # Extract WhatsApp Business Account webhook structure
+        if payload.get("object") != "whatsapp_business_account":
+            return {"status": "ignored", "reason": "Not a WhatsApp webhook"}
+        
+        # Process entries
+        entries = payload.get("entry", [])
+        
+        for entry in entries:
+            changes = entry.get("changes", [])
+            
+            for change in changes:
+                if change.get("field") != "messages":
+                    continue
+                
+                value = change.get("value", {})
+                messages = value.get("messages", [])
+                contacts = value.get("contacts", [])
+                metadata = value.get("metadata", {})
+                
+                # Process each message
+                for message in messages:
+                    # Extract contact info
+                    contact_info = contacts[0] if contacts else {}
+                    customer_name = contact_info.get("profile", {}).get("name", "Unknown")
+                    whatsapp_id = contact_info.get("wa_id", "")
+                    phone_number = message.get("from", "")
+                    
+                    # Normalize phone number
+                    normalized_phone = normalize_phone_number(phone_number)
+                    
+                    if not normalized_phone:
+                        print(f"⚠️ [Wacto] Invalid phone number: {phone_number}")
+                        continue
+                    
+                    # Extract message details
+                    message_type = message.get("type", "")
+                    message_id = message.get("id", "")
+                    timestamp = message.get("timestamp", "")
+                    
+                    # Convert timestamp to datetime
+                    webhook_time = datetime.fromtimestamp(int(timestamp)) if timestamp else datetime.now()
+                    
+                    # Handle different message types
+                    message_text = ""
+                    button_payload = ""
+                    referral_data = {}
+                    campaign_name = "WhatsApp CTA"
+                    
+                    # CTA Button Response
+                    if message_type == "button":
+                        button_data = message.get("button", {})
+                        button_payload = button_data.get("payload", "")
+                        message_text = button_data.get("text", "")
+                        campaign_name = f"WhatsApp CTA - {button_payload}"
+                    
+                    # Interactive Button Response
+                    elif message_type == "interactive":
+                        interactive = message.get("interactive", {})
+                        interactive_type = interactive.get("type", "")
+                        
+                        if interactive_type == "button_reply":
+                            button_reply = interactive.get("button_reply", {})
+                            button_payload = button_reply.get("id", "")
+                            message_text = button_reply.get("title", "")
+                            campaign_name = f"WhatsApp Interactive - {button_payload}"
+                        
+                        elif interactive_type == "list_reply":
+                            list_reply = interactive.get("list_reply", {})
+                            button_payload = list_reply.get("id", "")
+                            message_text = list_reply.get("title", "")
+                            campaign_name = f"WhatsApp List - {button_payload}"
+                    
+                    # Text message with referral (Click to WhatsApp Ads)
+                    elif message_type == "text":
+                        text_data = message.get("text", {})
+                        message_text = text_data.get("body", "")
+                        
+                        # Check for referral data (CTA from ads)
+                        referral = message.get("referral", {})
+                        if referral:
+                            referral_data = {
+                                "source_url": referral.get("source_url", ""),
+                                "source_id": referral.get("source_id", ""),
+                                "source_type": referral.get("source_type", ""),
+                                "headline": referral.get("headline", ""),
+                                "ctwa_clid": referral.get("ctwa_clid", "")
+                            }
+                            campaign_name = f"WhatsApp Ad - {referral.get('headline', 'CTA')}"
+                    
+                    # Store additional metadata
+                    metadata_json = {
+                        "whatsapp_id": whatsapp_id,
+                        "message_id": message_id,
+                        "message_type": message_type,
+                        "message_text": message_text,
+                        "button_payload": button_payload,
+                        "referral_data": referral_data,
+                        "webhook_timestamp": webhook_time.isoformat()
+                    }
+                    
+                    # Check if lead already exists (by phone + source + sub_source)
+                    existing = supabase.table("lead_master").select("*").eq(
+                        "customer_mobile_number", normalized_phone
+                    ).eq("source", "Whatsapp").eq("sub_source", "Wacto").execute()
+                    
+                    if existing.data:
+                        print(f"⚠️ [Wacto] Lead already exists: {normalized_phone} | Source: Whatsapp | Sub-source: Wacto")
+                        # Update metadata with new interaction
+                        existing_lead = existing.data[0]
+                        existing_metadata = existing_lead.get("metadata", {})
+                        
+                        # Add new message to metadata
+                        if "interactions" not in existing_metadata:
+                            existing_metadata["interactions"] = []
+                        
+                        existing_metadata["interactions"].append({
+                            "timestamp": webhook_time.isoformat(),
+                            "message_text": message_text,
+                            "button_payload": button_payload,
+                            "message_type": message_type
+                        })
+                        
+                        update_data = {
+                            "metadata": existing_metadata,
+                            "updated_at": now_ist_iso()
+                        }
+                        
+                        supabase.table("lead_master").update(update_data).eq(
+                            "id", existing_lead['id']
+                        ).execute()
+                        
+                        print(f"📝 [Wacto] Updated existing lead with new interaction: {existing_lead['uid']}")
+                        continue
+                    
+                    # Prepare new lead data for lead_master
+                    lead_data = {
+                        "date": webhook_time.date().isoformat(),
+                        "customer_name": customer_name,
+                        "customer_mobile_number": normalized_phone,
+                        "source": "Whatsapp",
+                        "sub_source": "Wacto",
+                        "campaign": campaign_name,
+                        "assigned": "No",
+                        "lead_status": "Pending",
+                        "final_status": "Pending",
+                        "metadata": metadata_json,
+                        "created_at": now_ist_iso(),
+                        "updated_at": now_ist_iso()
+                    }
+                    
+                    # Insert into lead_master (UID auto-generated by trigger)
+                    result = supabase.table("lead_master").insert(lead_data).execute()
+                    
+                    if result.data:
+                        inserted_lead = result.data[0]
+                        print(f"✅ [Wacto] New WhatsApp CTA lead: {inserted_lead['uid']} | {customer_name} | {normalized_phone}")
+                        print(f"   Source: Whatsapp | Sub-source: Wacto | Campaign: {campaign_name}")
+                    else:
+                        print(f"❌ [Wacto] Failed to insert lead: {normalized_phone}")
+        
+        return {"status": "success", "message": "Webhook processed successfully"}
+        
+    except Exception as e:
+        print(f"❌ [Wacto] Error processing webhook: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/webhook/wacto/test")
+async def test_wacto_leads():
+    """Test endpoint to view recent Wacto WhatsApp leads"""
+    try:
+        leads = supabase.table("lead_master").select(
+            "uid, customer_name, customer_mobile_number, source, sub_source, campaign, lead_status, final_status, created_at"
+        ).eq("source", "Whatsapp").eq("sub_source", "Wacto").order(
+            "created_at", desc=True
+        ).limit(10).execute()
+        
+        return {
+            "total_leads": len(leads.data),
+            "leads": leads.data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/webhook/wacto/all-whatsapp")
+async def test_all_whatsapp_leads():
+    """Test endpoint to view ALL WhatsApp leads (any sub-source)"""
+    try:
+        leads = supabase.table("lead_master").select(
+            "uid, customer_name, customer_mobile_number, source, sub_source, campaign, lead_status, final_status, created_at"
+        ).eq("source", "Whatsapp").order(
+            "created_at", desc=True
+        ).limit(20).execute()
+        
+        return {
+            "total_leads": len(leads.data),
+            "leads": leads.data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 JWT_SECRET = config('JWT_SECRET', default=os.environ.get('JWT_SECRET', 'your-jwt-secret-key-here'))
 JWT_ALGORITHM = config('JWT_ALGORITHM', default=os.environ.get('JWT_ALGORITHM', 'HS256'))

@@ -227,10 +227,8 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     print(f"🔄 [Background Worker] Lead status: {lead_status_val}, Final status: {final_status_val}, First remark: {first_remark_val[:50]}...")
                     
                     should_sync_qualified = (
-                        (final_status_val.lower() == 'pending' and (lead_status_val in ['Qualified', 'Pending']))
-                        or ('status' in update_data and str(update_data.get('status', '')).strip() == 'Qualified')
-                        or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() in ['Qualified', 'Pending'])
-                        or ('first_remark' in update_data and bool(update_data.get('first_remark')))
+                        (lead_status_val == 'Qualified')
+                        or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() == 'Qualified')
                     )
                     
                     print(f"🔄 [Background Worker] Should sync to qualified_leads: {should_sync_qualified}")

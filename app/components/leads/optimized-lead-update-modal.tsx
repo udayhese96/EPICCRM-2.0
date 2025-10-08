@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { CheckCircle2, Lock, Circle } from "lucide-react"
 import { LeadFormHeader } from "./lead-form-header"
 import { LeadQualificationForm } from "./lead-qualification-form"
+import { toast } from "sonner"
 
 interface Lead {
   id: string
@@ -76,6 +77,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
   const [isProcessing, setIsProcessing] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const today = new Date().toISOString().slice(0,10)
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0,10)
   
   const [formData, setFormData] = useState({
     model_interested: "",
@@ -93,7 +95,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
     trade_in_year: "",
     trade_in_km: "",
     trade_in_ownership: "",
-    follow_up_date: "",
+    follow_up_date: tomorrow,
     lead_category: "",
     lost_reason: "",
     pending_reason: "",
@@ -128,7 +130,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
       trade_in_year: "",
       trade_in_km: "",
       trade_in_ownership: "",
-      follow_up_date: "",
+      follow_up_date: tomorrow,
       lead_category: "",
       lost_reason: "",
       pending_reason: "",
@@ -189,6 +191,52 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
     const isClosed = leadStatus === "Won" || leadStatus === "Lost"
     const isFollowUpWorkflow = !isClosed && leadStatus !== "" && !selectedStatus
     const pendingExactStatus = formData.pending_reason || "Called"
+
+    // Validation for required fields
+    if (leadStatus === "Qualified" && !formData.follow_up_date) {
+      toast.error("Please select a follow-up date before submitting.")
+      return
+    }
+
+    if (selectedStatus === "qualified" && (!formData.model_interested || !formData.variant || !formData.follow_up_date)) {
+      toast.error("Please fill in all required fields: Model Interested, Variant, and Follow-up Date.")
+      return
+    }
+
+    if (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date) {
+      toast.error("Please select a follow-up date when marking as 'Call me back'.")
+      return
+    }
+
+    // Prevent empty updates during follow-up workflow
+    if (isFollowUpWorkflow) {
+      const hasAnyInput = Boolean(
+        (formData.call_status && String(formData.call_status).trim()) ||
+        (formData.sales_outcome && String(formData.sales_outcome).trim()) ||
+        (formData.general_remarks && String(formData.general_remarks).trim())
+      )
+      if (!hasAnyInput) {
+        toast.error("Add at least one detail: Call Outcome, Sales Outcome, or Remarks.")
+        return
+      }
+    }
+
+    // Validation for normal update (no status selected) - should have some field filled
+    if (!selectedStatus && leadStatus !== "Qualified") {
+      const hasAnyFieldFilled = Boolean(
+        (formData.model_interested && String(formData.model_interested).trim()) ||
+        (formData.variant && String(formData.variant).trim()) ||
+        (formData.profession && String(formData.profession).trim()) ||
+        (formData.buying_plan && String(formData.buying_plan).trim()) ||
+        (formData.finance_option && String(formData.finance_option).trim()) ||
+        (formData.general_remarks && String(formData.general_remarks).trim()) ||
+        (formData.customer_location && String(formData.customer_location).trim())
+      )
+      if (!hasAnyFieldFilled) {
+        toast.error("Please fill at least one field or select a lead status to update.")
+        return
+      }
+    }
     
     // Build update payload
     const updateData = isFollowUpWorkflow
@@ -198,7 +246,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Qualified",
           final_status: formData.sales_outcome === "Lost" ? "Lost" :
                        (formData.sales_outcome === "Booked" || formData.sales_outcome === "Retailed") ? "Won" : "Pending",
-          follow_up_date: formData.follow_up_date || today,
+          follow_up_date: formData.follow_up_date || tomorrow,
           call_status: formData.call_status,
           followup_note: formData.general_remarks
         }
@@ -212,7 +260,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
           final_status: selectedStatus === "qualified" ? "Pending" :
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? "Pending" : "Pending",
-          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || today) : (formData.follow_up_date || undefined),
+          follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : (formData.follow_up_date || undefined),
           first_remark: isFollowUpWorkflow ? undefined : formData.general_remarks,
           profession: formData.profession,
           variant: formData.variant,
@@ -360,10 +408,10 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Next Follow-up Date</Label>
+              <Label>Next Follow-up Date *</Label>
               <Input
                 type="date"
-                value={formData.follow_up_date || today}
+                value={formData.follow_up_date || tomorrow}
                 onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
               />
             </div>
@@ -512,7 +560,7 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
             {!(lead.lead_status === "Won" || lead.lead_status === "Lost") && (
               <Button 
                 onClick={handleSubmit}
-                disabled={isProcessing || (lead.lead_status !== "Qualified" && !selectedStatus) || (selectedStatus === "pending" && formData.pending_reason === "Call me back" && !formData.follow_up_date)}
+                disabled={isProcessing}
                 className={
                   selectedStatus === "unqualified" ? "bg-red-600 hover:bg-red-700" :
                   selectedStatus === "pending" ? "bg-yellow-600 hover:bg-yellow-700" :

@@ -281,7 +281,7 @@ export const LeadQualificationForm = memo(function LeadQualificationForm({
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <Label htmlFor="follow_up_date" className="text-sm font-medium mb-2 block">Follow Up Date</Label>
+              <Label htmlFor="follow_up_date" className="text-sm font-medium mb-2 block">Follow Up Date *</Label>
               <Input 
                 type="date"
                 value={formData.follow_up_date}

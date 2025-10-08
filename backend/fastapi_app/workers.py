@@ -438,7 +438,7 @@ class LeadBatchProcessor:
             logger.error(f"Error updating dashboard metrics: {str(e)}")
 
 def process_cre_lead(task_data: dict):
-    """Process CRE lead creation - insert into qualified_leads and trade_in_master"""
+    """Process CRE lead creation - insert into qualified_leads ONLY if lead is qualified"""
     try:
         from .database import get_supabase_client
         supabase = get_supabase_client()
@@ -448,49 +448,66 @@ def process_cre_lead(task_data: dict):
             logger.error("No lead_uid provided in task data")
             return
         
-        # Insert into qualified_leads
-        qualified_lead_data = {
-            "lead_uid": lead_uid,
-            "customer_name": task_data.get('customer_name', ''),
-            "customer_mobile_number": task_data.get('customer_mobile_number', ''),
-            "source": task_data.get('source', ''),
-            "sub_source": task_data.get('sub_source', ''),
-            "cre_name": task_data.get('cre_name', ''),
-            "first_remark": task_data.get('remarks', ''),
-            "created_at": now_ist_iso(),
-            "updated_at": now_ist_iso()
-        }
+        # Check if lead is actually qualified before inserting into qualified_leads
+        lead_response = supabase.table('lead_master').select('lead_status, final_status').eq('uid', lead_uid).execute()
         
-        # Insert qualified lead
-        qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
-        if not qualified_response.data:
-            logger.error(f"Failed to insert qualified lead for {lead_uid}")
+        if not lead_response.data:
+            logger.error(f"Lead {lead_uid} not found in lead_master")
             return
-        
-        # Insert into trade_in_master if trade-in details provided
-        trade_in_data = {
-            "lead_uid": lead_uid,
-            "customer_name": task_data.get('customer_name', ''),
-            "customer_mobile_number": task_data.get('customer_mobile_number', ''),
-            "trade_in_make": task_data.get('trade_in_make'),
-            "trade_in_model": task_data.get('trade_in_model'),
-            "trade_in_year": task_data.get('trade_in_year'),
-            "trade_in_km": task_data.get('trade_in_km'),
-            "trade_in_ownership": task_data.get('trade_in_ownership'),
-            "created_at": now_ist_iso(),
-            "updated_at": now_ist_iso()
-        }
-        
-        # Only insert if any trade-in details are provided
-        if any([trade_in_data.get('trade_in_make'), trade_in_data.get('trade_in_model'), 
-                trade_in_data.get('trade_in_year'), trade_in_data.get('trade_in_km'), 
-                trade_in_data.get('trade_in_ownership')]):
             
-            trade_in_response = supabase.table('trade_in_master').upsert(trade_in_data).execute()
-            if not trade_in_response.data:
-                logger.error(f"Failed to insert trade-in data for {lead_uid}")
-            else:
-                logger.info(f"Successfully inserted trade-in data for {lead_uid}")
+        lead = lead_response.data[0]
+        lead_status = lead.get('lead_status', '')
+        final_status = lead.get('final_status', '')
+        
+        # Only insert into qualified_leads if lead is actually qualified
+        if lead_status == 'Qualified':
+            logger.info(f"Lead {lead_uid} is qualified - inserting into qualified_leads")
+            
+            # Insert into qualified_leads
+            qualified_lead_data = {
+                "lead_uid": lead_uid,
+                "customer_name": task_data.get('customer_name', ''),
+                "customer_mobile_number": task_data.get('customer_mobile_number', ''),
+                "source": task_data.get('source', ''),
+                "sub_source": task_data.get('sub_source', ''),
+                "cre_name": task_data.get('cre_name', ''),
+                "first_remark": task_data.get('remarks', ''),
+                "created_at": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }
+            
+            # Insert qualified lead
+            qualified_response = supabase.table('qualified_leads').insert(qualified_lead_data).execute()
+            if not qualified_response.data:
+                logger.error(f"Failed to insert qualified lead for {lead_uid}")
+                return
+            
+            # Insert into trade_in_master if trade-in details provided
+            trade_in_data = {
+                "lead_uid": lead_uid,
+                "customer_name": task_data.get('customer_name', ''),
+                "customer_mobile_number": task_data.get('customer_mobile_number', ''),
+                "trade_in_make": task_data.get('trade_in_make'),
+                "trade_in_model": task_data.get('trade_in_model'),
+                "trade_in_year": task_data.get('trade_in_year'),
+                "trade_in_km": task_data.get('trade_in_km'),
+                "trade_in_ownership": task_data.get('trade_in_ownership'),
+                "created_at": now_ist_iso(),
+                "updated_at": now_ist_iso()
+            }
+            
+            # Only insert if any trade-in details are provided
+            if any([trade_in_data.get('trade_in_make'), trade_in_data.get('trade_in_model'), 
+                    trade_in_data.get('trade_in_year'), trade_in_data.get('trade_in_km'), 
+                    trade_in_data.get('trade_in_ownership')]):
+                
+                trade_in_response = supabase.table('trade_in_master').upsert(trade_in_data).execute()
+                if not trade_in_response.data:
+                    logger.error(f"Failed to insert trade-in data for {lead_uid}")
+                else:
+                    logger.info(f"Successfully inserted trade-in data for {lead_uid}")
+        else:
+            logger.info(f"Lead {lead_uid} is not qualified (status: {lead_status}, final: {final_status}) - skipping qualified_leads insertion")
         
         logger.info(f"Successfully processed CRE lead {lead_uid}")
         
