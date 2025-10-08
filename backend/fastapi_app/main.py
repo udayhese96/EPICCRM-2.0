@@ -1654,10 +1654,19 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
         print(f"  - first_remark_type: {type(lead_data.first_remark)}")
         print(f"  - first_remark_truthy: {bool(lead_data.first_remark)}")
         
-        # Quick validation - check if lead exists
-        existing = supabase.table('lead_master').select('uid').eq('uid', uid).limit(1).execute()
+        # Quick validation - check if lead exists and get first-call state
+        existing = (
+            supabase
+                .table('lead_master')
+                .select('uid, first_remark, first_call_date')
+                .eq('uid', uid)
+                .limit(1)
+                .execute()
+        )
         if not existing.data:
             raise HTTPException(status_code=404, detail="Lead not found")
+        existing_first_remark = (existing.data[0].get('first_remark') or '').strip()
+        existing_first_call_date = (existing.data[0].get('first_call_date') or '').strip()
 
         # Build update data
         update_data = {"updated_at": now_ist_iso()}
@@ -1732,6 +1741,23 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["fifth_call_lead_status"] = lead_data.fifth_call_lead_status
         if lead_data.sixth_call_lead_status is not None:
             update_data["sixth_call_lead_status"] = lead_data.sixth_call_lead_status
+
+        # Business rule: Only Qualified (first-call) and Unqualified/Lost should populate first_remark.
+        # Pre-qualification pending outcomes must NOT set first_remark.
+        normalized_lead_status = (lead_data.lead_status or lead_data.status or "").strip().lower() if hasattr(lead_data, 'lead_status') else (lead_data.status or "").strip().lower()
+        normalized_final_status = (lead_data.final_status or "").strip().lower() if hasattr(lead_data, 'final_status') else ""
+
+        is_qualification_event = normalized_lead_status == 'qualified'
+        is_unqualified_event = normalized_final_status == 'lost' or normalized_lead_status == 'lost'
+
+        # Only set first_remark if it's a qualification or unqualification event AND first call not recorded yet
+        if (is_qualification_event or is_unqualified_event) and not existing_first_remark and not existing_first_call_date:
+            if lead_data.first_call_remark is not None and str(lead_data.first_call_remark).strip():
+                update_data["first_remark"] = str(lead_data.first_call_remark).strip()
+                update_data["first_call_date"] = now_ist_iso()
+            elif lead_data.existing_remarks is not None and str(lead_data.existing_remarks).strip():
+                update_data["first_remark"] = str(lead_data.existing_remarks).strip()
+                update_data["first_call_date"] = now_ist_iso()
 
         # Handle follow-up notes - pass to background worker for proper follow-up logic
         if (lead_data.followup_note or "").strip():
@@ -2497,7 +2523,7 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
         if cre_response.data:
             pending_reasons = cre_response.data[0].get('pending_reasons', [])
         
-        return {
+        payload = {
             'lead_uid': lead_uid,
             'remarks': remarks,
             'total_remarks': len(remarks),
@@ -2506,6 +2532,7 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
             'overall_lead_status': overall_lead_status if 'overall_lead_status' in locals() else '',
             'existing_remarks': existing_remarks_value if 'existing_remarks_value' in locals() else ''
         }
+        return JSONResponse(content=payload, headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

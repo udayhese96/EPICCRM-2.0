@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,6 +38,7 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
   const [overallLeadStatus, setOverallLeadStatus] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [refreshTimer, setRefreshTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchRemarks = async () => {
     if (!leadUid) return
@@ -49,10 +51,11 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`/api/leads/${leadUid}/remarks`, {
+      const response = await fetch(`/api/leads/${leadUid}/remarks?_t=${Date.now()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate'
         }
       })
 
@@ -80,6 +83,49 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
       fetchRemarks()
     }
   }, [isOpen, leadUid])
+
+  // Realtime: listen for changes to this lead in lead_master and refresh
+  useEffect(() => {
+    if (!isOpen || !leadUid) return
+    try {
+      const supabase = createClient()
+      const channel = supabase
+        .channel(`remarks_lead_${leadUid}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'lead_master',
+          filter: `uid=eq.${leadUid}`
+        }, () => {
+          // Immediate refresh + staggered follow-up for eventual consistency
+          fetchRemarks()
+          setTimeout(() => fetchRemarks(), 700)
+        })
+        .subscribe()
+
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    } catch {}
+  }, [isOpen, leadUid])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+      }
+      const t = setTimeout(() => fetchRemarks(), 300)
+      setRefreshTimer(t)
+    }
+    window.addEventListener('lead-master-updated', handler as any)
+    window.addEventListener('lead-status-changed', handler as any)
+    return () => {
+      window.removeEventListener('lead-master-updated', handler as any)
+      window.removeEventListener('lead-status-changed', handler as any)
+      if (refreshTimer) clearTimeout(refreshTimer)
+    }
+  }, [isOpen, leadUid, refreshTimer])
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A'
@@ -212,7 +258,7 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                 )}
 
                 {/* Existing Remarks Section - Unqualified/Lost leads */}
-                {existingRemarks && (
+                {existingRemarks && ((overallFinalStatus || '').toLowerCase() === 'lost') && (
                   <div className="border rounded-lg p-4 border-l-4 border-l-red-500 bg-red-50">
                     <div className="flex items-center gap-2 mb-2">
                       <FileText className="h-4 w-4 text-red-600" />
