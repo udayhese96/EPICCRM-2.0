@@ -110,14 +110,14 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
 
   const handleSubmit = async () => {
     if (!formData.customer_name || !formData.customer_mobile_number || !formData.follow_up_date) {
-      alert("Please fill in required fields (Name, Mobile, and Follow-up Date)")
+      toast.error("Please fill in required fields (Name, Mobile, and Follow-up Date)")
       return
     }
 
     // Validate mobile number
     const mobile = (formData.customer_mobile_number || '').trim()
     if (!/^\d{10}$/.test(mobile)) {
-      alert("Enter a valid 10-digit mobile number")
+      toast.error("Enter a valid 10-digit mobile number")
       return
     }
 
@@ -2096,6 +2096,41 @@ export default function PSDashboard() {
                         {activeTab === 'retailed' && 'Retailed leads approval status'}
                         {activeTab === 'wonlost' && 'Leads that are won or lost'}
                       </p>
+                      
+                      {/* Source + Subsource badges */}
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {(() => {
+                          const currentList = filteredFollowUps
+                          // Create combined source+subsource badges
+                          const sourceSubsourceCombos = [...new Set(
+                            currentList
+                              .filter(item => item.source || item.sub_source)
+                              .map(item => {
+                                const source = item.source || ''
+                                const subsource = item.sub_source || ''
+                                if (source && subsource) {
+                                  return `${source} ${subsource}`
+                                } else if (source) {
+                                  return source
+                                } else if (subsource) {
+                                  return subsource
+                                }
+                                return null
+                              })
+                              .filter(Boolean)
+                          )]
+                          
+                          return (
+                            <>
+                              {sourceSubsourceCombos.map(combo => (
+                                <Badge key={combo} className="text-xs px-2 py-0.5 bg-white/20 text-white/90 border-white/30">
+                                  {combo}
+                                </Badge>
+                              ))}
+                            </>
+                          )
+                        })()}
+                      </div>
                     </div>
                   </div>
 
@@ -2384,15 +2419,22 @@ export default function PSDashboard() {
                             </div>
                             {/* Source badge for walk-in leads */}
                             {['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(item.source) && (
-                              <Badge
-                                className={`text-xs px-2 py-0.5 ${
-                                  item.source === 'Walk-in'
-                                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                }`}
-                              >
-                                {item.source === 'Walk-in' ? '🚶 Walk-in' : '💻 Digital'}
-                              </Badge>
+                              <div className="flex gap-1">
+                                <Badge
+                                  className={`text-xs px-2 py-0.5 ${
+                                    item.source === 'Walk-in'
+                                      ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  }`}
+                                >
+                                  {item.source === 'Walk-in' ? '🚶 Walk-in' : `💻 ${item.source}`}
+                                </Badge>
+                                {item.sub_source && item.sub_source !== '' && (
+                                  <Badge className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                    {item.sub_source}
+                                  </Badge>
+                                )}
+                              </div>
                             )}
                             {activeTab !== 'fresh' && (
                               <>
@@ -2955,7 +2997,7 @@ export default function PSDashboard() {
                       <div>
                         <Label htmlFor="followUpDate" className="text-sm font-semibold text-gray-700 mb-2 block flex items-center">
                           <Calendar className="w-4 h-4 mr-2" />
-                          Next Follow-up Date
+                          Next Follow-up Date *
                         </Label>
                         <Input
                           id="followUpDate"

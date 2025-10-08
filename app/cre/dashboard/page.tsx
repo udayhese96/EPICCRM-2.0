@@ -98,6 +98,16 @@ interface Lead {
   lost_reason?: string
   lost_requested_at?: string
   ps_requested_by?: string
+  // Pending reasons for pending leads (JSONB array) - multiple attempts
+  pending_reasons?: Array<{
+    attempt: number
+    reason: string
+    status: string
+    date: string
+    user?: string
+  }>
+  // Existing remarks for unqualified/lost leads
+  existing_remarks?: string
 }
 
 export default function CREDashboard() {
@@ -122,6 +132,37 @@ export default function CREDashboard() {
   const [countsUpdating, setCountsUpdating] = useState(false)
   const [notifications, setNotifications] = useState<Array<{id: string, type: 'walkin', leadUid: string, timestamp: Date, message?: string}>>([])
 
+  // Debounced refresh to coalesce multiple triggers
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastRefreshAtRef = useRef<number>(0)
+
+  const requestRefresh = (options?: { immediate?: boolean, force?: boolean }) => {
+    const now = Date.now()
+    const immediate = !!options?.immediate
+    const force = !!options?.force
+    // Throttle: if a refresh was requested very recently, skip unless forced
+    if (!force && (now - lastRefreshAtRef.current < 800)) return
+    lastRefreshAtRef.current = now
+
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = null
+    }
+
+    const run = async () => {
+      setIsRefreshing(true)
+      await fetchAssignedLeads(true)
+      fetchLostRequests()
+      setTimeout(() => setIsRefreshing(false), 900)
+    }
+
+    if (immediate) {
+      run()
+    } else {
+      refreshTimerRef.current = setTimeout(run, 300)
+    }
+  }
+
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
     if (supabaseUser) {
@@ -132,19 +173,12 @@ export default function CREDashboard() {
 
     // Listen for immediate refresh events after modal submits
     const immediateRefresh = async () => {
-      setIsRefreshing(true)
       if (process.env.NODE_ENV === 'development') {
         console.log('🔄 [Event] Lead master updated event triggered')
       }
-      const result = await fetchAssignedLeads(true)
-      fetchLostRequests()
-      // If counts didn't change yet, retry once after 1s to cover propagation lag
-      try {
-        if (result && JSON.stringify(result.before) === JSON.stringify(result.after)) {
-          setTimeout(() => { fetchAssignedLeads(true) }, 1000)
-        }
-      } catch {}
-      setTimeout(() => setIsRefreshing(false), 900)
+      requestRefresh({ immediate: true, force: true })
+      // Staggered follow-up refresh to catch propagation lag
+      setTimeout(() => requestRefresh({ immediate: true, force: true }), 900)
     }
     
     // Listen for lead status changes specifically
@@ -152,12 +186,8 @@ export default function CREDashboard() {
       if (process.env.NODE_ENV === 'development') {
         console.log('🔄 [Event] Lead status change event triggered')
       }
-      setIsRefreshing(true)
-      // Multiple rapid refreshes to catch status changes
-      fetchAssignedLeads(true)
-      setTimeout(() => fetchAssignedLeads(true), 500)
-      setTimeout(() => fetchAssignedLeads(true), 1000)
-      setTimeout(() => setIsRefreshing(false), 1500)
+      requestRefresh({ immediate: true, force: true })
+      setTimeout(() => requestRefresh({ immediate: true, force: true }), 900)
     }
     
     window.addEventListener('lead-master-updated', immediateRefresh as any)
@@ -205,6 +235,10 @@ export default function CREDashboard() {
       clearInterval(primaryPolling)
       clearInterval(countPolling)
       clearInterval(workerStatusCheck)
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+        refreshTimerRef.current = null
+      }
     }
   }, [user?.username])
 
@@ -248,13 +282,11 @@ export default function CREDashboard() {
             console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
           }
           setCountsUpdating(true)
-          // Immediate refresh for status changes
-          fetchAssignedLeads(true)
-          // Also trigger a delayed refresh to catch any propagation lag
+          requestRefresh({ immediate: true, force: true })
+          setTimeout(() => requestRefresh({ immediate: true, force: true }), 800)
           setTimeout(() => {
-            fetchAssignedLeads(true)
             setCountsUpdating(false)
-          }, 1000)
+          }, 1200)
         }
       )
       .subscribe((status) => {
@@ -298,13 +330,11 @@ export default function CREDashboard() {
             console.log('🔄 [Real-time] Refreshing leads data due to qualified_leads change')
           }
           setCountsUpdating(true)
-          // Immediate refresh for qualified leads changes
-          fetchAssignedLeads(true)
-          // Also trigger a delayed refresh to catch any propagation lag
+          requestRefresh({ immediate: true, force: true })
+          setTimeout(() => requestRefresh({ immediate: true, force: true }), 800)
           setTimeout(() => {
-            fetchAssignedLeads(true)
             setCountsUpdating(false)
-          }, 1000)
+          }, 1200)
         }
       )
       .subscribe((status) => {
@@ -439,7 +469,7 @@ export default function CREDashboard() {
             customer_name: l.customer_name || '',
             customer_mobile_number: l.customer_mobile_number || '',
             source: l.source || '',
-            campaign: l.sub_source || l.model_interested || '',
+            campaign: l.campaign || '',
             date: (l.created_at || '').slice(0,10) || '',
             lead_status: (l.lead_status || '').toString().trim(),
             final_status: (l.final_status || '').toString().trim(),
@@ -467,7 +497,11 @@ export default function CREDashboard() {
             third_call_lead_status: l.third_call_lead_status || '',
             fourth_call_lead_status: l.fourth_call_lead_status || '',
             fifth_call_lead_status: l.fifth_call_lead_status || '',
-            sixth_call_lead_status: l.sixth_call_lead_status || ''
+            sixth_call_lead_status: l.sixth_call_lead_status || '',
+            // Pending reasons for pending leads (multiple attempts)
+            pending_reasons: l.pending_reasons || [],
+            // Existing remarks for unqualified/lost leads
+            existing_remarks: l.existing_remarks || ''
           }
         })
         
@@ -546,21 +580,12 @@ export default function CREDashboard() {
 
   const handleUpdateLead = (leadData: any) => {
     if (process.env.NODE_ENV === 'development') {
-      console.log("🔄 [UI Sync] Lead update initiated; syncing from lead_master", leadData)
+      console.log("🔄 [UI Sync] Lead update initiated; awaiting consolidated refresh", leadData)
     }
     
-    // Strict server-sync: refetch from lead_master (single source of truth)
+    // Rely on events from the modal + debounced refresh
     setIsRefreshing(true)
-    
-    // Small delay because the PUT is triggered inside the modal after this callback
-    setTimeout(() => {
-      fetchAssignedLeads()
-      // Second pass to guarantee consistency even if DB commit lags briefly
-      setTimeout(() => {
-        fetchAssignedLeads()
-        setIsRefreshing(false)
-      }, 1200)
-    }, 600)
+    setTimeout(() => setIsRefreshing(false), 1200)
   }
 
   const openUpdateModal = (lead: Lead) => {
@@ -576,7 +601,7 @@ export default function CREDashboard() {
       customer_name: leadData.customer_name,
       customer_mobile_number: leadData.customer_mobile_number,
       source: leadData.source,
-      campaign: leadData.sub_source || '', // Map sub_source to campaign for display
+      campaign: leadData.campaign || '', // Use campaign column directly
       date: leadData.created_at?.slice(0,10) || new Date().toISOString().slice(0,10),
       // CRE leads are immediately qualified
       lead_status: 'Qualified',
@@ -683,6 +708,28 @@ export default function CREDashboard() {
       return true
     }
 
+    const withinFollowUpDateFilter = (lead: any) => {
+      if (!lead.follow_up_date) return false
+      const followUpDate = lead.follow_up_date.includes('T')
+        ? lead.follow_up_date.slice(0,10)
+        : lead.follow_up_date
+      
+      // Use new date range filter if dates are set
+      if (startDate) {
+        return followUpDate === startDate
+      }
+      
+      // Fallback to old date mode system
+      if (dateMode === 'All Time') return true
+      // For "Today" filter in followup tab, include overdue leads (<= today)
+      if (dateMode === 'Today') return followUpDate <= todayIso
+      if (dateMode === 'This Week') return followUpDate >= startOfWeek && followUpDate <= todayIso
+      if (dateMode === 'Date Range') {
+        return startDate ? followUpDate === startDate : true
+      }
+      return true
+    }
+
     const isFinalizedWon = (lead: any) => {
       const fs = (lead?.final_status || '').toString().toLowerCase()
       return fs === 'booked' || fs === 'retailed'
@@ -702,13 +749,29 @@ export default function CREDashboard() {
       case "followup":
         {
           const today = new Date().toISOString().slice(0,10)
-          filteredLeads = leads.filter(lead => {
+          // First filter for overdue/due today leads
+          const overdueAndDueToday = leads.filter(lead => {
             if (!lead.follow_up_date) return false
             const followUpDate = lead.follow_up_date.includes('T')
               ? lead.follow_up_date.slice(0,10)
               : lead.follow_up_date
             // Include due today or overdue
-            return followUpDate <= today
+            return followUpDate <= today && !isFinalizedWon(lead)
+          })
+          
+          // Then apply date mode filter
+          filteredLeads = overdueAndDueToday.filter(lead => {
+            if (!lead.follow_up_date) return false
+            const raw = lead.follow_up_date
+            const followUpDate = raw.includes('T') ? raw.slice(0,10) : raw
+            
+            if (dateMode === 'All Time') return true
+            if (dateMode === 'Today') return followUpDate <= todayIso // Include overdue
+            if (dateMode === 'This Week') return followUpDate >= startOfWeek && followUpDate <= todayIso
+            if (dateMode === 'Date Range') {
+              return startDate ? followUpDate === startDate : true
+            }
+            return true
           })
         }
         break
@@ -721,7 +784,7 @@ export default function CREDashboard() {
         if (process.env.NODE_ENV === 'development') {
           console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
         }
-        filteredLeads = pendingCandidates
+        filteredLeads = pendingCandidates.filter(withinDateFilter)
         if (pendingCategory !== "all") {
           filteredLeads = filteredLeads.filter(lead => lead.lead_category === pendingCategory)
         }
@@ -735,7 +798,7 @@ export default function CREDashboard() {
         if (process.env.NODE_ENV === 'development') {
           console.log('Qualified candidates:', qualifiedCandidates.length, qualifiedCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status })))
         }
-        filteredLeads = qualifiedCandidates
+        filteredLeads = qualifiedCandidates.filter(withinDateFilter)
         break
       case "wonlost":
         filteredLeads = leads.filter(lead => {
@@ -745,7 +808,7 @@ export default function CREDashboard() {
           const isBooked = fs === 'booked'
           const isRetailed = fs === 'retailed'
           return isLost || isLostRequested || isBooked || isRetailed
-        })
+        }).filter(withinDateFilter)
         break
       case "lostconfirm":
         // Lost confirmation = leads with lost_status = "Requested" for this CRE
@@ -755,7 +818,7 @@ export default function CREDashboard() {
           customer_name: request.customer_name,
           customer_mobile_number: request.customer_mobile_number,
           source: request.source,
-          campaign: request.model_interested || '',
+          campaign: request.campaign || '',
           date: request.created_at ? request.created_at.slice(0,10) : '',
           lead_status: 'Lost Requested',
           final_status: 'Lost Requested',
@@ -779,13 +842,12 @@ export default function CREDashboard() {
         // Filter to only show walk-in, digital, and referral leads
         filteredLeads = leads.filter(lead =>
           ['Walk-in', 'Digital', 'Referral'].includes(lead.source)
-        )
+        ).filter(withinDateFilter)
         break
       default:
-        filteredLeads = leads
+        filteredLeads = leads.filter(withinDateFilter)
     }
 
-    filteredLeads = filteredLeads.filter(withinDateFilter)
 
 
     // Filter by status within tab using business rules
@@ -1064,8 +1126,7 @@ export default function CREDashboard() {
                 if (process.env.NODE_ENV === 'development') {
                   console.log('🔄 [Manual] Manual refresh triggered')
                 }
-                fetchAssignedLeads()
-                fetchLostRequests()
+                requestRefresh({ immediate: true })
               }}
               aria-label="Refresh data"
             >
@@ -1399,7 +1460,11 @@ export default function CREDashboard() {
                     <select 
                       className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-2xl border border-blue-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base z-10"
                       value={dateMode} 
-                      onChange={(e) => setDateMode(e.target.value as any)}
+                      onChange={(e) => {
+                        setDateMode(e.target.value as any)
+                        // Auto-refresh when date filter changes
+                        setTimeout(() => fetchAssignedLeads(), 100)
+                      }}
                       aria-label="Select date filter"
                     >
                       <option>All Time</option>
@@ -1414,7 +1479,11 @@ export default function CREDashboard() {
                     <input
                       type="date"
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => {
+                        setStartDate(e.target.value)
+                        // Auto-refresh when date changes
+                        setTimeout(() => fetchAssignedLeads(), 100)
+                      }}
                       className="w-full sm:w-64 px-3 py-2 rounded-2xl border border-gray-200 bg-white placeholder-gray-400 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base"
                       placeholder="Select Date"
                       aria-label="Select specific date"
@@ -1559,7 +1628,11 @@ export default function CREDashboard() {
                       <button
                         key={cat}
                         className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-150 min-h-[44px] ${getButtonStyles()}`}
-                        onClick={() => setPendingCategory(cat)}
+                        onClick={() => {
+                          setPendingCategory(cat)
+                          // Auto-refresh when category filter changes
+                          setTimeout(() => fetchAssignedLeads(), 100)
+                        }}
                         aria-label={`Filter by ${cat} leads`}
                       >
                         {/* Apple Magnus glassy effect layers */}
@@ -1748,7 +1821,15 @@ export default function CREDashboard() {
                           <td className="p-3 font-medium text-gray-900">{lead.customer_name}</td>
                           <td className="p-3 text-gray-800">{lead.customer_mobile_number}</td>
                           <td className="p-3 text-gray-800">{lead.source}</td>
-                          <td className="p-3 text-gray-800">{lead.campaign}</td>
+                          <td className="p-3">
+                            {lead.campaign ? (
+                              <span className="text-gray-800">{lead.campaign}</span>
+                            ) : (
+                              <Badge variant="outline" className="rounded-full bg-gray-100 text-gray-600">
+                                No Campaign
+                              </Badge>
+                            )}
+                          </td>
                           <td className="p-3">
                             <Badge variant="outline" className={`rounded-full ${lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}>
                               {lead.branch || 'Unassigned'}
