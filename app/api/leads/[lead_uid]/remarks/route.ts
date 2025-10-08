@@ -13,24 +13,25 @@ export async function GET(
   try {
     const { lead_uid } = params
     const bearer = request.headers.get('Authorization') || (request.cookies.get('access_token') ? `Bearer ${request.cookies.get('access_token')!.value}` : '')
-    
-    const response = await fetch(`${FASTAPI_URL}/api/leads/${lead_uid}/remarks`, {
+    const cacheBuster = Date.now()
+    const response = await fetch(`${FASTAPI_URL}/api/leads/${lead_uid}/remarks?_t=${cacheBuster}`, {
       method: 'GET',
       headers: {
         'Authorization': bearer,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     })
 
     if (!response.ok) {
       return NextResponse.json(
         { error: 'Failed to fetch lead remarks' },
-        { status: response.status }
+        { status: response.status, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
       )
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
   } catch (error) {
     console.error('Error fetching lead remarks:', error)
     return NextResponse.json(

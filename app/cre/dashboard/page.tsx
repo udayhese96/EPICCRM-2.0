@@ -70,6 +70,7 @@ interface Lead {
   customer_name: string
   customer_mobile_number: string
   source: string
+  sub_source?: string
   campaign: string
   date: string
   lead_status: string
@@ -469,6 +470,7 @@ export default function CREDashboard() {
             customer_name: l.customer_name || '',
             customer_mobile_number: l.customer_mobile_number || '',
             source: l.source || '',
+            sub_source: l.sub_source || '',
             campaign: l.campaign || '',
             date: (l.created_at || '').slice(0,10) || '',
             lead_status: (l.lead_status || '').toString().trim(),
@@ -601,6 +603,7 @@ export default function CREDashboard() {
       customer_name: leadData.customer_name,
       customer_mobile_number: leadData.customer_mobile_number,
       source: leadData.source,
+      sub_source: leadData.sub_source || '',
       campaign: leadData.campaign || '', // Use campaign column directly
       date: leadData.created_at?.slice(0,10) || new Date().toISOString().slice(0,10),
       // CRE leads are immediately qualified
@@ -773,6 +776,14 @@ export default function CREDashboard() {
             }
             return true
           })
+          
+          // Sort: Newer follow-up dates first (today at the top), then older overdue
+          const getTs = (l: any) => {
+            if (!l?.follow_up_date) return 0
+            const d = l.follow_up_date.includes('T') ? l.follow_up_date.slice(0,10) : l.follow_up_date
+            return d ? new Date(d + 'T00:00:00').getTime() : 0
+          }
+          filteredLeads.sort((a, b) => getTs(b) - getTs(a))
         }
         break
       case "pending":
@@ -1820,7 +1831,16 @@ export default function CREDashboard() {
                           )}
                           <td className="p-3 font-medium text-gray-900">{lead.customer_name}</td>
                           <td className="p-3 text-gray-800">{lead.customer_mobile_number}</td>
-                          <td className="p-3 text-gray-800">{lead.source}</td>
+                          <td className="p-3 text-gray-800">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span>{lead.source}</span>
+                              {lead.sub_source && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  {lead.sub_source}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="p-3">
                             {lead.campaign ? (
                               <span className="text-gray-800">{lead.campaign}</span>
