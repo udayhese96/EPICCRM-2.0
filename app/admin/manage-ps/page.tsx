@@ -76,13 +76,18 @@ export default function ManagePSPage() {
     e.preventDefault()
     
     try {
+      // Get token from localStorage (same pattern as other pages)
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || (typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('access_token')) : null)
+      
       const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users'
       const method = editingUser ? 'PUT' : 'POST'
       
       const response = await fetch(url, {
         method,
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -112,10 +117,13 @@ export default function ManagePSPage() {
         setEditingUser(null)
         setIsDialogOpen(false)
       } else {
-        console.error('Failed to save PS user')
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Failed to save PS user:', errorData)
+        alert(`Failed to save PS user: ${errorData.detail || errorData.error || response.statusText}`)
       }
     } catch (error) {
       console.error('Error saving PS user:', error)
+      alert('Error saving PS user. Please try again.')
     }
   }
 
@@ -135,17 +143,27 @@ export default function ManagePSPage() {
 
   const handleDelete = async (userId: string) => {
     try {
+      // Get token from localStorage (same pattern as other pages)
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || (typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('access_token')) : null)
+      
       const response = await fetch(`/api/users/${userId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       })
       if (response.ok) {
         await fetchPSUsers() // Refresh the list
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Failed to delete PS user:', errorData)
+        alert(`Failed to delete PS user: ${errorData.detail || errorData.error || response.statusText}`)
       }
     } catch (error) {
       console.error('Error deleting PS user:', error)
+      alert('Error deleting PS user. Please try again.')
     }
   }
 
@@ -154,19 +172,29 @@ export default function ManagePSPage() {
       const user = psUsers.find(u => u.id === userId)
       if (!user) return
 
+      // Get token from localStorage (same pattern as other pages)
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || (typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('access_token')) : null)
+
       const response = await fetch(`/api/users/${userId}`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ is_active: !user.is_active })
       })
       if (response.ok) {
         await fetchPSUsers() // Refresh the list
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Failed to update PS user status:', errorData)
+        alert(`Failed to update PS user status: ${errorData.detail || errorData.error || response.statusText}`)
       }
     } catch (error) {
       console.error('Error updating PS user status:', error)
+      alert('Error updating PS user status. Please try again.')
     }
   }
 
@@ -194,11 +222,11 @@ export default function ManagePSPage() {
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="name">Full Name</Label>
+                  <Label htmlFor="full_name">Full Name</Label>
                   <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    id="full_name"
+                    value={formData.full_name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
                     required
                   />
                 </div>
@@ -343,7 +371,7 @@ export default function ManagePSPage() {
               <TableBody>
                 {psUsers.map((user) => (
                   <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
+                    <TableCell className="font-medium">{user.full_name}</TableCell>
                     <TableCell>{user.username}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>{user.phone}</TableCell>
