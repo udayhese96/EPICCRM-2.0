@@ -883,36 +883,45 @@ async def bulk_update_status(
 async def register_user(user_data: UserCreate):
     """Register a new user"""
     try:
-        # Create user in Supabase Auth
-        auth_response = supabase.auth.admin_create_user({
-            "email": user_data.email,
-            "password": user_data.password,
-            "email_confirm": True
-        })
+        import uuid
         
-        if not auth_response.user:
-            raise HTTPException(status_code=400, detail="Failed to create user")
+        # Generate a UUID for the user
+        user_id = str(uuid.uuid4())
         
-        # Create user record in database
+        # Debug: Print received data
+        print(f"[register_user] Received data: {user_data.model_dump()}")
+        
+        # Validate full_name is not empty
+        if not user_data.full_name or user_data.full_name.strip() == "":
+            raise HTTPException(status_code=400, detail="full_name is required and cannot be empty")
+        
+        # Create user record in database with all required fields
+        # Password is stored as-is in password_hash column
         user_record = {
-            "id": auth_response.user.id,
+            "id": user_id,
+            "username": user_data.username,
             "email": user_data.email,
-            "first_name": user_data.first_name,
-            "last_name": user_data.last_name,
+            "password_hash": user_data.password,  # Store password as-is in password_hash column
+            "full_name": user_data.full_name.strip(),  # Ensure no leading/trailing spaces
             "role": user_data.role,
-            "phone": user_data.phone,
-            "branch_id": user_data.branch_id,
-            "is_active": True
+            "phone": user_data.phone if user_data.phone else None,
+            "branch": user_data.branch if user_data.branch else None,
+            "is_active": user_data.is_active if hasattr(user_data, 'is_active') else True
         }
         
+        print(f"[register_user] Creating user with data: username={user_record.get('username')}, role={user_record.get('role')}, full_name='{user_record.get('full_name')}'")
         response = supabase.table('users').insert(user_record).execute()
         
         if response.data:
+            print(f"[register_user] User created successfully: {response.data[0].get('id')}")
             return UserResponse(**response.data[0])
         else:
             raise HTTPException(status_code=500, detail="Failed to create user record")
             
     except Exception as e:
+        print(f"[register_user] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/auth/login", response_model=LoginResponse)

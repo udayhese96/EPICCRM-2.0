@@ -80,6 +80,11 @@ export default function ManageCREPage() {
     e.preventDefault()
     
     try {
+      // Get token from localStorage (same pattern as other pages)
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || (typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('access_token')) : null)
+      
       const url = editingUser ? `/api/cre-users/${editingUser.id}` : '/api/cre-users'
       const fastApiUrl = editingUser ? `/api/cre-users/${editingUser.id}` : `/api/cre-users`
       const method = editingUser ? 'PUT' : 'POST'
@@ -88,7 +93,7 @@ export default function ManageCREPage() {
       let response = await fetch(url, {
         method,
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
@@ -100,7 +105,7 @@ export default function ManageCREPage() {
         response = await fetch(fastApiUrl, {
           method,
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(formData)
@@ -149,17 +154,28 @@ export default function ManageCREPage() {
 
   const handleDelete = async (userId: string) => {
     try {
+      // Get token from localStorage (same pattern as other pages)
+      const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
+      const supabaseToken = supabaseUserRaw ? (JSON.parse(supabaseUserRaw)?.access_token || null) : null
+      const token = supabaseToken || (typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('access_token')) : null)
+      
       const response = await fetch(`/api/cre-users/${userId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       })
       if (response.ok) {
         await fetchCREUsers() // Refresh the list
+        alert('CRE user deleted successfully!')
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Failed to delete CRE user:', errorData)
+        alert(`Failed to delete CRE user: ${errorData.detail || errorData.error || response.statusText}`)
       }
     } catch (error) {
       console.error('Error deleting CRE user:', error)
+      alert('Error deleting CRE user. Please try again.')
     }
   }
 

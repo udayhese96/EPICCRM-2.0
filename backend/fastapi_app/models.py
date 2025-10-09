@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -44,12 +44,19 @@ class UserBase(BaseModel):
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
-    full_name: str
+    full_name: str  # Required field, cannot be empty
     phone: Optional[str] = None
     role: str
     branch: Optional[str] = None
     password: str
     is_active: bool = True
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('full_name cannot be empty')
+        return v.strip()
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
