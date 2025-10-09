@@ -209,7 +209,9 @@ export default function AssignLeadsPage() {
       // Load CREs first so UI can show them even if unassigned API fails
       const creList = await fetchAvailableCREs()
       const timestamp = Date.now()
-      const response = await fetch(`/api/leads/unassigned?_t=${timestamp}`, {
+      
+      // Try the authenticated endpoint first
+      let response = await fetch(`/api/leads/unassigned?_t=${timestamp}`, {
         headers: {
           'Authorization': `Bearer ${getToken()}`,
           'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -217,11 +219,26 @@ export default function AssignLeadsPage() {
           'Expires': '0'
         }
       })
+      
+      // If authenticated endpoint fails, try public endpoint
+      if (!response.ok) {
+        console.warn('[assign-leads] Authenticated endpoint failed, trying public endpoint...')
+        response = await fetch(`/api/public/unassigned?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        })
+      }
+      
       if (response.ok) {
         const data = await response.json()
-        console.log('[assign-leads] /api/leads/unassigned summary:', data)
+        console.log('[assign-leads] Unassigned leads summary:', data)
         // Recompute accurate per-source counts using the per-source listing API
         const sourceList: string[] = Object.keys(data?.by_source || {})
+        console.log('[assign-leads] Sources to fetch:', sourceList)
+        
         const results = await Promise.all(
           sourceList.map(async (src) => {
             try {
@@ -234,12 +251,27 @@ export default function AssignLeadsPage() {
                 }
               })
               console.log(`[assign-leads] ${src} API response status:`, r.status)
-              if (!r.ok) return [src, 0] as const
+              if (!r.ok) {
+                // Try public endpoint
+                const r2 = await fetch(`/api/public/unassigned/${encodeURIComponent(src)}?_t=${timestamp}&_cb=${Date.now()}`, {
+                  headers: { 
+                    'Cache-Control': 'no-store, no-cache, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                  }
+                })
+                if (!r2.ok) return [src, 0] as const
+                const list: any[] = await r2.json()
+                console.log(`[assign-leads] list for ${src}:`, list.length, list)
+                console.log(`[assign-leads] ${src} leads:`, list.map(l => `${l.uid}(${l.assigned})`))
+                return [src, list.length] as const
+              }
               const list: any[] = await r.json()
               console.log(`[assign-leads] list for ${src}:`, list.length, list)
               console.log(`[assign-leads] ${src} leads:`, list.map(l => `${l.uid}(${l.assigned})`))
               return [src, list.length] as const
-            } catch {
+            } catch (err) {
+              console.error(`[assign-leads] Error fetching ${src}:`, err)
               return [src, 0] as const
             }
           })
@@ -261,16 +293,16 @@ export default function AssignLeadsPage() {
         let err: any = {}
         try { err = await response.json() } catch { err = { error: await response.text() } }
         console.error('[assign-leads] Failed to load unassigned leads:', err)
-        alert(`Failed to load unassigned leads: ${err?.detail || err?.error || response.status}`)
+        // Don't show alert, just fall back silently
         // Fallback: probe known sources individually to build counts
         const candidateSources = [
-          'BTL','META','GOOGLE','Car Dekho','Car Wale','Telein','Landing Page'
+          'BTL','Meta','META','GOOGLE','Google','Car Dekho','Car Wale','CarWale','Telein','Landing Page','Walkin','Walk-in','WhatsApp','OEM','Tele Out','Referral','Other'
         ]
         const probe = await Promise.all(candidateSources.map(async (src) => {
           try {
-            const r = await fetch(`/api/leads/unassigned/${encodeURIComponent(src)}?_t=${Date.now()}`, {
+            // Try public endpoint for fallback
+            const r = await fetch(`/api/public/unassigned/${encodeURIComponent(src)}?_t=${Date.now()}`, {
               headers: { 
-                'Authorization': `Bearer ${getToken()}`, 
                 'Cache-Control': 'no-store, no-cache, must-revalidate',
                 'Pragma': 'no-cache',
                 'Expires': '0'
@@ -278,6 +310,7 @@ export default function AssignLeadsPage() {
             })
             if (!r.ok) return [src, 0] as const
             const list: any[] = await r.json()
+            console.log(`[assign-leads] Fallback found ${list.length} leads for ${src}`)
             return [src, list.length] as const
           } catch {
             return [src, 0] as const
@@ -289,7 +322,7 @@ export default function AssignLeadsPage() {
           if (cnt > 0) by_source[src] = cnt
           total_unassigned += cnt
         }
-        console.log('[assign-leads] Setting unassigned data with CREs:', creList)
+        console.log('[assign-leads] Fallback - Setting unassigned data:', by_source)
         setUnassignedData({ by_source, total_unassigned, available_cres: creList })
       }
     } catch (error) {

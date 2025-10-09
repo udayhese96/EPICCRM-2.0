@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uvicorn
 import time
 # Import Supabase with error handling
@@ -2105,7 +2105,7 @@ class LeadAssignmentRequest(BaseModel):
 
 class UnassignedLeadsResponse(BaseModel):
     total_unassigned: int
-    by_source: dict
+    by_source: Dict[str, int]
     available_cres: List[dict]
 
 @app.get("/api/leads/unassigned", response_model=UnassignedLeadsResponse)
@@ -2114,15 +2114,47 @@ async def get_unassigned_leads():
     Business rule: unassigned = (assigned != 'Yes') OR (cre_name is null/empty).
     """
     try:
+        print("[unassigned] Fetching all leads from lead_master...")
         # Load all leads once; filter in app to support complex OR conditions reliably
-        all_query = supabase.table('lead_master').select('*').execute()
-        rows = all_query.data or []
+        # Note: Supabase has default limit of 1000, we need to fetch all records
+        all_leads = []
+        page_size = 1000
+        offset = 0
+        while True:
+            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
+            batch = query.data or []
+            if not batch:
+                break
+            all_leads.extend(batch)
+            print(f"[unassigned] Fetched batch: {len(batch)} leads (total so far: {len(all_leads)})")
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        
+        rows = all_leads
+        print(f"[unassigned] Fetched {len(rows)} total leads from database")
+        
+        # Debug: show sample of leads
+        if rows:
+            sample = rows[:5]
+            for lead in sample:
+                print(f"  Sample lead: uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
+        
         def is_unassigned(lead: dict) -> bool:
             assigned = (lead.get('assigned') or '').strip()
             cre_name = (lead.get('cre_name') or '').strip()
-            return assigned != 'Yes' or cre_name == ''
+            # A lead is unassigned if: assigned != 'Yes' OR cre_name is empty
+            result = assigned != 'Yes' or cre_name == ''
+            return result
 
         unassigned_leads = [l for l in rows if is_unassigned(l)]
+        print(f"[unassigned] Filtered to {len(unassigned_leads)} unassigned leads")
+        
+        # Debug: show what was filtered
+        if unassigned_leads:
+            print(f"[unassigned] First 10 unassigned leads:")
+            for lead in unassigned_leads[:10]:
+                print(f"  - uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
 
         # Group by source
         by_source: dict = {}
@@ -2131,8 +2163,10 @@ async def get_unassigned_leads():
             by_source.setdefault(source, []).append(lead)
 
         source_counts = {src: len(lst) for src, lst in by_source.items()}
+        print(f"[unassigned] Source counts: {source_counts}")
 
         # Fetch active CREs from unified users table
+        print("[unassigned] Fetching CRE users...")
         cre_query = (
             supabase
                 .table('users')
@@ -2142,6 +2176,8 @@ async def get_unassigned_leads():
                 .execute()
         )
         raw_cres = cre_query.data or []
+        print(f"[unassigned] Found {len(raw_cres)} CRE users")
+        
         # Normalize to expected shape with `name` field preserved for consumers
         available_cres = [
             {
@@ -2152,26 +2188,52 @@ async def get_unassigned_leads():
             for u in raw_cres
         ]
 
-        return UnassignedLeadsResponse(
+        result = UnassignedLeadsResponse(
             total_unassigned=len(unassigned_leads),
             by_source=source_counts,
             available_cres=available_cres
         )
+        print(f"[unassigned] Returning response with {len(unassigned_leads)} total unassigned")
+        return result
     except Exception as e:
+        print(f"[unassigned] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/leads/unassigned/{source}")
 async def get_unassigned_leads_by_source(source: str):
     """Get unassigned leads for a specific source (see rule above)."""
     try:
-        response = supabase.table('lead_master').select('*').eq('source', source).execute()
-        rows = response.data or []
+        # Fetch all leads and filter in-app for case-insensitive source matching
+        # Note: Supabase has default limit of 1000, we need to fetch all records
+        all_leads = []
+        page_size = 1000
+        offset = 0
+        while True:
+            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
+            batch = query.data or []
+            if not batch:
+                break
+            all_leads.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        
+        rows = all_leads
+        
         def is_unassigned(lead: dict) -> bool:
             assigned = (lead.get('assigned') or '').strip()
             cre_name = (lead.get('cre_name') or '').strip()
-            return assigned != 'Yes' or cre_name == ''
-        return [l for l in rows if is_unassigned(l)]
+            lead_source = (lead.get('source') or '').strip()
+            # Match source case-insensitively and check unassigned condition
+            return (lead_source.lower() == source.lower()) and (assigned != 'Yes' or cre_name == '')
+        
+        filtered_leads = [l for l in rows if is_unassigned(l)]
+        print(f"[unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' (searched {len(rows)} total leads)")
+        return filtered_leads
     except Exception as e:
+        print(f"[unassigned/{source}] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/leads/assign")
@@ -2198,15 +2260,45 @@ async def assign_leads(assignment: LeadAssignmentRequest):
 @app.get("/api/public/unassigned", response_model=UnassignedLeadsResponse)
 async def get_unassigned_public():
     try:
+        print("[public/unassigned] Fetching all leads from lead_master...")
         # Use the same business rule as the private endpoint
-        all_query = supabase.table('lead_master').select('*').execute()
-        rows = all_query.data or []
+        # Note: Supabase has default limit of 1000, we need to fetch all records
+        all_leads = []
+        page_size = 1000
+        offset = 0
+        while True:
+            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
+            batch = query.data or []
+            if not batch:
+                break
+            all_leads.extend(batch)
+            print(f"[public/unassigned] Fetched batch: {len(batch)} leads (total so far: {len(all_leads)})")
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        
+        rows = all_leads
+        print(f"[public/unassigned] Fetched {len(rows)} total leads from database")
+        
+        # Debug: show sample of leads
+        if rows:
+            sample = rows[:5]
+            for lead in sample:
+                print(f"  Sample lead: uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
+        
         def is_unassigned(lead: dict) -> bool:
             assigned = (lead.get('assigned') or '').strip()
             cre_name = (lead.get('cre_name') or '').strip()
             return assigned != 'Yes' or cre_name == ''
 
         unassigned_leads = [l for l in rows if is_unassigned(l)]
+        print(f"[public/unassigned] Filtered to {len(unassigned_leads)} unassigned leads")
+        
+        # Debug: show what was filtered
+        if unassigned_leads:
+            print(f"[public/unassigned] First 10 unassigned leads:")
+            for lead in unassigned_leads[:10]:
+                print(f"  - uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
 
         by_source = {}
         for lead in unassigned_leads:
@@ -2245,14 +2337,35 @@ async def get_unassigned_public():
 @app.get("/api/public/unassigned/{source}")
 async def get_unassigned_public_by_source(source: str):
     try:
-        response = supabase.table('lead_master').select('*').eq('source', source).execute()
-        rows = response.data or []
+        # Fetch all leads and filter in-app for case-insensitive source matching
+        # Note: Supabase has default limit of 1000, we need to fetch all records
+        all_leads = []
+        page_size = 1000
+        offset = 0
+        while True:
+            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
+            batch = query.data or []
+            if not batch:
+                break
+            all_leads.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        
+        rows = all_leads
+        
         def is_unassigned(lead: dict) -> bool:
             assigned = (lead.get('assigned') or '').strip()
             cre_name = (lead.get('cre_name') or '').strip()
-            return assigned != 'Yes' or cre_name == ''
-        return [l for l in rows if is_unassigned(l)]
+            lead_source = (lead.get('source') or '').strip()
+            # Match source case-insensitively and check unassigned condition
+            return (lead_source.lower() == source.lower()) and (assigned != 'Yes' or cre_name == '')
+        
+        filtered_leads = [l for l in rows if is_unassigned(l)]
+        print(f"[public/unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' (searched {len(rows)} total leads)")
+        return filtered_leads
     except Exception as e:
+        print(f"[public/unassigned/{source}] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Test endpoint to check if API is working
@@ -2852,59 +2965,76 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
         assigned_count = 0
         
         for lead_id in assignment.lead_ids:
-            # Update qualified lead with PS assignment
-            update_data = {
-                "ps_name": assignment.ps_name,
-                "updated_at": now_ist_iso()
-            }
-            
-            print(f"[Assign] Updating qualified_leads for lead_id: {lead_id} with ps_name: {assignment.ps_name}")
-            supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
-            print(f"[Assign] Updated qualified_leads successfully for lead_id: {lead_id}")
-            
-            # Get the qualified lead data
-            lead_response = supabase.table('qualified_leads').select('*').eq('id', lead_id).execute()
-            if lead_response.data:
-                lead_data = lead_response.data[0]
-                
-                # SYNC BACK TO lead_master - This is the missing piece!
-                lead_master_update = {
+            try:
+                # Update qualified lead with PS assignment
+                update_data = {
                     "ps_name": assignment.ps_name,
-                    "ps_id": assignment.ps_id,
-                    "branch": assignment.ps_branch,
-                    "updated_at": now_ist_iso()
-                }
-                supabase.table('lead_master').update(lead_master_update).eq('uid', lead_data['lead_uid']).execute()
-                
-                # Create entry in ps_followup_master
-                followup_data = {
-                    "lead_uid": lead_data['lead_uid'],
-                    "ps_name": assignment.ps_name,
-                    "ps_id": assignment.ps_id,
-                    "ps_branch": assignment.ps_branch,
-                    "customer_name": lead_data['customer_name'],
-                    "customer_mobile_number": lead_data['customer_mobile_number'],
-                    "source": lead_data['source'],
-                    "sub_source": lead_data.get('sub_source'),
-                    "cre_name": lead_data['cre_name'],
-                    "lead_category": lead_data['lead_category'],
-                    "model_interested": lead_data['model_interested'],
-                    "variant": lead_data['variant'],
-                    "buying_plan": lead_data['buying_plan'],
-                    "finance_option": lead_data['finance_option'],
-                    "follow_up_date": None,  # Only set when PS manually enters it
-                    "lead_status": "Pending",
-                    "final_status": "Pending",
-                    "ps_assigned_at": now_ist_iso(),
-                    "created_at": now_ist_iso(),
                     "updated_at": now_ist_iso()
                 }
                 
-                supabase.table('ps_followup_master').insert(followup_data).execute()
-                assigned_count += 1
+                print(f"[Assign] Updating qualified_leads for lead_id: {lead_id} with ps_name: {assignment.ps_name}")
+                supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
+                print(f"[Assign] Updated qualified_leads successfully for lead_id: {lead_id}")
+                
+                # Get the qualified lead data
+                lead_response = supabase.table('qualified_leads').select('*').eq('id', lead_id).execute()
+                if lead_response.data:
+                    lead_data = lead_response.data[0]
+                    
+                    # SYNC BACK TO lead_master - This is the missing piece!
+                    lead_master_update = {
+                        "ps_name": assignment.ps_name,
+                        "ps_id": assignment.ps_id,
+                        "branch": assignment.ps_branch,
+                        "updated_at": now_ist_iso()
+                    }
+                    supabase.table('lead_master').update(lead_master_update).eq('uid', lead_data.get('lead_uid')).execute()
+                    
+                    # Create entry in ps_followup_master with safe field access
+                    followup_data = {
+                        "lead_uid": lead_data.get('lead_uid'),
+                        "ps_name": assignment.ps_name,
+                        "ps_id": assignment.ps_id,
+                        "ps_branch": assignment.ps_branch,
+                        "customer_name": lead_data.get('customer_name'),
+                        "customer_mobile_number": lead_data.get('customer_mobile_number'),
+                        "source": lead_data.get('source'),
+                        "sub_source": lead_data.get('sub_source'),
+                        "cre_name": lead_data.get('cre_name'),
+                        "lead_category": lead_data.get('lead_category'),
+                        "model_interested": lead_data.get('model_interested'),
+                        "variant": lead_data.get('variant'),
+                        "buying_plan": lead_data.get('buying_plan'),
+                        "finance_option": lead_data.get('finance_option'),
+                        "follow_up_date": None,  # Only set when PS manually enters it
+                        "lead_status": "Pending",
+                        "final_status": "Pending",
+                        "ps_assigned_at": now_ist_iso(),
+                        "created_at": now_ist_iso(),
+                        "updated_at": now_ist_iso()
+                    }
+                    
+                    print(f"[Assign] Inserting into ps_followup_master for lead_uid: {lead_data.get('lead_uid')}")
+                    supabase.table('ps_followup_master').insert(followup_data).execute()
+                    print(f"[Assign] Successfully inserted into ps_followup_master")
+                    assigned_count += 1
+                else:
+                    print(f"[Assign] Warning: No data found for lead_id {lead_id} in qualified_leads")
+            except Exception as lead_error:
+                print(f"[Assign] Error processing lead_id {lead_id}: {str(lead_error)}")
+                # Continue with other leads instead of failing entire batch
+                continue
+        
+        if assigned_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to assign any leads. Check backend logs for details.")
         
         return {"message": f"Successfully assigned {assigned_count} leads to {assignment.ps_name}"}
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"[Assign] Fatal error in assign_qualified_leads: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================
