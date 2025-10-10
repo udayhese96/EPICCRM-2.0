@@ -24,7 +24,8 @@ import {
   Clock,
   Flame,
   Snowflake,
-  Thermometer
+  Thermometer,
+  Globe
 } from "lucide-react"
 import { useState, useEffect, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
@@ -140,6 +141,7 @@ export default function CREDashboard() {
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [callOutcomeFilter, setCallOutcomeFilter] = useState<string>("all")
+  const [sourceFilter, setSourceFilter] = useState<string>("all")
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
@@ -274,6 +276,7 @@ export default function CREDashboard() {
   useEffect(() => {
     setStatusFilter("all")
     setCallOutcomeFilter("all")
+    setSourceFilter("all")
   }, [activeStatus])
 
   // Reset call outcome filter when status filter changes
@@ -1021,6 +1024,13 @@ export default function CREDashboard() {
       })
     }
 
+    // Filter by source if not "all"
+    if (sourceFilter && sourceFilter !== "all") {
+      filteredLeads = filteredLeads.filter(lead => 
+        (lead.source || '').toString().trim() === sourceFilter
+      )
+    }
+
       return filteredLeads
     } catch (error) {
       console.error('Error in getFilteredLeads:', error)
@@ -1169,7 +1179,7 @@ export default function CREDashboard() {
       }
       return []
     }
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter])
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter, sourceFilter])
   
   const tabCounts = useMemo(() => {
     try {
@@ -1274,6 +1284,36 @@ export default function CREDashboard() {
   }
 
   const availableCallOutcomes = useMemo(() => getAvailableCallOutcomes(), [leads, activeTab, activeStatus])
+
+  // Get available sources for current filtered leads
+  const getAvailableSources = () => {
+    try {
+      if (!leads || leads.length === 0) return []
+      
+      const sourceSet = new Set<string>()
+      
+      // Get the actual filtered leads for the current tab/view
+      const currentFilteredLeads = getFilteredLeads()
+      
+      // Only show sources that exist in the currently filtered leads
+      currentFilteredLeads.forEach(lead => {
+        const source = lead?.source || ''
+        
+        // Add non-empty sources
+        if (source && source.trim()) {
+          sourceSet.add(source.trim())
+        }
+      })
+      
+      // Convert to array and sort
+      return Array.from(sourceSet).sort()
+    } catch (error) {
+      console.error('Error getting available sources:', error)
+      return []
+    }
+  }
+
+  const availableSources = useMemo(() => getAvailableSources(), [leads, activeTab, activeStatus])
 
   return (
     <DashboardLayout>
@@ -1766,6 +1806,31 @@ export default function CREDashboard() {
                           {availableCallOutcomes.map((outcome) => (
                             <SelectItem key={outcome} value={outcome}>
                               {outcome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Source Filter */}
+                  {availableSources.length > 0 && (
+                    <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
+                      {/* Apple Magnus glassy effect layers */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-orange-300/25"></div>
+                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                      <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                      
+                      <Globe className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-orange-500 z-10" />
+                      <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                        <SelectTrigger className="relative w-full sm:w-48 pl-10 pr-3 py-2 rounded-2xl border border-orange-200/30 bg-white/90 focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all duration-150 text-sm md:text-base z-10">
+                          <SelectValue placeholder="All Sources" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sources</SelectItem>
+                          {availableSources.map((source) => (
+                            <SelectItem key={source} value={source}>
+                              {source}
                             </SelectItem>
                           ))}
                         </SelectContent>
