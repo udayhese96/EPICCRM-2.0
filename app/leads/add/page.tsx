@@ -258,8 +258,8 @@ export default function AddLeadPage() {
                       <SelectContent>
                         <SelectItem value="Bulkwatsup(Telein)">Bulkwatsup(Telein)</SelectItem>
                         <SelectItem value="Bulkwatsup(Watco)">Bulkwatsup(Watco)</SelectItem>
-                        <SelectItem value="Car Dekho">Car Dekho</SelectItem>
-                        <SelectItem value="Car Wale">Car Wale</SelectItem>
+                        <SelectItem value="CarDekho">CarDekho</SelectItem>
+                        <SelectItem value="CarWale">CarWale</SelectItem>
                         <SelectItem value="CD B">CD B</SelectItem>
                         <SelectItem value="CD G">CD G</SelectItem>
                         <SelectItem value="CWA">CWA</SelectItem>

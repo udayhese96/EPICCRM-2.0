@@ -1,0 +1,7 @@
+customer_name,customer_mobile_number,customer_location,source,sub_source,campaign,model_interested,variant,buying_plan,finance_option,profession,trade_in,alternate_mobile_number,lead_category,test_drive_type
+John Doe,9876543210,T NAGAR,Meta,Web,Innova Campaign,Toyota Innova Crysta,GX,Within 1 Month,Finance,Salaried,No,9876543211,Hot,Showroom Test Drive
+Jane Smith,9876543212,ADYAR,Google,Tele In,Fortuner Offer,Toyota Fortuner,4x2 AT,Within 3 Months,Cash,Business,Yes,9876543213,Warm,Home Test Drive
+Raj Kumar,9876543213,VELACHERRY,CarDekho,CD B,General Campaign,Toyota Urban Cruiser Hyryder,V,Immediate,Finance,Professional,No,9876543214,Cold,Showroom Test Drive
+Priya Sharma,9876543215,KODAMBAKKAM,CarWale,CWA,Hybrid Campaign,Toyota Innova Hycross,GX (O),Within 2 Months,Finance,Software Engineer,Yes,9876543216,Hot,
+Vikram Singh,9876543217,GUINDY,WhatsApp,Bulk Message,Fortuner Legender,Toyota Fortuner Legender,4x4 AT,Within 6 Months,Cash,Business Owner,No,9876543218,Warm,
+

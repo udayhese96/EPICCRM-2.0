@@ -77,7 +77,7 @@ export function DashboardLayoutFullBleed({ children }: DashboardLayoutFullBleedP
   const getNavigationItems = () => {
     const roleSpecificItems = {
       admin: [
-        { icon: Home, label: 'Dashboard', href: '/dashboard' },
+        { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/analytics' },
         { icon: Settings, label: 'Admin', href: '/admin' },
       ],

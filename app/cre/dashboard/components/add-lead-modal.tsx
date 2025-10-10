@@ -31,8 +31,8 @@ interface AddLeadModalProps {
 const SOURCE_OPTIONS: { [key: string]: string[] } = {
   "Google": ["Web", "Tele In", "GMB Tele In"],
   "WhatsApp": ["Tele In", "Bulk Message"],
-  "Car Dekho": ["CD B", "CD G"],
-  "Car Wale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
+  "CarDekho": ["CD B", "CD G"],
+  "CarWale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
   "OEM": ["Dealer CMS", "TKM"],
   "Meta": ["Web"],
   "Tele Out": ["Web"],

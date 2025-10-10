@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
@@ -495,14 +495,18 @@ async def get_lost_requests(current_user=Depends(get_current_user)):
         print(f"[DEBUG] Found {len(response.data or [])} Lost Requested leads")
         
         # Filter by CRE name (case-insensitive)
+        # Try to match against both username and full_name since cre_name might be either
         filtered_data = []
         for item in response.data or []:
-            cre_name = item.get('cre_name', '').lower()
-            user_name = current_user.username.lower()
-            if cre_name == user_name:
+            cre_name = (item.get('cre_name') or '').strip().lower()
+            user_name = (getattr(current_user, 'username', '') or '').strip().lower()
+            full_name = (getattr(current_user, 'full_name', '') or '').strip().lower()
+            
+            # Match against either username or full_name
+            if cre_name and (cre_name == user_name or cre_name == full_name):
                 filtered_data.append(item)
         
-        print(f"[DEBUG] Filtered to {len(filtered_data)} leads for CRE {current_user.username}")
+        print(f"[DEBUG] Filtered to {len(filtered_data)} leads for CRE {getattr(current_user, 'username', 'unknown')}")
         
         # Format the response to match expected structure
         lost_requests = []
@@ -1326,6 +1330,160 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/admin/leads/upload")
+async def upload_leads_bulk(
+    file: UploadFile = File(...),
+    current_user=Depends(admin_required)
+):
+    """Bulk upload leads from CSV/Excel file"""
+    try:
+        import csv
+        import io
+        import uuid
+        from datetime import datetime
+        
+        # Read file content
+        content = await file.read()
+        
+        # Determine file type and parse
+        if file.filename.endswith('.csv'):
+            # Parse CSV
+            text_content = content.decode('utf-8')
+            csv_reader = csv.DictReader(io.StringIO(text_content))
+            rows = list(csv_reader)
+        elif file.filename.endswith(('.xlsx', '.xls')):
+            # Parse Excel
+            try:
+                import pandas as pd
+                df = pd.read_excel(io.BytesIO(content))
+                rows = df.to_dict('records')
+            except ImportError:
+                raise HTTPException(status_code=400, detail="Excel file support requires pandas. Please use CSV format.")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format. Please use CSV or Excel.")
+        
+        print(f"[Bulk Upload] Processing {len(rows)} rows from {file.filename}")
+        
+        # Normalize column names (lowercase, strip spaces)
+        normalized_rows = []
+        for row in rows:
+            normalized_row = {k.lower().strip().replace(' ', '_'): v for k, v in row.items()}
+            normalized_rows.append(normalized_row)
+        
+        # Validate required fields
+        required_fields = ['customer_name', 'customer_mobile_number']
+        
+        success_count = 0
+        failed_count = 0
+        errors = []
+        existing_numbers = set()
+        
+        # Get existing mobile numbers to check for duplicates
+        try:
+            existing_leads_response = supabase.table('lead_master').select('customer_mobile_number').execute()
+            if existing_leads_response.data:
+                existing_numbers = {lead['customer_mobile_number'] for lead in existing_leads_response.data if lead.get('customer_mobile_number')}
+        except Exception as e:
+            print(f"[Bulk Upload] Warning: Could not fetch existing leads: {e}")
+        
+        # Process each row
+        for idx, row in enumerate(normalized_rows, start=2):  # Start at 2 because row 1 is header
+            try:
+                # Check required fields
+                missing_fields = [field for field in required_fields if not row.get(field)]
+                if missing_fields:
+                    errors.append(f"Row {idx}: Missing required fields: {', '.join(missing_fields)}")
+                    failed_count += 1
+                    continue
+                
+                # Validate mobile number
+                mobile = str(row['customer_mobile_number']).strip()
+                if len(mobile) != 10 or not mobile.isdigit():
+                    errors.append(f"Row {idx}: Invalid mobile number '{mobile}' (must be 10 digits)")
+                    failed_count += 1
+                    continue
+                
+                # Check for duplicates
+                if mobile in existing_numbers:
+                    errors.append(f"Row {idx}: Duplicate mobile number '{mobile}' already exists")
+                    failed_count += 1
+                    continue
+                
+                # Generate UID
+                lead_uid = f"CD{mobile[-6:]}"  # Use last 6 digits of mobile number
+                
+                # Check if UID already exists, if so, generate a unique one
+                uid_check = supabase.table('lead_master').select('uid').eq('uid', lead_uid).execute()
+                if uid_check.data:
+                    # Generate a random UID if the mobile-based one exists
+                    lead_uid = f"LD{str(uuid.uuid4())[:8].upper()}"
+                
+                # Prepare lead data
+                insert_data = {
+                    "uid": lead_uid,
+                    "customer_name": str(row['customer_name']).strip(),
+                    "customer_mobile_number": mobile,
+                    "date": now_ist_iso(),
+                    "created_at": now_ist_iso(),
+                    "updated_at": now_ist_iso(),
+                    "assigned": "No",
+                    "lead_status": None,
+                    "final_status": "Pending"
+                }
+                
+                # Add optional fields
+                optional_field_mapping = {
+                    'customer_location': 'customer_location',
+                    'alternate_mobile_number': 'alternate_mobile_number',
+                    'source': 'source',
+                    'sub_source': 'sub_source',
+                    'campaign': 'campaign',
+                    'model_interested': 'model_interested',
+                    'variant': 'variant',
+                    'buying_plan': 'buying_plan',
+                    'finance_option': 'finance_option',
+                    'profession': 'profession',
+                    'trade_in': 'trade_in',
+                    'lead_category': 'lead_category',
+                    'test_drive_type': 'test_drive_type'
+                }
+                
+                for csv_field, db_field in optional_field_mapping.items():
+                    value = row.get(csv_field)
+                    if value and str(value).strip() and str(value).strip().lower() not in ['nan', 'none', 'null', '']:
+                        insert_data[db_field] = str(value).strip()
+                
+                # Insert into database
+                response = supabase.table('lead_master').insert(insert_data).execute()
+                
+                if response.data:
+                    success_count += 1
+                    existing_numbers.add(mobile)  # Add to set to prevent duplicates within same file
+                    print(f"[Bulk Upload] Row {idx}: Successfully inserted lead {lead_uid}")
+                else:
+                    errors.append(f"Row {idx}: Database insertion failed")
+                    failed_count += 1
+                    
+            except Exception as e:
+                errors.append(f"Row {idx}: {str(e)}")
+                failed_count += 1
+                print(f"[Bulk Upload] Row {idx} error: {e}")
+        
+        result = {
+            "total": len(normalized_rows),
+            "success": success_count,
+            "failed": failed_count,
+            "errors": errors[:20]  # Return first 20 errors to avoid huge response
+        }
+        
+        print(f"[Bulk Upload] Complete: {success_count} success, {failed_count} failed")
+        
+        return result
+        
+    except Exception as e:
+        print(f"[Bulk Upload] Fatal error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/cre/leads", response_model=dict)
 async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_current_user)):
     """Create a new lead for CRE users with background processing for qualified_leads and trade_in_master"""
@@ -2126,47 +2284,20 @@ async def get_unassigned_leads():
     Business rule: unassigned = (assigned != 'Yes') OR (cre_name is null/empty).
     """
     try:
-        print("[unassigned] Fetching all leads from lead_master...")
-        # Load all leads once; filter in app to support complex OR conditions reliably
-        # Note: Supabase has default limit of 1000, we need to fetch all records
-        all_leads = []
-        page_size = 1000
-        offset = 0
-        while True:
-            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
-            batch = query.data or []
-            if not batch:
-                break
-            all_leads.extend(batch)
-            print(f"[unassigned] Fetched batch: {len(batch)} leads (total so far: {len(all_leads)})")
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        print("[unassigned] Fetching unassigned leads directly from database...")
         
-        rows = all_leads
-        print(f"[unassigned] Fetched {len(rows)} total leads from database")
+        # Use database query to get only unassigned leads instead of fetching all
+        # This is much more efficient than fetching all leads and filtering in memory
+        query = (
+            supabase
+                .table('lead_master')
+                .select('uid, source, assigned, cre_name')
+                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                .execute()
+        )
         
-        # Debug: show sample of leads
-        if rows:
-            sample = rows[:5]
-            for lead in sample:
-                print(f"  Sample lead: uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
-        
-        def is_unassigned(lead: dict) -> bool:
-            assigned = (lead.get('assigned') or '').strip()
-            cre_name = (lead.get('cre_name') or '').strip()
-            # A lead is unassigned if: assigned != 'Yes' OR cre_name is empty
-            result = assigned != 'Yes' or cre_name == ''
-            return result
-
-        unassigned_leads = [l for l in rows if is_unassigned(l)]
-        print(f"[unassigned] Filtered to {len(unassigned_leads)} unassigned leads")
-        
-        # Debug: show what was filtered
-        if unassigned_leads:
-            print(f"[unassigned] First 10 unassigned leads:")
-            for lead in unassigned_leads[:10]:
-                print(f"  - uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
+        unassigned_leads = query.data or []
+        print(f"[unassigned] Found {len(unassigned_leads)} unassigned leads directly from database")
 
         # Group by source
         by_source: dict = {}
@@ -2217,32 +2348,19 @@ async def get_unassigned_leads():
 async def get_unassigned_leads_by_source(source: str):
     """Get unassigned leads for a specific source (see rule above)."""
     try:
-        # Fetch all leads and filter in-app for case-insensitive source matching
-        # Note: Supabase has default limit of 1000, we need to fetch all records
-        all_leads = []
-        page_size = 1000
-        offset = 0
-        while True:
-            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
-            batch = query.data or []
-            if not batch:
-                break
-            all_leads.extend(batch)
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        # Use database query to get only unassigned leads for specific source
+        # This is much more efficient than fetching all leads and filtering in memory
+        query = (
+            supabase
+                .table('lead_master')
+                .select('*')
+                .ilike('source', source)  # Case-insensitive source matching
+                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                .execute()
+        )
         
-        rows = all_leads
-        
-        def is_unassigned(lead: dict) -> bool:
-            assigned = (lead.get('assigned') or '').strip()
-            cre_name = (lead.get('cre_name') or '').strip()
-            lead_source = (lead.get('source') or '').strip()
-            # Match source case-insensitively and check unassigned condition
-            return (lead_source.lower() == source.lower()) and (assigned != 'Yes' or cre_name == '')
-        
-        filtered_leads = [l for l in rows if is_unassigned(l)]
-        print(f"[unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' (searched {len(rows)} total leads)")
+        filtered_leads = query.data or []
+        print(f"[unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' directly from database")
         return filtered_leads
     except Exception as e:
         print(f"[unassigned/{source}] Error: {str(e)}")
@@ -2272,45 +2390,20 @@ async def assign_leads(assignment: LeadAssignmentRequest):
 @app.get("/api/public/unassigned", response_model=UnassignedLeadsResponse)
 async def get_unassigned_public():
     try:
-        print("[public/unassigned] Fetching all leads from lead_master...")
-        # Use the same business rule as the private endpoint
-        # Note: Supabase has default limit of 1000, we need to fetch all records
-        all_leads = []
-        page_size = 1000
-        offset = 0
-        while True:
-            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
-            batch = query.data or []
-            if not batch:
-                break
-            all_leads.extend(batch)
-            print(f"[public/unassigned] Fetched batch: {len(batch)} leads (total so far: {len(all_leads)})")
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        print("[public/unassigned] Fetching unassigned leads directly from database...")
         
-        rows = all_leads
-        print(f"[public/unassigned] Fetched {len(rows)} total leads from database")
+        # Use database query to get only unassigned leads instead of fetching all
+        # This is much more efficient than fetching all leads and filtering in memory
+        query = (
+            supabase
+                .table('lead_master')
+                .select('uid, source, assigned, cre_name')
+                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                .execute()
+        )
         
-        # Debug: show sample of leads
-        if rows:
-            sample = rows[:5]
-            for lead in sample:
-                print(f"  Sample lead: uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
-        
-        def is_unassigned(lead: dict) -> bool:
-            assigned = (lead.get('assigned') or '').strip()
-            cre_name = (lead.get('cre_name') or '').strip()
-            return assigned != 'Yes' or cre_name == ''
-
-        unassigned_leads = [l for l in rows if is_unassigned(l)]
-        print(f"[public/unassigned] Filtered to {len(unassigned_leads)} unassigned leads")
-        
-        # Debug: show what was filtered
-        if unassigned_leads:
-            print(f"[public/unassigned] First 10 unassigned leads:")
-            for lead in unassigned_leads[:10]:
-                print(f"  - uid={lead.get('uid')}, source={lead.get('source')}, assigned={lead.get('assigned')}, cre_name={lead.get('cre_name')}")
+        unassigned_leads = query.data or []
+        print(f"[public/unassigned] Found {len(unassigned_leads)} unassigned leads directly from database")
 
         by_source = {}
         for lead in unassigned_leads:
@@ -2349,32 +2442,19 @@ async def get_unassigned_public():
 @app.get("/api/public/unassigned/{source}")
 async def get_unassigned_public_by_source(source: str):
     try:
-        # Fetch all leads and filter in-app for case-insensitive source matching
-        # Note: Supabase has default limit of 1000, we need to fetch all records
-        all_leads = []
-        page_size = 1000
-        offset = 0
-        while True:
-            query = supabase.table('lead_master').select('*').range(offset, offset + page_size - 1).execute()
-            batch = query.data or []
-            if not batch:
-                break
-            all_leads.extend(batch)
-            if len(batch) < page_size:
-                break
-            offset += page_size
+        # Use database query to get only unassigned leads for specific source
+        # This is much more efficient than fetching all leads and filtering in memory
+        query = (
+            supabase
+                .table('lead_master')
+                .select('*')
+                .ilike('source', source)  # Case-insensitive source matching
+                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                .execute()
+        )
         
-        rows = all_leads
-        
-        def is_unassigned(lead: dict) -> bool:
-            assigned = (lead.get('assigned') or '').strip()
-            cre_name = (lead.get('cre_name') or '').strip()
-            lead_source = (lead.get('source') or '').strip()
-            # Match source case-insensitively and check unassigned condition
-            return (lead_source.lower() == source.lower()) and (assigned != 'Yes' or cre_name == '')
-        
-        filtered_leads = [l for l in rows if is_unassigned(l)]
-        print(f"[public/unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' (searched {len(rows)} total leads)")
+        filtered_leads = query.data or []
+        print(f"[public/unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' directly from database")
         return filtered_leads
     except Exception as e:
         print(f"[public/unassigned/{source}] Error: {str(e)}")

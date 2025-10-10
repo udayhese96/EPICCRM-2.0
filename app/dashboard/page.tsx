@@ -115,7 +115,11 @@ export default function DashboardPage() {
         if (supabaseUser) {
           const u = JSON.parse(supabaseUser)
           console.log("✅ Dashboard loaded for user (supabase):", u)
-          // Redirect team leaders to their purpose-built dashboard
+          // Redirect users to their appropriate dashboards
+          if (u?.role === 'admin') {
+            router.push('/admin/dashboard')
+            return
+          }
           if (u?.role === 'team_leader') {
             router.push('/team-leader-dashboard')
             return
@@ -124,6 +128,10 @@ export default function DashboardPage() {
         } else if (legacyToken && legacyUser) {
           const u = JSON.parse(legacyUser)
           console.log("✅ Dashboard loaded for user (legacy):", u)
+          if (u?.role === 'admin') {
+            router.push('/admin/dashboard')
+            return
+          }
           if (u?.role === 'team_leader') {
             router.push('/team-leader-dashboard')
             return

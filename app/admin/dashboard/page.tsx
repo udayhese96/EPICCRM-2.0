@@ -140,6 +140,7 @@ export default function AdminDashboard() {
                 desc="Import leads and customer data"
                 icon={Upload}
                 accent="red"
+                onClick={() => router.push("/admin/upload-data")}
               />
               <QuickCard
                 title="Assign Leads"

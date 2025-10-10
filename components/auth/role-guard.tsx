@@ -138,7 +138,7 @@ export function RoleGuard({ children, requiredRole, requiredPermission, route, f
               Your current role ({userRole?.replace("_", " ").toUpperCase()}) doesn't have the required permissions.
             </p>
             <Button asChild>
-              <Link href="/dashboard">
+              <Link href={userRole === 'admin' ? '/admin/dashboard' : '/dashboard'}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Dashboard
               </Link>

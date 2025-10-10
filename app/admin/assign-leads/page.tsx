@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowRightLeft, Users, Phone, Mail, Calendar, X, Plus, RefreshCw } from "lucide-react"
+import { ArrowRightLeft, Users, Phone, Mail, Calendar, X, Plus, RefreshCw, ArrowLeft } from "lucide-react"
+import Link from "next/link"
 import { DndContext, DragEndEvent, useDroppable, useDraggable } from "@dnd-kit/core"
 import { SortableContext, useSortable, arrayMove } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
@@ -657,6 +658,12 @@ export default function AssignLeadsPage() {
             )}
           </div>
           <div className="flex space-x-3">
+            <Button variant="outline" size="sm" asChild className="rounded-xl bg-white/70 border-none shadow hover:bg-gray-50">
+              <Link href="/admin/dashboard">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Link>
+            </Button>
             <Button 
               onClick={handleManualRefresh} 
               disabled={isRefreshing || loading}
