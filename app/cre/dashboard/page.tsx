@@ -95,6 +95,20 @@ interface Lead {
   ps_name?: string
   ps_id?: string
   icrop_id?: string
+  // Qualification fields
+  model_interested?: string
+  variant?: string
+  buying_plan?: string
+  finance_option?: string
+  trade_in?: string
+  trade_in_make?: string
+  trade_in_model?: string
+  trade_in_year?: string
+  trade_in_km?: string
+  trade_in_ownership?: string
+  test_drive?: boolean
+  test_drive_type?: string
+  profession?: string
   // Additional fields for lost requests
   lost_reason?: string
   lost_requested_at?: string
@@ -242,6 +256,14 @@ export default function CREDashboard() {
       }
     }
   }, [user?.username])
+
+  // NEW: Refetch leads when active tab changes (for backend filtering)
+  useEffect(() => {
+    if (user?.username && activeTab) {
+      console.log(`🔄 [Tab Change] Fetching leads for tab: ${activeTab}`)
+      fetchAssignedLeads()
+    }
+  }, [activeTab])
 
   const setupRealtimeSubscriptions = () => {
     // Only setup if we have a user
@@ -437,12 +459,18 @@ export default function CREDashboard() {
       // Use fullName for API call since database stores cre_name with proper case
       const qs = new URLSearchParams({ username: fullName || username })
       if (fullName) qs.append('name', fullName)
+      
+      // NEW: Add tab filter for backend filtering (massive performance boost!)
+      if (activeTab && activeTab !== 'all') {
+        qs.append('tab', activeTab)
+      }
+      
       // Cache-busting to avoid any intermediate caching layers
       const cacheBuster = Date.now().toString()
       qs.append('_t', cacheBuster)
       
       if (process.env.NODE_ENV === 'development') {
-        console.debug('[CRE fetch] requesting /api/cre-assigned with _t=', cacheBuster)
+        console.debug('[CRE fetch] requesting /api/cre-assigned with tab=', activeTab, '_t=', cacheBuster)
       }
       const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
       
@@ -485,6 +513,20 @@ export default function CREDashboard() {
             icrop_id: l.icrop_id || '', // Add ICROP ID mapping
             lead_remark: l.first_remark || l.lead_remark || l.pending_reason || '',
             pending_reason: l.pending_reason || '',
+            // Qualification fields
+            model_interested: l.model_interested || '',
+            variant: l.variant || '',
+            buying_plan: l.buying_plan || '',
+            finance_option: l.finance_option || '',
+            trade_in: l.trade_in || '',
+            trade_in_make: l.trade_in_make || '',
+            trade_in_model: l.trade_in_model || '',
+            trade_in_year: l.trade_in_year || '',
+            trade_in_km: l.trade_in_km || '',
+            trade_in_ownership: l.trade_in_ownership || '',
+            test_drive: l.test_drive || false,
+            test_drive_type: l.test_drive_type || '',
+            profession: l.profession || '',
             // Previous call history
             second_call_date: l.second_call_date || '',
             second_remark: l.second_remark || '',
@@ -737,6 +779,28 @@ export default function CREDashboard() {
       const fs = (lead?.final_status || '').toString().toLowerCase()
       return fs === 'booked' || fs === 'retailed'
     }
+    
+    const isLostOrUnqualified = (lead: any) => {
+      const fs = (lead?.final_status || '').toString().toLowerCase()
+      const ls = (lead?.lead_status || '').toString().toLowerCase()
+      
+      // If final_status is Lost, definitely exclude
+      if (fs === 'lost' || fs === 'unqualified') return true
+      
+      // If lead_status is truly unqualified (no follow-up needed), exclude
+      return ls === 'lost' || ls === 'not interested' || 
+             ls === 'out of territory' || ls === 'duplicate lead' ||
+             ls === 'invalid number' || ls === 'wrong number' ||
+             ls === 'just enquired' || ls === 'service' || ls === 'insurance' ||
+             ls === 'internal' || ls === 'used car' || ls === 'no response' ||
+             ls === 'mock call' || ls === 'plan dropped' || ls === 'plan postponed' ||
+             ls === 'dsa enq' || ls === 'bh registration' || ls === 'existing enq' ||
+             ls === 'did not enquire' || ls === 'lost to co-dealer' ||
+             ls === 'lost to competition' || ls === 'low budget' ||
+             ls === 'not eligible' || ls === 'job enquiry'
+      
+      // Note: RNR, Call me back, etc. are NOT excluded - they need follow-up!
+    }
 
     // Filter by tab
     switch (activeTab) {
@@ -758,8 +822,8 @@ export default function CREDashboard() {
             const followUpDate = lead.follow_up_date.includes('T')
               ? lead.follow_up_date.slice(0,10)
               : lead.follow_up_date
-            // Include due today or overdue
-            return followUpDate <= today && !isFinalizedWon(lead)
+            // Include due today or overdue, but exclude won/lost/unqualified leads
+            return followUpDate <= today && !isFinalizedWon(lead) && !isLostOrUnqualified(lead)
           })
           
           // Then apply date mode filter
@@ -913,6 +977,28 @@ export default function CREDashboard() {
       const fs = (l?.final_status || '').toString().toLowerCase()
       return fs === 'booked' || fs === 'retailed'
     }
+    
+    const isLostOrUnqualified = (lead: any) => {
+      const fs = (lead?.final_status || '').toString().toLowerCase()
+      const ls = (lead?.lead_status || '').toString().toLowerCase()
+      
+      // If final_status is Lost, definitely exclude
+      if (fs === 'lost' || fs === 'unqualified') return true
+      
+      // If lead_status is truly unqualified (no follow-up needed), exclude
+      return ls === 'lost' || ls === 'not interested' || 
+             ls === 'out of territory' || ls === 'duplicate lead' ||
+             ls === 'invalid number' || ls === 'wrong number' ||
+             ls === 'just enquired' || ls === 'service' || ls === 'insurance' ||
+             ls === 'internal' || ls === 'used car' || ls === 'no response' ||
+             ls === 'mock call' || ls === 'plan dropped' || ls === 'plan postponed' ||
+             ls === 'dsa enq' || ls === 'bh registration' || ls === 'existing enq' ||
+             ls === 'did not enquire' || ls === 'lost to co-dealer' ||
+             ls === 'lost to competition' || ls === 'low budget' ||
+             ls === 'not eligible' || ls === 'job enquiry'
+      
+      // Note: RNR, Call me back, etc. are NOT excluded - they need follow-up!
+    }
     const isUntouched = (l: Lead) => {
       const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
       const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
@@ -933,7 +1019,7 @@ export default function CREDashboard() {
         const followUpDate = lead.follow_up_date.includes('T') 
           ? lead.follow_up_date.slice(0,10) 
           : lead.follow_up_date
-        return followUpDate <= today && !isFinalizedWon(lead)
+        return followUpDate <= today && !isFinalizedWon(lead) && !isLostOrUnqualified(lead)
       }).length,
       // Pending = final_status Pending AND first call done
       pending: leads.filter(lead => ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !!(lead?.first_call_date) && !isFinalizedWon(lead)).length,
@@ -1674,10 +1760,10 @@ export default function CREDashboard() {
                 </div>
               )}
 
-              {/* Leads Table */}
-              <div className="overflow-x-auto rounded-2xl">
+              {/* Leads Table - Optimized with Backend Filtering */}
+              <div className="overflow-auto rounded-2xl max-h-[calc(100vh-300px)]">
                 <table className="w-full border-collapse">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-white shadow-sm">
                     <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
                       <th className="text-left p-3 font-semibold text-gray-800">ACTION</th>
                       {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
@@ -1733,7 +1819,10 @@ export default function CREDashboard() {
                         const rowColorClass = specialStatusClass || `${baseRowClass} ${hoverClass}`
                         
                         return (
-                        <tr key={lead.id} className={`border-b transition-colors duration-200 ${rowColorClass}`}>
+                        <tr 
+                          key={lead.id} 
+                          className={`border-b transition-colors duration-200 ${rowColorClass}`}
+                        >
                           <td className="p-3">
                             <div className="flex gap-2">
                               {activeTab === "lostconfirm" ? (

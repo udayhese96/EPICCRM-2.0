@@ -380,6 +380,11 @@ interface Lead {
   test_drive?: boolean
   test_drive_type?: string
   trade_in?: string
+  trade_in_make?: string
+  trade_in_model?: string
+  trade_in_year?: string
+  trade_in_km?: string
+  trade_in_ownership?: string
   // removed duplicate lead_category type
   customer_email?: string
   customer_location?: string
@@ -501,6 +506,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
   const today = new Date().toISOString().slice(0,10)
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0,10)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showTradeInDialog, setShowTradeInDialog] = useState(false)
   const [formData, setFormData] = useState({
     model_interested: "",
     variant: "",
@@ -855,6 +861,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : 
                          selectedStatus === "pending" && formData.pending_reason === "Call me back" ? (formData.follow_up_date || tomorrow) : 
                          selectedStatus === "pending" ? undefined : // No follow-up date for RNR, DND, Busy, etc.
+                         selectedStatus === "unqualified" ? undefined : // No follow-up date for lost leads
                          (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
           needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back",
@@ -1251,7 +1258,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               <div className="mt-4 p-3 rounded-lg bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200/40 backdrop-blur-sm">
                 <div className="text-xs font-semibold text-blue-900 mb-2">Previous Calls</div>
                 <div className="text-xs text-gray-700 space-y-1 leading-tight">
-                  <div>First Call: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.first_call_remark || lead.lead_remark || lead.remarks || '—'}</div>
+                  <div>First Call: <span className="font-medium">{(lead.first_call_date || '').slice(0,10) || '-'}</span> · {lead.lead_status ? (<Badge variant="outline" className="mr-1">{lead.lead_status}</Badge>) : null}{lead.first_call_remark || lead.lead_remark || lead.remarks || '—'}</div>
                   {(lead.second_remark || lead.second_call_lead_status) && (
                     <div>F1: <span className="font-medium">{(lead.second_call_date || '').slice(0,10)}</span> · {lead.second_call_lead_status ? (<Badge variant="outline" className="mr-1">{lead.second_call_lead_status}</Badge>) : null}{lead.second_remark}</div>
                   )}
@@ -1271,23 +1278,29 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
               </div>
 
               {/* Qualification Summary (if present) */}
-              {(lead.model_interested || lead.branch || lead.ps_assigned || lead.lead_category) && (
+              {(lead.model_interested || lead.branch || lead.ps_assigned || lead.lead_category || true) && (
                 <div className="mt-4 pt-3 border-t border-blue-200/40">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {lead.model_interested && (
-                    <div className="flex items-center space-x-2">
-                        <Car className="h-3 w-3 text-gray-400" />
-                        <span className="text-xs text-gray-500">Model:</span>
-                        <span className="text-sm font-medium text-gray-900">{lead.model_interested}</span>
-                    </div>
-                  )}
-                  {lead.variant && (
-                    <div className="flex items-center space-x-2">
-                        <Car className="h-3 w-3 text-gray-400" />
-                        <span className="text-xs text-gray-500">Variant:</span>
-                        <span className="text-sm font-medium text-gray-900">{lead.variant}</span>
-                    </div>
-                  )}
+                  {/* Always show Model Interested */}
+                  <div className="flex items-center space-x-2">
+                    <Car className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Model:</span>
+                    {lead.model_interested ? (
+                      <span className="text-sm font-medium text-gray-900">{lead.model_interested}</span>
+                    ) : (
+                      <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 text-xs px-2 py-0.5">Not Set</Badge>
+                    )}
+                  </div>
+                  {/* Always show Variant */}
+                  <div className="flex items-center space-x-2">
+                    <Car className="h-3 w-3 text-gray-400" />
+                    <span className="text-xs text-gray-500">Variant:</span>
+                    {lead.variant ? (
+                      <span className="text-sm font-medium text-gray-900">{lead.variant}</span>
+                    ) : (
+                      <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 text-xs px-2 py-0.5">Not Set</Badge>
+                    )}
+                  </div>
                   {lead.branch && (
                     <div className="flex items-center space-x-2">
                         <Building className="h-3 w-3 text-gray-400" />
@@ -1310,24 +1323,32 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
           {/* Previous Follow-ups */}
           {lead.call_logs && lead.call_logs.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Previous Follow-ups</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
+            <div className="border-2 rounded-lg border-purple-200 bg-gradient-to-r from-purple-50 to-purple-100 shadow-md">
+              <div className="p-4 border-b border-purple-200 bg-purple-100/50">
+                <h3 className="text-sm font-semibold text-purple-900 flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Previous Follow-ups
+                </h3>
+              </div>
+              <div className="p-4">
+                <div className="space-y-3">
                   {lead.call_logs.map((log, idx) => (
-                    <div key={idx} className="flex items-start justify-between border-b py-2">
+                    <div key={idx} className="bg-white rounded-lg p-3 border border-purple-100 shadow-sm">
                       <div className="text-gray-700">
-                        <span className="font-medium mr-2">{log.date}</span>
-                        <Badge variant="outline" className="mr-2">{log.outcome || "—"}</Badge>
-                        <span className="text-gray-600">{log.remarks || "No remarks"}</span>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Calendar className="h-3 w-3 text-purple-600" />
+                          <span className="font-medium text-sm">{log.date}</span>
+                          <Badge variant="outline" className="ml-auto bg-purple-50 text-purple-700 border-purple-200">{log.outcome || "—"}</Badge>
+                        </div>
+                        <div className="text-sm text-gray-600 pl-5">
+                          {log.remarks || "No remarks"}
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
           {/* Status Selection or Follow-up Workflow */}
@@ -1454,6 +1475,63 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     )
                   })}
                 </div>
+
+                  {/* Qualification Details Summary */}
+                  <div className="bg-white/60 rounded-lg p-3 border border-blue-100 mb-4">
+                    <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                      <Car className="h-3 w-3" />
+                      Qualification Details
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {lead.model_interested && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-gray-500">Model:</span>
+                          <span className="font-medium text-gray-800">{lead.model_interested}</span>
+                        </div>
+                      )}
+                      {lead.variant && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-gray-500">Variant:</span>
+                          <span className="font-medium text-gray-800">{lead.variant}</span>
+                        </div>
+                      )}
+                      {lead.buying_plan && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-gray-500">Buying:</span>
+                          <span className="font-medium text-gray-800">{lead.buying_plan}</span>
+                        </div>
+                      )}
+                      {lead.finance_option && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-gray-500">Finance:</span>
+                          <span className="font-medium text-gray-800">{lead.finance_option}</span>
+                        </div>
+                      )}
+                      {lead.trade_in && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500">Trade-in:</span>
+                          <span className="font-medium text-gray-800">{lead.trade_in}</span>
+                          {lead.trade_in === 'Yes' && lead.trade_in_make && (
+                            <Button 
+                              type="button"
+                              size="sm" 
+                              variant="outline" 
+                              className="h-6 px-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                              onClick={() => setShowTradeInDialog(true)}
+                            >
+                              View Details
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {lead.test_drive_type && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-gray-500">Test Drive:</span>
+                          <span className="font-medium text-gray-800">{lead.test_drive_type}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="space-y-4">
                     <div>
@@ -2313,6 +2391,55 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setIsTradeInDialogOpen(false)}>Close</Button>
             <Button onClick={() => setIsTradeInDialogOpen(false)} className="bg-blue-600 hover:bg-blue-700">Save</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Trade-in Details View Dialog */}
+    <Dialog open={showTradeInDialog} onOpenChange={setShowTradeInDialog}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Car className="h-5 w-5 text-blue-600" />
+            Trade-in Vehicle Details
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Make</div>
+                <div className="text-sm font-semibold text-gray-900">{lead?.trade_in_make || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Model</div>
+                <div className="text-sm font-semibold text-gray-900">{lead?.trade_in_model || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Year</div>
+                <div className="text-sm font-semibold text-gray-900">{lead?.trade_in_year || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">KM Driven</div>
+                <div className="text-sm font-semibold text-gray-900">{lead?.trade_in_km ? `${lead.trade_in_km} km` : 'Not specified'}</div>
+              </div>
+              <div className="col-span-2">
+                <div className="text-xs text-gray-500 mb-1">Ownership</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {lead?.trade_in_ownership === 'first' ? 'First Owner' :
+                   lead?.trade_in_ownership === 'second' ? 'Second Owner' :
+                   lead?.trade_in_ownership === 'third' ? 'Third Owner' :
+                   lead?.trade_in_ownership === 'more' ? 'More than 3 Owners' :
+                   'Not specified'}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setShowTradeInDialog(false)}>
+              Close
+            </Button>
           </div>
         </div>
       </DialogContent>
