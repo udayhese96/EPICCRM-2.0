@@ -1715,6 +1715,9 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["customer_location"] = lead_data.customer_location
         if lead_data.final_status is not None:
             update_data["final_status"] = lead_data.final_status
+            # Clear follow_up_date when lead is marked as Lost
+            if lead_data.final_status.lower() == 'lost':
+                update_data["follow_up_date"] = None
 
         # Handle follow-up date (accepts YYYY-MM-DD and full ISO; skip empty)
         if lead_data.follow_up_date is not None:
@@ -2387,7 +2390,7 @@ async def test_endpoint():
 async def get_public_cre_assigned(username: str, name: Optional[str] = None):
     try:
         print(f"Fetching leads for username: {username}, name: {name}")
-        query = supabase.table('lead_master').select('*').eq('assigned', 'Yes')
+        query = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes')
 
         # Prefer full name if provided; otherwise use username
         clean_user = (username or '').strip()
@@ -2400,7 +2403,7 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
         
         for term in search_terms:
             try:
-                exact_query = supabase.table('lead_master').select('*').eq('assigned', 'Yes').eq('cre_name', term)
+                exact_query = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes').eq('cre_name', term)
                 exact_response = exact_query.order('created_at', desc=True).execute()
                 if exact_response.data:
                     found_leads.extend(exact_response.data)
@@ -2412,7 +2415,7 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
         # If no exact matches, try case-insensitive
         if not found_leads:
             try:
-                all_leads_response = supabase.table('lead_master').select('*').eq('assigned', 'Yes').execute()
+                all_leads_response = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes').execute()
                 if all_leads_response.data:
                     for term in search_terms:
                         filtered_leads = [
@@ -2426,12 +2429,22 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
             except Exception as e:
                 print(f"Error with case-insensitive match: {e}")
         
-        # Remove duplicates
+        # Remove duplicates and flatten trade-in data
         unique_leads = []
         seen_ids = set()
         for lead in found_leads:
             lead_id = lead.get('id') or lead.get('uid')
             if lead_id not in seen_ids:
+                # Flatten trade_in_master data into lead object
+                if lead.get('trade_in_master') and isinstance(lead['trade_in_master'], list) and len(lead['trade_in_master']) > 0:
+                    trade_in_data = lead['trade_in_master'][0]
+                    lead['trade_in_make'] = trade_in_data.get('trade_in_make')
+                    lead['trade_in_model'] = trade_in_data.get('trade_in_model')
+                    lead['trade_in_year'] = trade_in_data.get('trade_in_year')
+                    lead['trade_in_km'] = trade_in_data.get('trade_in_km')
+                    lead['trade_in_ownership'] = trade_in_data.get('trade_in_ownership')
+                    # Remove the nested object to keep response clean
+                    del lead['trade_in_master']
                 unique_leads.append(lead)
                 seen_ids.add(lead_id)
         
@@ -2444,10 +2457,14 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
 
 # Alternative endpoint with query parameters
 @app.get("/api/cre-assigned")
-async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] = None):
+async def get_cre_assigned(
+    username: Optional[str] = None, 
+    name: Optional[str] = None,
+    tab: Optional[str] = None  # NEW: tab filter (all, fresh, followup, qualified, lost, wonlost)
+):
     try:
-        print(f"Fetching leads for username: {username}, name: {name}")
-        query = supabase.table('lead_master').select('*').eq('assigned', 'Yes')
+        print(f"Fetching leads for username: {username}, name: {name}, tab: {tab}")
+        query = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes')
 
         # Prefer full name if provided; otherwise use username
         clean_user = (username or '').strip()
@@ -2458,9 +2475,40 @@ async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] =
         elif clean_user:
             query = query.eq('cre_name', clean_user)
 
+        # Apply tab-specific filtering at database level for performance
+        if tab:
+            tab_lower = tab.lower()
+            if tab_lower == 'fresh':
+                # Fresh leads: not qualified, not won/lost, no first_call_date
+                query = query.is_('first_call_date', 'null').neq('lead_status', 'Qualified').not_.in_('final_status', ['booked', 'retailed'])
+            elif tab_lower == 'followup':
+                # Follow-up leads: have follow_up_date set, not won/lost
+                # Exclude by final_status = Lost OR truly unqualified lead_status (but allow RNR, Call me back, etc.)
+                print(f"🔍 [DEBUG] Filtering follow-up leads - excluding lost/unqualified leads (but allowing RNR/Call me back)")
+                query = query.not_.is_('follow_up_date', 'null').not_.in_('final_status', ['booked', 'retailed', 'lost', 'unqualified', 'Lost', 'Unqualified', 'LOST', 'UNQUALIFIED']).not_.in_('lead_status', ['Lost', 'Not interested', 'Out of Territory', 'Duplicate Lead', 'Invalid Number', 'Wrong Number', 'Just enquired', 'Service', 'Insurance', 'Internal', 'Used car', 'No Response', 'Mock Call', 'Plan Dropped', 'Plan Postponed', 'DSA Enq', 'BH Registration', 'Existing Enq', 'Did not enquire', 'Lost to co-dealer', 'Lost to competition', 'Low Budget', 'Not Eligible', 'Job Enquiry'])
+                # Note: RNR, Call me back, etc. are NOT excluded - they need follow-up!
+            elif tab_lower == 'qualified':
+                # Qualified leads: lead_status = 'Qualified', final_status = 'Pending'
+                query = query.eq('lead_status', 'Qualified').eq('final_status', 'Pending')
+            elif tab_lower == 'lost':
+                # Lost leads: final_status in ['lost', 'unqualified']
+                query = query.in_('final_status', ['lost', 'unqualified'])
+            elif tab_lower == 'wonlost':
+                # Won/Lost leads: final_status in ['booked', 'retailed', 'lost', 'unqualified']
+                query = query.in_('final_status', ['booked', 'retailed', 'lost', 'unqualified'])
+            # 'all' or any other value: no additional filtering
+
         response = query.order('created_at', desc=True).execute()
         print(f"Found {len(response.data or [])} leads")
         print(f"Sample lead UIDs: {[lead.get('uid') for lead in (response.data or [])[:3]]}")
+        
+        # DEBUG: Show problematic leads if any
+        if response.data:
+            problematic_leads = [lead for lead in response.data if lead.get('lead_status') in ['Lost', 'RNR', 'Out of Territory'] or lead.get('final_status') in ['Lost', 'lost']]
+            if problematic_leads:
+                print(f"⚠️ [DEBUG] Found {len(problematic_leads)} problematic leads in followup results:")
+                for lead in problematic_leads[:3]:
+                    print(f"   - {lead.get('uid')}: lead_status='{lead.get('lead_status')}', final_status='{lead.get('final_status')}', follow_up_date='{lead.get('follow_up_date')}'")
         
         # DEBUG: Comprehensive ICROP ID debugging
         print(f"🔍 [DEBUG] Processing {len(response.data or [])} leads for ICROP ID...")
@@ -2516,7 +2564,23 @@ async def get_cre_assigned(username: Optional[str] = None, name: Optional[str] =
         
         print(f"🔍 [DEBUG] Returning {len(response.data or [])} leads with ICROP IDs processed")
         
-        return response.data or []
+        # Flatten trade-in data into lead objects
+        leads_data = response.data or []
+        for lead in leads_data:
+            if lead.get('trade_in_master') and isinstance(lead['trade_in_master'], list) and len(lead['trade_in_master']) > 0:
+                trade_in_data = lead['trade_in_master'][0]
+                lead['trade_in_make'] = trade_in_data.get('trade_in_make')
+                lead['trade_in_model'] = trade_in_data.get('trade_in_model')
+                lead['trade_in_year'] = trade_in_data.get('trade_in_year')
+                lead['trade_in_km'] = trade_in_data.get('trade_in_km')
+                lead['trade_in_ownership'] = trade_in_data.get('trade_in_ownership')
+                # Remove the nested object to keep response clean
+                del lead['trade_in_master']
+            elif 'trade_in_master' in lead:
+                # Remove empty trade_in_master object
+                del lead['trade_in_master']
+        
+        return leads_data
     except Exception as e:
         print(f"Error in get_cre_assigned: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2538,7 +2602,8 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 'fourth_remark', 'fifth_remark', 'sixth_remark', 'first_call_date', 'second_call_date', 
                 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date', 
                 'lead_status', 'final_status', 'cre_name', 'pending_reasons',
-                'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
+                'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status',
+                'model_interested', 'variant', 'buying_plan', 'finance_option', 'trade_in', 'test_drive_type'
             ).eq('uid', lead_uid).execute()
             
             if cre_response.data:
@@ -2568,13 +2633,14 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 
                 for idx, (remark_field, date_field) in enumerate(call_fields, start=1):
                     if lead_data.get(remark_field):
-                        # Build status: Qualified for first call; for later calls show "Qualified + <latest>" when available
+                        # Build status: Use actual lead_status for first call; for later calls show per-call status
                         if idx == 1:
-                            status_value = 'Qualified'
+                            # For first call, use the actual lead_status (contains unqualified reasons like "Out of Territory")
+                            status_value = overall_lead_status if overall_lead_status else 'Qualified'
                         else:
                             step_status_key = status_fields[idx - 1]
                             step_status_val = lead_data.get(step_status_key) if step_status_key else None
-                            status_value = f"Qualified + {step_status_val}" if step_status_val else 'Qualified'
+                            status_value = step_status_val if step_status_val else 'Qualified'
                         cre_remarks.append({
                             'type': 'CRE',
                             'call_number': len(cre_remarks) + 1,
@@ -2645,6 +2711,60 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
         if cre_response.data:
             pending_reasons = cre_response.data[0].get('pending_reasons', [])
         
+        # Extract qualification details
+        qual_details = {}
+        if cre_response.data:
+            lead_data = cre_response.data[0]
+            qual_details = {
+                'model_interested': lead_data.get('model_interested', ''),
+                'variant': lead_data.get('variant', ''),
+                'buying_plan': lead_data.get('buying_plan', ''),
+                'finance_option': lead_data.get('finance_option', ''),
+                'trade_in': lead_data.get('trade_in', ''),
+                'test_drive_type': lead_data.get('test_drive_type', '')
+            }
+        
+        # Fetch trade-in details from trade_in_master table if trade_in is Yes
+        if qual_details.get('trade_in') == 'Yes':
+            try:
+                print(f"🚗 [Trade-in] Fetching trade-in details for lead: {lead_uid}")
+                tradein_response = supabase.table('trade_in_master').select(
+                    'trade_in_make', 'trade_in_model', 'trade_in_year', 'trade_in_km', 'trade_in_ownership'
+                ).eq('lead_uid', lead_uid).execute()
+                
+                print(f"🚗 [Trade-in] Query response: {tradein_response.data}")
+                
+                if tradein_response.data and len(tradein_response.data) > 0:
+                    tradein_data = tradein_response.data[0]
+                    qual_details['trade_in_make'] = tradein_data.get('trade_in_make', '')
+                    qual_details['trade_in_model'] = tradein_data.get('trade_in_model', '')
+                    qual_details['trade_in_year'] = tradein_data.get('trade_in_year', '')
+                    qual_details['trade_in_km'] = tradein_data.get('trade_in_km', '')
+                    qual_details['trade_in_ownership'] = tradein_data.get('trade_in_ownership', '')
+                    print(f"✅ [Trade-in] Details found: {qual_details['trade_in_make']} {qual_details['trade_in_model']}")
+                else:
+                    # No trade-in details found, set empty values
+                    print(f"⚠️ [Trade-in] No trade-in record found in trade_in_master for {lead_uid}")
+                    qual_details['trade_in_make'] = ''
+                    qual_details['trade_in_model'] = ''
+                    qual_details['trade_in_year'] = ''
+                    qual_details['trade_in_km'] = ''
+                    qual_details['trade_in_ownership'] = ''
+            except Exception as e:
+                print(f"❌ [Trade-in] Error fetching trade-in details: {e}")
+                qual_details['trade_in_make'] = ''
+                qual_details['trade_in_model'] = ''
+                qual_details['trade_in_year'] = ''
+                qual_details['trade_in_km'] = ''
+                qual_details['trade_in_ownership'] = ''
+        else:
+            # Trade-in is not Yes, set empty values
+            qual_details['trade_in_make'] = ''
+            qual_details['trade_in_model'] = ''
+            qual_details['trade_in_year'] = ''
+            qual_details['trade_in_km'] = ''
+            qual_details['trade_in_ownership'] = ''
+        
         payload = {
             'lead_uid': lead_uid,
             'remarks': remarks,
@@ -2652,7 +2772,8 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
             'pending_reasons': pending_reasons,
             'overall_final_status': overall_final_status if 'overall_final_status' in locals() else '',
             'overall_lead_status': overall_lead_status if 'overall_lead_status' in locals() else '',
-            'existing_remarks': existing_remarks_value if 'existing_remarks_value' in locals() else ''
+            'existing_remarks': existing_remarks_value if 'existing_remarks_value' in locals() else '',
+            **qual_details  # Add qualification details to payload
         }
         return JSONResponse(content=payload, headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
         

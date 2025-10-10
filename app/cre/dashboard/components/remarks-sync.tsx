@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { MessageSquare, User, Calendar, RefreshCw, FileText } from "lucide-react"
+import { MessageSquare, User, Calendar, RefreshCw, FileText, Car } from "lucide-react"
 
 interface Remark {
   type: 'CRE' | 'PS'
@@ -36,6 +36,20 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
   const [existingRemarks, setExistingRemarks] = useState<string | null>(null)
   const [overallFinalStatus, setOverallFinalStatus] = useState<string>('')
   const [overallLeadStatus, setOverallLeadStatus] = useState<string>('')
+  const [qualificationDetails, setQualificationDetails] = useState<{
+    model_interested?: string
+    variant?: string
+    buying_plan?: string
+    finance_option?: string
+    trade_in?: string
+    trade_in_make?: string
+    trade_in_model?: string
+    trade_in_year?: string
+    trade_in_km?: string
+    trade_in_ownership?: string
+    test_drive_type?: string
+  }>({})
+  const [showTradeInDialog, setShowTradeInDialog] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshTimer, setRefreshTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -66,6 +80,19 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
         setExistingRemarks(data.existing_remarks || null)
         setOverallFinalStatus(data.overall_final_status || '')
         setOverallLeadStatus(data.overall_lead_status || '')
+        setQualificationDetails({
+          model_interested: data.model_interested || '',
+          variant: data.variant || '',
+          buying_plan: data.buying_plan || '',
+          finance_option: data.finance_option || '',
+          trade_in: data.trade_in || '',
+          trade_in_make: data.trade_in_make || '',
+          trade_in_model: data.trade_in_model || '',
+          trade_in_year: data.trade_in_year || '',
+          trade_in_km: data.trade_in_km || '',
+          trade_in_ownership: data.trade_in_ownership || '',
+          test_drive_type: data.test_drive_type || ''
+        })
       } else {
         const errorData = await response.json()
         setError(errorData.error || 'Failed to fetch remarks')
@@ -153,6 +180,7 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
   }
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
         <DialogHeader>
@@ -216,6 +244,68 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                     )}
                   </div>
                 )}
+
+                {/* Qualification Details */}
+                {(qualificationDetails.model_interested || qualificationDetails.variant || qualificationDetails.buying_plan || qualificationDetails.finance_option || qualificationDetails.trade_in || qualificationDetails.test_drive_type) && (
+                  <div className="border rounded-lg p-4 bg-blue-50 border-l-4 border-l-blue-500">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Car className="h-4 w-4 text-blue-600" />
+                      <h4 className="text-sm font-semibold text-gray-800">Qualification Details</h4>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {qualificationDetails.model_interested && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Model Interested</div>
+                          <div className="text-sm font-medium text-gray-800">{qualificationDetails.model_interested}</div>
+                        </div>
+                      )}
+                      {qualificationDetails.variant && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Variant</div>
+                          <div className="text-sm font-medium text-gray-800">{qualificationDetails.variant}</div>
+                        </div>
+                      )}
+                      {qualificationDetails.buying_plan && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Buying Plan</div>
+                          <div className="text-sm font-medium text-gray-800">{qualificationDetails.buying_plan}</div>
+                        </div>
+                      )}
+                      {qualificationDetails.finance_option && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Finance Option</div>
+                          <div className="text-sm font-medium text-gray-800">{qualificationDetails.finance_option}</div>
+                        </div>
+                      )}
+                      {qualificationDetails.trade_in && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Trade-in</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium text-gray-800">{qualificationDetails.trade_in}</div>
+                            {qualificationDetails.trade_in === 'Yes' && qualificationDetails.trade_in_make && (
+                              <Button 
+                                type="button"
+                                size="sm" 
+                                variant="outline" 
+                                className="h-6 px-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                onClick={() => setShowTradeInDialog(true)}
+                              >
+                                View Details
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {qualificationDetails.test_drive_type && (
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <div className="text-xs text-gray-500 mb-1">Test Drive</div>
+                          <div className="text-sm font-medium text-gray-800">{qualificationDetails.test_drive_type}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Pending Reasons Section - Multiple attempts */}
                 {pendingReasons.length > 0 && (
                   <div className="border rounded-lg p-4 border-l-4 border-l-amber-500 bg-amber-50">
@@ -288,10 +378,10 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
                     {remarks.map((remark, index) => (
                   <div
                     key={index}
-                    className={`border rounded-lg p-4 ${
+                    className={`border-2 rounded-lg p-4 shadow-md ${
                       remark.type === 'CRE' 
-                        ? 'border-l-4 border-l-blue-500 bg-blue-50' 
-                        : 'border-l-4 border-l-green-500 bg-green-50'
+                        ? 'border-l-4 border-l-blue-600 bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200' 
+                        : 'border-l-4 border-l-green-600 bg-gradient-to-r from-green-50 to-green-100 border-green-200'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -343,5 +433,55 @@ export function RemarksSync({ isOpen, onClose, leadUid, customerName }: RemarksS
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Trade-in Details View Dialog */}
+    <Dialog open={showTradeInDialog} onOpenChange={setShowTradeInDialog}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Car className="h-5 w-5 text-blue-600" />
+            Trade-in Vehicle Details
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Make</div>
+                <div className="text-sm font-semibold text-gray-900">{qualificationDetails.trade_in_make || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Model</div>
+                <div className="text-sm font-semibold text-gray-900">{qualificationDetails.trade_in_model || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Year</div>
+                <div className="text-sm font-semibold text-gray-900">{qualificationDetails.trade_in_year || 'Not specified'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">KM Driven</div>
+                <div className="text-sm font-semibold text-gray-900">{qualificationDetails.trade_in_km ? `${qualificationDetails.trade_in_km} km` : 'Not specified'}</div>
+              </div>
+              <div className="col-span-2">
+                <div className="text-xs text-gray-500 mb-1">Ownership</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {qualificationDetails.trade_in_ownership === 'first' ? 'First Owner' :
+                   qualificationDetails.trade_in_ownership === 'second' ? 'Second Owner' :
+                   qualificationDetails.trade_in_ownership === 'third' ? 'Third Owner' :
+                   qualificationDetails.trade_in_ownership === 'more' ? 'More than 3 Owners' :
+                   'Not specified'}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setShowTradeInDialog(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
