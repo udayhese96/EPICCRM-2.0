@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
   Plus, 
   BarChart3, 
@@ -137,6 +138,8 @@ export default function CREDashboard() {
   const [activeStatus, setActiveStatus] = useState<string>("Fresh")
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [callOutcomeFilter, setCallOutcomeFilter] = useState<string>("all")
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [dateMode, setDateMode] = useState<"All Time" | "Today" | "This Week" | "Date Range">("All Time")
@@ -262,8 +265,21 @@ export default function CREDashboard() {
     if (user?.username && activeTab) {
       console.log(`🔄 [Tab Change] Fetching leads for tab: ${activeTab}`)
       fetchAssignedLeads()
+      // Reset status filter to "all" when tab changes
+      setStatusFilter("all")
     }
   }, [activeTab])
+
+  // Reset status filter when activeStatus changes (for Fresh tab sections)
+  useEffect(() => {
+    setStatusFilter("all")
+    setCallOutcomeFilter("all")
+  }, [activeStatus])
+
+  // Reset call outcome filter when status filter changes
+  useEffect(() => {
+    setCallOutcomeFilter("all")
+  }, [statusFilter])
 
   const setupRealtimeSubscriptions = () => {
     // Only setup if we have a user
@@ -947,13 +963,62 @@ export default function CREDashboard() {
       }
     }
 
-    // Filter by search term
+    // Filter by search term (includes status search)
     if (searchTerm) {
+      filteredLeads = filteredLeads.filter(lead => {
+        const searchLower = searchTerm.toLowerCase()
+        
+        // Search in basic fields
+        const basicMatch = (
+          (lead.uid || '').toLowerCase().includes(searchLower) ||
+          (lead.customer_name || '').toLowerCase().includes(searchLower) ||
+          (lead.customer_mobile_number || '').includes(searchTerm)
+        )
+        
+        // Search in status fields
+        const statusMatch = (
+          (lead.lead_status || '').toLowerCase().includes(searchLower) ||
+          (lead.final_status || '').toLowerCase().includes(searchLower)
+        )
+        
+        // Search in other relevant fields
+        const otherMatch = (
+          (lead.source || '').toLowerCase().includes(searchLower) ||
+          (lead.campaign || '').toLowerCase().includes(searchLower) ||
+          (lead.branch || '').toLowerCase().includes(searchLower) ||
+          (lead.icrop_id || '').toLowerCase().includes(searchLower)
+        )
+        
+        return basicMatch || statusMatch || otherMatch
+      })
+    }
+
+    // Filter by status if not "all"
+    if (statusFilter && statusFilter !== "all") {
       filteredLeads = filteredLeads.filter(lead => 
-        (lead.uid || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (lead.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (lead.customer_mobile_number || '').includes(searchTerm)
+        (lead.lead_status || '').toString().trim() === statusFilter ||
+        (lead.final_status || '').toString().trim() === statusFilter
       )
+    }
+
+    // Filter by call outcome if status is "Qualified" and call outcome is not "all"
+    if (statusFilter === "Qualified" && callOutcomeFilter && callOutcomeFilter !== "all") {
+      filteredLeads = filteredLeads.filter(lead => {
+        // For qualified leads, check if they have the specific call outcome status
+        const leadStatus = (lead.lead_status || '').toString().trim()
+        const secondCallStatus = (lead.second_call_lead_status || '').toString().trim()
+        const thirdCallStatus = (lead.third_call_lead_status || '').toString().trim()
+        const fourthCallStatus = (lead.fourth_call_lead_status || '').toString().trim()
+        const fifthCallStatus = (lead.fifth_call_lead_status || '').toString().trim()
+        const sixthCallStatus = (lead.sixth_call_lead_status || '').toString().trim()
+        
+        return leadStatus === callOutcomeFilter ||
+               secondCallStatus === callOutcomeFilter ||
+               thirdCallStatus === callOutcomeFilter ||
+               fourthCallStatus === callOutcomeFilter ||
+               fifthCallStatus === callOutcomeFilter ||
+               sixthCallStatus === callOutcomeFilter
+      })
     }
 
       return filteredLeads
@@ -1104,7 +1169,7 @@ export default function CREDashboard() {
       }
       return []
     }
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate])
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter])
   
   const tabCounts = useMemo(() => {
     try {
@@ -1138,6 +1203,77 @@ export default function CREDashboard() {
       }
     }
   }, [leads])
+
+  // Get available statuses for current tab (tab-specific)
+  const getAvailableStatuses = () => {
+    try {
+      if (!leads || leads.length === 0) return []
+      
+      const statusSet = new Set<string>()
+      
+      // Get the actual filtered leads for the current tab/view
+      const currentFilteredLeads = getFilteredLeads()
+      
+      // Only show statuses that exist in the currently filtered leads
+      currentFilteredLeads.forEach(lead => {
+        const status = lead?.lead_status || ''
+        const finalStatus = lead?.final_status || ''
+        
+        // Add non-empty statuses
+        if (status && status.trim()) {
+          statusSet.add(status.trim())
+        }
+        if (finalStatus && finalStatus.trim()) {
+          statusSet.add(finalStatus.trim())
+        }
+      })
+      
+      // Convert to array and sort
+      return Array.from(statusSet).sort()
+    } catch (error) {
+      console.error('Error getting available statuses:', error)
+      return []
+    }
+  }
+
+  const availableStatuses = useMemo(() => getAvailableStatuses(), [leads, activeTab, activeStatus])
+
+  // Get available call outcomes for qualified leads
+  const getAvailableCallOutcomes = () => {
+    try {
+      if (!leads || leads.length === 0) return []
+      
+      const outcomeSet = new Set<string>()
+      
+      // Get call outcomes from leads that are in the qualified tab
+      const currentFilteredLeads = getFilteredLeads()
+      
+      currentFilteredLeads.forEach(lead => {
+        // Check all follow-up call status fields for outcomes (excluding the base lead_status)
+        const followupStatusFields = [
+          lead?.second_call_lead_status,
+          lead?.third_call_lead_status,
+          lead?.fourth_call_lead_status,
+          lead?.fifth_call_lead_status,
+          lead?.sixth_call_lead_status
+        ]
+        
+        followupStatusFields.forEach(status => {
+          if (status && status.trim() && status.trim().toLowerCase() !== "qualified") {
+            outcomeSet.add(status.trim())
+          }
+        })
+      })
+      
+      // Convert to array and sort
+      return Array.from(outcomeSet).sort()
+    } catch (error) {
+      console.error('Error getting available call outcomes:', error)
+      return []
+    }
+  }
+
+  const availableCallOutcomes = useMemo(() => getAvailableCallOutcomes(), [leads, activeTab, activeStatus])
 
   return (
     <DashboardLayout>
@@ -1587,6 +1723,56 @@ export default function CREDashboard() {
                     />
                   )}
                   
+                  {/* Status Filter - beside date filter */}
+                  {availableStatuses.length > 0 && (
+                    <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
+                      {/* Apple Magnus glassy effect layers */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-green-300/25"></div>
+                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                      <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                      
+                      <Filter className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-green-500 z-10" />
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="relative w-full sm:w-48 pl-10 pr-3 py-2 rounded-2xl border border-green-200/30 bg-white/90 focus:ring-2 focus:ring-green-100 focus:border-green-300 transition-all duration-150 text-sm md:text-base z-10">
+                          <SelectValue placeholder="All Statuses" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          {availableStatuses.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
+                  {/* Call Outcome Filter - appears when Qualified is selected */}
+                  {statusFilter === "Qualified" && availableCallOutcomes.length > 0 && (
+                    <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
+                      {/* Apple Magnus glassy effect layers */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
+                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
+                      <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
+                      
+                      <Phone className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500 z-10" />
+                      <Select value={callOutcomeFilter} onValueChange={setCallOutcomeFilter}>
+                        <SelectTrigger className="relative w-full sm:w-48 pl-10 pr-3 py-2 rounded-2xl border border-blue-200/30 bg-white/90 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all duration-150 text-sm md:text-base z-10">
+                          <SelectValue placeholder="All Call Outcomes" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Call Outcomes</SelectItem>
+                          {availableCallOutcomes.map((outcome) => (
+                            <SelectItem key={outcome} value={outcome}>
+                              {outcome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
                   <div className="relative overflow-hidden rounded-2xl backdrop-blur-[6px]">
                     {/* Apple Magnus glassy effect layers */}
                     <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-purple-300/25"></div>
@@ -1596,7 +1782,7 @@ export default function CREDashboard() {
                     <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-500 z-10" />
                     <input 
                       type="text"
-                      placeholder="Search by UID, name..." 
+                      placeholder="Search by UID, name, status, source..." 
                       className="relative w-full sm:w-64 pl-10 pr-3 py-2 rounded-2xl border border-purple-200/30 bg-white/90 placeholder-gray-400 focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all duration-150 text-sm md:text-base z-10"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -1747,6 +1933,7 @@ export default function CREDashboard() {
                   })}
                 </div>
               )}
+
 
               {activeTab === "wonlost" && (
                 <></>

@@ -184,10 +184,12 @@ const getNavigationForRole = (role: string) => {
         },
       ]
     default:
+      // For unknown roles, try to redirect to role-specific dashboard
+      const dashboardHref = role === 'admin' ? '/admin/dashboard' : '/dashboard'
       return [
         {
           name: "Dashboard",
-          href: "/dashboard",
+          href: dashboardHref,
           icon: LayoutDashboard,
         },
       ]
