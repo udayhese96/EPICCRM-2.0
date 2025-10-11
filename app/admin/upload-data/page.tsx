@@ -33,19 +33,30 @@ export default function UploadDataPage() {
   const [uploadResult, setUploadResult] = useState<{
     success: boolean
     message: string
-    details?: { total: number; success: number; failed: number; errors?: string[] }
+    details?: { 
+      total: number
+      success: number
+      failed: number
+      duplicate_db_count?: number
+      duplicate_file_count?: number
+      duplicate_in_db?: string[]
+      duplicate_in_file?: string[]
+      errors?: string[]
+    }
   } | null>(null)
   const [previewData, setPreviewData] = useState<any[]>([])
   const [showFormat, setShowFormat] = useState(false)
   const [showOptional, setShowOptional] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [duplicateNumbers, setDuplicateNumbers] = useState<Set<string>>(new Set())
+  const [inFileDuplicates, setInFileDuplicates] = useState<Set<string>>(new Set())
+  const [duplicateCheckFailed, setDuplicateCheckFailed] = useState(false)
 
   // Check authentication on component mount
   useEffect(() => {
     const checkAuth = async () => {
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
-      console.log('[Upload] Initial auth check:', !!session?.access_token)
       setIsAuthenticated(!!session?.access_token)
     }
     checkAuth()
@@ -70,56 +81,114 @@ export default function UploadDataPage() {
 
   const parseFilePreview = async (file: File) => {
     const reader = new FileReader()
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const text = e.target?.result as string
-      const lines = text.split("\n").slice(0, 6)
+      const lines = text.split("\n").filter(line => line.trim()) // Remove empty lines
       const parsed = lines.map(line => line.split(",").map(v => v.trim().replace(/^"|"$/g, "")))
       setPreviewData(parsed)
+      
+      // Check for duplicates
+      if (parsed.length > 1) {
+        await checkForDuplicates(parsed)
+      }
     }
     reader.readAsText(file)
   }
 
+  const checkForDuplicates = async (parsedData: any[][]) => {
+    try {
+      const supabase = createClient()
+      
+      // Get the mobile number column index
+      const headers = parsedData[0] || []
+      const mobileIdx = headers.findIndex((h: string) => 
+        h.toLowerCase().includes('mobile') && !h.toLowerCase().includes('alternate')
+      )
+      
+      if (mobileIdx === -1) return
+      
+      // Extract all mobile numbers from the file
+      const fileNumbers = parsedData.slice(1)
+        .map(row => String(row[mobileIdx] || '').trim())
+        .filter(num => num && num.length === 10 && /^\d+$/.test(num))
+      
+      // Check for duplicates within the file itself - FIXED LOGIC
+      const numberCounts = new Map<string, number>()
+      const fileDupes = new Set<string>()
+      
+      // Count occurrences of each number
+      fileNumbers.forEach(num => {
+        const count = (numberCounts.get(num) || 0) + 1
+        numberCounts.set(num, count)
+      })
+      
+      // Find numbers that appear more than once
+      numberCounts.forEach((count, num) => {
+        if (count > 1) {
+          fileDupes.add(num)
+        }
+      })
+      
+      setInFileDuplicates(fileDupes)
+      
+      
+      // Check against existing database records
+      const uniqueNumbers = Array.from(new Set(fileNumbers))
+      if (uniqueNumbers.length > 0) {
+        
+        try {
+          // Try multiple query approaches
+          const { data: existingLeads, error } = await supabase
+            .from('lead_master')
+            .select('customer_mobile_number')
+            .in('customer_mobile_number', uniqueNumbers)
+          
+          
+          if (error) {
+            setDuplicateCheckFailed(true)
+          } else if (existingLeads && existingLeads.length > 0) {
+            const existingNumbers = new Set<string>(existingLeads.map((l: any) => String(l.customer_mobile_number)))
+            setDuplicateNumbers(existingNumbers)
+          }
+        } catch (dbError) {
+          setDuplicateCheckFailed(true)
+        }
+      }
+    } catch (error) {
+      setDuplicateCheckFailed(true)
+    }
+  }
+
   const handleUpload = async () => {
-    console.log('[Upload] handleUpload called')
-    console.log('[Upload] selectedFile:', selectedFile)
-    
     if (!selectedFile) {
-      console.log('[Upload] No file selected')
       setUploadResult({ success: false, message: "Please select a file to upload" })
       return
     }
     
-    console.log('[Upload] Starting upload process...')
     setIsUploading(true)
     setUploadResult(null)
     
     try {
        const formData = new FormData()
        formData.append("file", selectedFile)
-       console.log('[Upload] FormData created, file:', selectedFile.name)
 
-      // Prefer cookie-based auth; let the browser send HttpOnly auth cookies
-      console.log('[Upload] Making API request to /api/admin/leads/upload (cookie auth)')
       const response = await fetch("/api/admin/leads/upload", {
         method: "POST",
         credentials: "include",
         body: formData,
       })
       
-      console.log('[Upload] Response status:', response.status)
       const result = await response.json()
-      console.log('[Upload] Response result:', result)
       
       if (response.ok) {
-        setUploadResult({ success: true, message: `Successfully uploaded ${result.success} leads!`, details: result })
+        setUploadResult({ success: true, message: `Upload completed! ${result.success} leads uploaded successfully.`, details: result })
         setSelectedFile(null)
         setPreviewData([])
-        setTimeout(() => router.push("/admin/assign-leads"), 3000)
+        // Removed automatic redirect - user can manually go to assign leads
       } else {
         setUploadResult({ success: false, message: result.error || "Upload failed", details: result })
       }
     } catch (error: any) {
-      console.error('[Upload] Error:', error)
       setUploadResult({ success: false, message: error.message || "An error occurred during upload" })
     } finally {
       setIsUploading(false)
@@ -130,6 +199,9 @@ export default function UploadDataPage() {
     setSelectedFile(null)
     setPreviewData([])
     setUploadResult(null)
+    setDuplicateNumbers(new Set())
+    setInFileDuplicates(new Set())
+    setDuplicateCheckFailed(false)
   }
 
   return (
@@ -214,12 +286,7 @@ export default function UploadDataPage() {
                   </Button>
                 )}
                 <Button
-                  onClick={() => {
-                    console.log('[Upload] Button clicked!')
-                    console.log('[Upload] selectedFile:', selectedFile)
-                    console.log('[Upload] isUploading:', isUploading)
-                    handleUpload()
-                  }}
+                  onClick={handleUpload}
                   disabled={!selectedFile || isUploading}
                   className="rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold px-8 py-2 shadow-lg"
                 >
@@ -240,81 +307,170 @@ export default function UploadDataPage() {
                {/* Preview (only when file chosen) */}
                {previewData.length > 0 && (
                  <div className="space-y-3">
-                   <div className="flex items-center justify-between">
-                     <Label className="font-semibold text-orange-900">📊 What will go to Assign Leads (Preview)</Label>
-                     <div className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded-full">
-                       {previewData.length - 1} leads ready
+                   <div className="flex items-center justify-between flex-wrap gap-2">
+                     <Label className="font-semibold text-orange-900">📊 Complete Lead Preview</Label>
+                     <div className="flex items-center gap-2 flex-wrap">
+                       <div className="text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full font-medium">
+                         ✓ {Math.max(0, previewData.length - 1 - duplicateNumbers.size - inFileDuplicates.size)} Valid
+                       </div>
+                       {duplicateNumbers.size > 0 && (
+                         <div className="text-xs text-red-700 bg-red-100 px-2 py-1 rounded-full font-medium">
+                           ⚠ {duplicateNumbers.size} DB Duplicates
+                         </div>
+                       )}
+                       {inFileDuplicates.size > 0 && (
+                         <div className="text-xs text-orange-700 bg-orange-100 px-2 py-1 rounded-full font-medium">
+                           ⚠ {inFileDuplicates.size} File Duplicates
+                         </div>
+                       )}
+                       <div className="text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded-full font-medium">
+                         📋 Total: {previewData.length - 1}
+                       </div>
                      </div>
                    </div>
                    
-                   <div className="border border-orange-100 rounded-2xl overflow-x-auto bg-white/90 shadow-sm">
-                     <table className="w-full text-sm">
-                       <thead className="bg-orange-50">
-                         <tr>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Customer Name</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Mobile</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Source</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Location</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Model Interested</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Variant</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Campaign</th>
-                           <th className="px-3 py-2 text-left font-medium text-orange-800 border-b">Status</th>
-                         </tr>
-                       </thead>
+                   <div className="relative">
+                     <div className="absolute top-2 right-4 z-20 bg-orange-600 text-white px-2 py-1 rounded text-xs font-bold animate-pulse">
+                       ← Scroll sideways to see all columns →
+                     </div>
+                     <div className="border border-orange-100 rounded-2xl overflow-hidden bg-white/90 shadow-sm max-h-[600px] overflow-x-auto overflow-y-auto">
+                       <table className="min-w-full text-sm">
+                         <thead className="bg-orange-50 sticky top-0 z-10 shadow-sm">
+                           <tr>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[50px]">#</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[150px]">Customer Name</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[140px]">Mobile</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[100px]">Source</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[120px]">Location</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[150px]">Model Interested</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[120px]">Variant</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[120px]">Campaign</th>
+                             <th className="px-3 py-2 text-left font-medium text-orange-800 border-b whitespace-nowrap min-w-[120px] sticky right-0 bg-orange-50 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)]">Status</th>
+                           </tr>
+                         </thead>
                        <tbody>
                          {previewData.slice(1).map((row: string[], rIdx: number) => {
                            const headers = previewData[0] || []
                            const nameIdx = headers.findIndex((h: string) => h.toLowerCase().includes('name'))
-                           const mobileIdx = headers.findIndex((h: string) => h.toLowerCase().includes('mobile'))
+                           const mobileIdx = headers.findIndex((h: string) => h.toLowerCase().includes('mobile') && !h.toLowerCase().includes('alternate'))
                            const sourceIdx = headers.findIndex((h: string) => h.toLowerCase() === 'source')
                            const locationIdx = headers.findIndex((h: string) => h.toLowerCase().includes('location'))
                            const modelIdx = headers.findIndex((h: string) => h.toLowerCase().includes('model_interested'))
                            const variantIdx = headers.findIndex((h: string) => h.toLowerCase() === 'variant')
                            const campaignIdx = headers.findIndex((h: string) => h.toLowerCase() === 'campaign')
                            
+                           const mobile = mobileIdx >= 0 ? String(row[mobileIdx] || '').trim() : ''
+                           const isDuplicateInDB = duplicateNumbers.has(mobile)
+                           const isDuplicateInFile = inFileDuplicates.has(mobile)
+                           const isDuplicate = isDuplicateInDB || isDuplicateInFile
+                           
                            return (
-                             <tr key={rIdx} className="hover:bg-orange-50">
-                               <td className="px-3 py-2 border-b text-orange-900 font-medium">
+                             <tr 
+                               key={rIdx} 
+                               className={`
+                                 ${isDuplicateInDB ? 'bg-red-50 hover:bg-red-100' : 
+                                   isDuplicateInFile ? 'bg-orange-50 hover:bg-orange-100' : 
+                                   'hover:bg-green-50'}
+                               `}
+                             >
+                               <td className="px-3 py-2 border-b text-gray-600 text-xs font-medium whitespace-nowrap">
+                                 {rIdx + 1}
+                               </td>
+                               <td className="px-3 py-2 border-b text-orange-900 font-medium whitespace-nowrap">
                                  {nameIdx >= 0 ? row[nameIdx] : 'N/A'}
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900 font-mono text-xs">
-                                 {mobileIdx >= 0 ? row[mobileIdx] : 'N/A'}
+                               <td className="px-3 py-2 border-b font-mono text-xs whitespace-nowrap">
+                                 <div className="flex items-center gap-2">
+                                   <span className={isDuplicate ? 'text-red-700 font-bold' : 'text-orange-900'}>
+                                     {mobile || 'N/A'}
+                                   </span>
+                                   {isDuplicateInDB && (
+                                     <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded font-bold" title="Already exists in database">
+                                       DB DUP
+                                     </span>
+                                   )}
+                                   {isDuplicateInFile && (
+                                     <span className="text-xs bg-orange-600 text-white px-1.5 py-0.5 rounded font-bold" title="Duplicate within this file">
+                                       FILE DUP
+                                     </span>
+                                   )}
+                                 </div>
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900">
+                               <td className="px-3 py-2 border-b text-orange-900 text-xs whitespace-nowrap">
                                  {sourceIdx >= 0 ? row[sourceIdx] : 'Not Set'}
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900">
+                               <td className="px-3 py-2 border-b text-orange-900 text-xs whitespace-nowrap">
                                  {locationIdx >= 0 ? row[locationIdx] : 'Not Set'}
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900 text-xs">
+                               <td className="px-3 py-2 border-b text-orange-900 text-xs whitespace-nowrap">
                                  {modelIdx >= 0 ? row[modelIdx] : 'Not Set'}
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900 text-xs">
+                               <td className="px-3 py-2 border-b text-orange-900 text-xs whitespace-nowrap">
                                  {variantIdx >= 0 ? row[variantIdx] : 'Not Set'}
                                </td>
-                               <td className="px-3 py-2 border-b text-orange-900 text-xs">
+                               <td className="px-3 py-2 border-b text-orange-900 text-xs whitespace-nowrap">
                                  {campaignIdx >= 0 ? row[campaignIdx] : 'Not Set'}
                                </td>
-                               <td className="px-3 py-2 border-b">
-                                 <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                                   Pending
-                                 </span>
+                               <td className={`px-3 py-2 border-b whitespace-nowrap sticky right-0 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.1)] ${
+                                 isDuplicateInDB ? 'bg-red-50' : 
+                                 isDuplicateInFile ? 'bg-orange-50' : 
+                                 'bg-white'
+                               }`}>
+                                 {isDuplicateInDB ? (
+                                   <span className="px-2 py-1 bg-red-200 text-red-900 rounded-full text-xs font-bold">
+                                     Will Skip
+                                   </span>
+                                 ) : isDuplicateInFile ? (
+                                   <span className="px-2 py-1 bg-orange-200 text-orange-900 rounded-full text-xs font-bold">
+                                     Duplicate
+                                   </span>
+                                 ) : (
+                                   <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                     Will Upload
+                                   </span>
+                                 )}
                                </td>
                              </tr>
                            )
                          })}
                        </tbody>
                      </table>
+                     </div>
                    </div>
                    
-                   <div className="text-xs text-orange-700 bg-orange-50 p-3 rounded-lg border border-orange-200">
-                     <p className="font-medium mb-1">✅ These leads will appear in Assign Leads with:</p>
-                     <ul className="list-disc list-inside space-y-1">
-                       <li><strong>Status:</strong> Pending (ready for assignment)</li>
-                       <li><strong>Assigned:</strong> No (will show in unassigned section)</li>
-                       <li><strong>Lead Status:</strong> Empty (fresh leads)</li>
-                       <li><strong>All Excel data:</strong> Imported exactly as provided</li>
-                     </ul>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                     <div className="text-xs text-green-700 bg-green-50 p-3 rounded-lg border border-green-200">
+                       <p className="font-bold mb-1">✅ Valid Leads ({Math.max(0, previewData.length - 1 - duplicateNumbers.size - inFileDuplicates.size)})</p>
+                       <ul className="list-disc list-inside space-y-1">
+                         <li><strong>Status:</strong> Pending (ready for assignment)</li>
+                         <li><strong>Assigned:</strong> No (will show in unassigned section)</li>
+                         <li><strong>All data:</strong> Imported exactly as provided</li>
+                       </ul>
+                     </div>
+                     
+                     {(duplicateNumbers.size > 0 || inFileDuplicates.size > 0) && (
+                       <div className="text-xs text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
+                         <p className="font-bold mb-1">⚠️ Duplicates Found ({duplicateNumbers.size + inFileDuplicates.size})</p>
+                         <ul className="list-disc list-inside space-y-1">
+                           {duplicateNumbers.size > 0 && (
+                             <li><strong>DB Duplicates:</strong> {duplicateNumbers.size} (already exist in database)</li>
+                           )}
+                           {inFileDuplicates.size > 0 && (
+                             <li><strong>File Duplicates:</strong> {inFileDuplicates.size} (repeated in this file)</li>
+                           )}
+                           <li className="text-red-900 font-bold">These will be SKIPPED during upload</li>
+                         </ul>
+                       </div>
+                     )}
+                     
+                     {/* Warning when duplicate check fails */}
+                     {duplicateCheckFailed && (
+                       <div className="text-xs text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
+                         <p className="font-bold mb-1">⚠️ Database Duplicate Check Failed</p>
+                         <p>Cannot verify if numbers already exist in database due to authentication issues.</p>
+                         <p className="font-medium mt-1">Backend will still check duplicates during upload.</p>
+                       </div>
+                     )}
                    </div>
                  </div>
                )}
@@ -372,22 +528,82 @@ John Doe,9876543210,T NAGAR,Meta,Web,Innova Campaign,Toyota Innova Crysta
                 ) : (
                   <AlertCircle className="h-5 w-5 text-red-600" />
                 )}
-                <div>
-                  <AlertTitle>{uploadResult.success ? "Success" : "Upload Failed"}</AlertTitle>
+                <div className="w-full">
+                  <AlertTitle>{uploadResult.success ? "Upload Complete!" : "Upload Failed"}</AlertTitle>
                   <AlertDescription className="text-sm">
                     {uploadResult.message}
                     {uploadResult.details && (
-                      <div className="mt-2 space-y-1">
-                        <p><strong>Total:</strong> {uploadResult.details.total}</p>
-                        <p><strong>Uploaded:</strong> {uploadResult.details.success}</p>
-                        <p><strong>Failed:</strong> {uploadResult.details.failed}</p>
-                        {uploadResult.details.errors?.length > 0 && (
-                          <details className="mt-1">
-                            <summary className="cursor-pointer text-orange-700">Errors</summary>
-                            <ul className="list-disc list-inside text-xs">
+                      <div className="mt-3 space-y-2">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-blue-50 p-2 rounded">
+                            <p className="text-xs text-blue-600 font-medium">Total Rows</p>
+                            <p className="text-lg font-bold text-blue-700">{uploadResult.details.total}</p>
+                          </div>
+                          <div className="bg-green-50 p-2 rounded">
+                            <p className="text-xs text-green-600 font-medium">✓ Uploaded</p>
+                            <p className="text-lg font-bold text-green-700">{uploadResult.details.success}</p>
+                          </div>
+                          {uploadResult.details.duplicate_db_count !== undefined && uploadResult.details.duplicate_db_count > 0 && (
+                            <div className="bg-red-50 p-2 rounded">
+                              <p className="text-xs text-red-600 font-medium">⚠ DB Duplicates</p>
+                              <p className="text-lg font-bold text-red-700">{uploadResult.details.duplicate_db_count}</p>
+                            </div>
+                          )}
+                          {uploadResult.details.duplicate_file_count !== undefined && uploadResult.details.duplicate_file_count > 0 && (
+                            <div className="bg-orange-50 p-2 rounded">
+                              <p className="text-xs text-orange-600 font-medium">⚠ File Duplicates</p>
+                              <p className="text-lg font-bold text-orange-700">{uploadResult.details.duplicate_file_count}</p>
+                            </div>
+                          )}
+                          {uploadResult.details.failed > 0 && (
+                            <div className="bg-gray-50 p-2 rounded">
+                              <p className="text-xs text-gray-600 font-medium">✗ Failed</p>
+                              <p className="text-lg font-bold text-gray-700">{uploadResult.details.failed}</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {uploadResult.details.duplicate_in_db && uploadResult.details.duplicate_in_db.length > 0 && (
+                          <details className="mt-2 bg-red-50 p-2 rounded border border-red-200">
+                            <summary className="cursor-pointer text-red-700 font-semibold text-xs">
+                              📋 Database Duplicates ({uploadResult.details.duplicate_db_count})
+                            </summary>
+                            <ul className="list-disc list-inside text-xs mt-2 space-y-1 text-red-800">
+                              {uploadResult.details.duplicate_in_db.map((e: string, i: number) => (
+                                <li key={i}>{e}</li>
+                              ))}
+                              {uploadResult.details.duplicate_db_count! > uploadResult.details.duplicate_in_db.length && (
+                                <li className="font-bold">... {uploadResult.details.duplicate_db_count! - uploadResult.details.duplicate_in_db.length} more</li>
+                              )}
+                            </ul>
+                          </details>
+                        )}
+                        
+                        {uploadResult.details.duplicate_in_file && uploadResult.details.duplicate_in_file.length > 0 && (
+                          <details className="mt-2 bg-orange-50 p-2 rounded border border-orange-200">
+                            <summary className="cursor-pointer text-orange-700 font-semibold text-xs">
+                              📋 File Duplicates ({uploadResult.details.duplicate_file_count})
+                            </summary>
+                            <ul className="list-disc list-inside text-xs mt-2 space-y-1 text-orange-800">
+                              {uploadResult.details.duplicate_in_file.map((e: string, i: number) => (
+                                <li key={i}>{e}</li>
+                              ))}
+                              {uploadResult.details.duplicate_file_count! > uploadResult.details.duplicate_in_file.length && (
+                                <li className="font-bold">... {uploadResult.details.duplicate_file_count! - uploadResult.details.duplicate_in_file.length} more</li>
+                              )}
+                            </ul>
+                          </details>
+                        )}
+                        
+                        {uploadResult.details?.errors && uploadResult.details.errors.length > 0 && (
+                          <details className="mt-2 bg-gray-50 p-2 rounded border border-gray-200">
+                            <summary className="cursor-pointer text-gray-700 font-semibold text-xs">
+                              ⚠️ Other Errors
+                            </summary>
+                            <ul className="list-disc list-inside text-xs mt-2 space-y-1 text-gray-800">
                               {uploadResult.details.errors.slice(0, 5).map((e: string, i: number) => <li key={i}>{e}</li>)}
                               {uploadResult.details.errors.length > 5 && (
-                                <li>... {uploadResult.details.errors.length - 5} more</li>
+                                <li className="font-bold">... {uploadResult.details.errors.length - 5} more</li>
                               )}
                             </ul>
                           </details>
@@ -395,7 +611,16 @@ John Doe,9876543210,T NAGAR,Meta,Web,Innova Campaign,Toyota Innova Crysta
                       </div>
                     )}
                     {uploadResult.success && (
-                      <p className="mt-2 text-xs">Redirecting to Assign Leads...</p>
+                      <div className="mt-3 flex items-center justify-between bg-green-50 p-3 rounded-lg border border-green-200">
+                        <p className="text-xs text-green-700 font-medium">✅ Upload completed! Review results above.</p>
+                        <Button 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700 text-white text-xs"
+                          onClick={() => router.push("/admin/assign-leads")}
+                        >
+                          Go to Assign Leads
+                        </Button>
+                      </div>
                     )}
                   </AlertDescription>
                 </div>
