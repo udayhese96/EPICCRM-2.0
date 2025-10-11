@@ -1376,7 +1376,10 @@ async def upload_leads_bulk(
         success_count = 0
         failed_count = 0
         errors = []
+        duplicate_in_db = []
+        duplicate_in_file = []
         existing_numbers = set()
+        processed_numbers = set()
         
         # Get existing mobile numbers to check for duplicates
         try:
@@ -1403,11 +1406,21 @@ async def upload_leads_bulk(
                     failed_count += 1
                     continue
                 
-                # Check for duplicates
+                # Check for duplicates in database
                 if mobile in existing_numbers:
-                    errors.append(f"Row {idx}: Duplicate mobile number '{mobile}' already exists")
+                    duplicate_in_db.append(f"Row {idx}: {row.get('customer_name', 'Unknown')} - {mobile}")
+                    errors.append(f"Row {idx}: Duplicate mobile number '{mobile}' already exists in database")
                     failed_count += 1
                     continue
+                
+                # Check for duplicates within the same file
+                if mobile in processed_numbers:
+                    duplicate_in_file.append(f"Row {idx}: {row.get('customer_name', 'Unknown')} - {mobile}")
+                    errors.append(f"Row {idx}: Duplicate mobile number '{mobile}' appears multiple times in file")
+                    failed_count += 1
+                    continue
+                
+                processed_numbers.add(mobile)
                 
                 # Generate UID
                 lead_uid = f"CD{mobile[-6:]}"  # Use last 6 digits of mobile number
@@ -1458,7 +1471,7 @@ async def upload_leads_bulk(
                 
                 if response.data:
                     success_count += 1
-                    existing_numbers.add(mobile)  # Add to set to prevent duplicates within same file
+                    existing_numbers.add(mobile)  # Add to existing_numbers to prevent future duplicates
                     print(f"[Bulk Upload] Row {idx}: Successfully inserted lead {lead_uid}")
                 else:
                     errors.append(f"Row {idx}: Database insertion failed")
@@ -1473,10 +1486,14 @@ async def upload_leads_bulk(
             "total": len(normalized_rows),
             "success": success_count,
             "failed": failed_count,
+            "duplicate_db_count": len(duplicate_in_db),
+            "duplicate_file_count": len(duplicate_in_file),
+            "duplicate_in_db": duplicate_in_db[:10],  # Return first 10 DB duplicates
+            "duplicate_in_file": duplicate_in_file[:10],  # Return first 10 file duplicates
             "errors": errors[:20]  # Return first 20 errors to avoid huge response
         }
         
-        print(f"[Bulk Upload] Complete: {success_count} success, {failed_count} failed")
+        print(f"[Bulk Upload] Complete: {success_count} success, {failed_count} failed ({len(duplicate_in_db)} DB dupes, {len(duplicate_in_file)} file dupes)")
         
         return result
         
