@@ -84,22 +84,27 @@ export default function ManagePSPage() {
       const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users'
       const method = editingUser ? 'PUT' : 'POST'
       
+      const payload: any = {
+        username: formData.username,
+        email: formData.email,
+        full_name: formData.full_name,
+        phone: formData.phone,
+        branch: formData.branch,
+        is_active: formData.is_active,
+        role: 'ps'
+      }
+      // Use password_hash per DB schema; include only if provided on create or edit
+      if (formData.password) {
+        payload.password_hash = formData.password
+      }
+
       const response = await fetch(url, {
         method,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          username: formData.username,
-          email: formData.email,
-          full_name: formData.full_name,
-          phone: formData.phone,
-          branch: formData.branch,
-          password: formData.password,
-          is_active: formData.is_active,
-          role: 'ps'
-        })
+        body: JSON.stringify(payload)
       })
 
       if (response.ok) {

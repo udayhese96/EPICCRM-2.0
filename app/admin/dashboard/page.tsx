@@ -181,6 +181,7 @@ export default function AdminDashboard() {
                 desc="Transfer leads between team members"
                 icon={ArrowRightLeft}
                 accent="indigo"
+                onClick={() => router.push("/admin/lead-transfer")}
               />
             </div>
           </section>
