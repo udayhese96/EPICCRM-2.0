@@ -194,13 +194,7 @@ export default function AdminDashboard() {
                 desc="Download lead data and reports"
                 icon={Download}
                 accent="blue"
-              />
-              <QuickCard
-                cardId="export-walkin"
-                title="Export Walk-in"
-                desc="Download walk-in data by branch/date"
-                icon={Building2}
-                accent="purple"
+                onClick={() => router.push("/admin/export-leads")}
               />
             </div>
 
