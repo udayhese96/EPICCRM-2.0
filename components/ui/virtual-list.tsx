@@ -29,8 +29,8 @@ export function VirtualList<T>({
   return (
     <div
       ref={parentRef}
-      className={`overflow-auto ${className}`}
-      style={{ height: containerHeight }}
+      className={className}
+      style={{ height: containerHeight, overflowY: 'auto', overflowX: 'hidden' }}
     >
       <div
         style={{
@@ -49,6 +49,7 @@ export function VirtualList<T>({
               width: '100%',
               height: `${virtualItem.size}px`,
               transform: `translateY(${virtualItem.start}px)`,
+              overflow: 'hidden',
             }}
           >
             {renderItem(items[virtualItem.index], virtualItem.index)}

@@ -490,7 +490,7 @@ const chennaiLocations = [
 
 const lostReasons = [
   "Invalid Number", "Wrong Number", "Just enquired", "Service", "Insurance", "Internal",
-  "Used car", "No Response", "Mock Call", "Plan Dropped", "Plan Postponed", "DSA Enq",
+  "Used car", "No Response", "Mock Call", "Plan Dropped", "DSA Enq",
   "BH Registration", "Existing Enq", "Duplicate Lead", "Not interested", "Did not enquire",
   "Lost to co-dealer", "Lost to competition", "Low Budget", "Out of Territory", "Not Eligible", "Job Enquiry"
 ]
@@ -498,7 +498,7 @@ const lostReasons = [
 const pendingReasons = [
   "RNR", "DND", "Not Reachable", "Switched Off", "Busy",
   "Disconnecting the call", "Temporary out of Service", "Call me back",
-  "Incoming call facility not available", "Out of Network"
+  "Incoming call facility not available", "Out of Network", "Plan Postponed"
 ]
 
 export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateModalProps) {
@@ -798,7 +798,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     const buildPendingReasons = () => {
       // Check if we're adding a new pending reason (either new pending or updating existing pending)
       const isNewPending = selectedStatus === "pending" && formData.pending_reason
-      const isExistingPendingUpdate = lead?.lead_status && ["RNR", "DND", "Busy", "Call me back", "Not Reachable", "Switched Off", "Disconnecting the call", "Temporary out of Service", "Incoming call facility not available", "Out of Network"].includes(lead.lead_status) && formData.pending_reason
+      const isExistingPendingUpdate = lead?.lead_status && ["RNR", "DND", "Busy", "Call me back", "Not Reachable", "Switched Off", "Disconnecting the call", "Temporary out of Service", "Incoming call facility not available", "Out of Network", "Plan Postponed"].includes(lead.lead_status) && formData.pending_reason
       
       console.log('🔍 buildPendingReasons debug:', {
         selectedStatus,
@@ -1580,7 +1580,6 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                              <SelectItem value="RNR">RNR</SelectItem>
                              <SelectItem value="Not Enquired">Not Enquired</SelectItem>
                              <SelectItem value="Not Interested">Not Interested</SelectItem>
-                             <SelectItem value="Plan Postponed">Plan Postponed</SelectItem>
                              <SelectItem value="Interested">Interested</SelectItem>
                              <SelectItem value="Call me back">Call me back</SelectItem>
                              <SelectItem value="Not reachable">Not reachable</SelectItem>

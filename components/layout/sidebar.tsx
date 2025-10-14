@@ -83,6 +83,11 @@ const getNavigationForRole = (role: string) => {
           icon: BarChart3,
         },
         {
+          name: "Export Leads",
+          href: "/admin/export-leads",
+          icon: Contact,
+        },
+        {
           name: "Settings",
           href: "/admin/settings",
           icon: Settings,
