@@ -18,14 +18,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create Supabase client with service role key to bypass RLS
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    // CRITICAL: Validate that service role key is available
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     
+    if (!supabaseUrl) {
+      console.error('CRITICAL: NEXT_PUBLIC_SUPABASE_URL is not set')
+      return NextResponse.json(
+        { error: 'Server configuration error: Supabase URL not configured' },
+        { status: 500 }
+      )
+    }
+    
+    if (!supabaseServiceKey) {
+      console.error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not set in environment variables')
+      console.error('The service role key is REQUIRED for admin operations to bypass RLS policies')
+      console.error('Please set SUPABASE_SERVICE_ROLE_KEY in your Netlify environment variables')
+      return NextResponse.json(
+        { 
+          error: 'Server configuration error: Service role key not configured. This is required for admin operations. Please contact your administrator to set SUPABASE_SERVICE_ROLE_KEY in the environment variables.',
+          details: 'The SUPABASE_SERVICE_ROLE_KEY environment variable must be set in your production environment (Netlify) to enable admin operations like lead transfer. The anon key cannot be used as it is subject to RLS policies.'
+        },
+        { status: 500 }
+      )
+    }
+    
+    // Create Supabase client with service role key to bypass RLS
+    // Add unique request ID to bypass PostgREST cache
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false
+      },
+      global: {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'X-Request-ID': `${Date.now()}-${Math.random()}` // Force unique request
+        }
       }
     })
 
@@ -237,13 +267,20 @@ export async function POST(request: NextRequest) {
     
     console.log('========================================')
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       transferred,
       failed,
       errors: errors.length > 0 ? errors : undefined,
       message: `Successfully transferred ${transferred} leads from ${from_name} to ${targetName}`
     })
+
+    // Force no-cache to ensure fresh data after transfer
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+    response.headers.set('Pragma', 'no-cache')
+    response.headers.set('Expires', '0')
+
+    return response
     
   } catch (error: any) {
     console.error('Error in lead transfer API:', error)

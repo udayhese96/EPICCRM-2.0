@@ -66,16 +66,35 @@ const SalesManagerDashboard = () => {
   const [rejectionReason, setRejectionReason] = useState('')
   const [processing, setProcessing] = useState(false)
   const [activeTab, setActiveTab] = useState<'booking' | 'retail'>('booking')
+  const [userBranch, setUserBranch] = useState<string | null>(null)
 
-  // Load approval requests
+  // Get user's branch from localStorage on mount
+  React.useEffect(() => {
+    const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+    const parsed = session ? JSON.parse(session) : null
+    const branch = parsed?.branch || null
+    setUserBranch(branch)
+    console.log('🏢 [Sales Manager] User branch:', branch)
+  }, [])
+
+  // Load approval requests - FILTERED BY BRANCH
   const loadApprovalRequests = async () => {
     try {
       setLoading(true)
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
+      const branch = parsed?.branch || ''
 
-      const response = await fetch(`/api/qualified-leads/pending-approvals?_t=${Date.now()}`, {
+      if (!branch) {
+        console.warn('⚠️ Sales Manager has no branch assigned!')
+        setLoading(false)
+        return
+      }
+
+      // Pass branch filter to API
+      const response = await fetch(`/api/qualified-leads/pending-approvals?branch=${encodeURIComponent(branch)}&_t=${Date.now()}`, {
+        cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -86,7 +105,7 @@ const SalesManagerDashboard = () => {
       if (response.ok) {
         const data = await response.json()
         setApprovalRequests(data)
-        console.log('✅ Approval requests loaded:', data)
+        console.log(`✅ [Sales Manager] Loaded ${data.length} approval requests for branch: ${branch}`, data)
       } else {
         console.error('❌ Failed to load approval requests')
       }
@@ -251,8 +270,17 @@ const SalesManagerDashboard = () => {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-gray-800 mb-2">Sales Manager Dashboard</h1>
-            <p className="text-gray-600 text-lg">Approve booking and retail requests from PS/GEM team</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-4xl font-bold text-gray-800">Sales Manager Dashboard</h1>
+              {userBranch && (
+                <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 text-sm font-semibold">
+                  📍 {userBranch}
+                </Badge>
+              )}
+            </div>
+            <p className="text-gray-600 text-lg">
+              Approve booking and retail requests from PS/GEM team {userBranch ? `at ${userBranch}` : ''}
+            </p>
           </div>
           <Button 
             onClick={loadApprovalRequests}

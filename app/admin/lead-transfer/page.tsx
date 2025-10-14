@@ -110,6 +110,12 @@ export default function LeadTransferPage() {
   const [previewData, setPreviewData] = useState<any>(null)
   const [transferResult, setTransferResult] = useState<any>(null)
   
+  const [lastTransferTarget, setLastTransferTarget] = useState<{
+    id: string
+    name: string
+    type: 'cre' | 'ps'
+  } | null>(null)
+  
   // History
   const [showHistory, setShowHistory] = useState(false)
   const [historyData, setHistoryData] = useState<any[]>([])
@@ -171,7 +177,7 @@ export default function LeadTransferPage() {
     }
   }
 
-  const loadCreLeads = async (extraExcludeIds?: number[], extraExcludeUids?: string[]) => {
+  const loadCreLeads = async (extraExcludeIds?: number[], extraExcludeUids?: string[], forceNoExclusions?: boolean) => {
     if (!fromCRE) {
       alert('Please select a CRE first')
       return
@@ -181,11 +187,12 @@ export default function LeadTransferPage() {
     try {
       // IMPORTANT: Only use CRE exclusions here, NOT PS exclusions
       // recentlyTransferredCreIds already includes persisted IDs (loaded from localStorage in useEffect)
-      const excludeIdsSet = new Set<number>([
+      // If forceNoExclusions is true, ignore all exclusions
+      const excludeIdsSet = forceNoExclusions ? new Set<number>() : new Set<number>([
         ...Array.from(recentlyTransferredCreIds),
         ...(extraExcludeIds || [])
       ])
-      const excludeUidsSet = new Set<string>([
+      const excludeUidsSet = forceNoExclusions ? new Set<string>() : new Set<string>([
         ...Array.from(recentlyTransferredCreUids),
         ...(extraExcludeUids || [])
       ])
@@ -198,8 +205,9 @@ export default function LeadTransferPage() {
       console.log('Loading CRE leads from:', url)
       
       const response = await fetch(url, {
+        cache: 'no-store',
         headers: {
-          'Cache-Control': 'no-cache, no-store',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache'
         }
       })
@@ -207,26 +215,73 @@ export default function LeadTransferPage() {
       if (!response.ok) {
         const errorData = await response.json()
         console.error('Error fetching CRE leads:', errorData)
-        alert(`Error loading leads: ${errorData.error || 'Unknown error'}`)
+        
+        // Show detailed error message
+        let errorMessage = errorData.error || 'Unknown error'
+        if (errorData.details) {
+          errorMessage += '\n\nDetails: ' + errorData.details
+        }
+        
+        // Special handling for configuration errors
+        if (response.status === 500 && errorData.error?.includes('Service role key')) {
+          errorMessage = '🔴 CRITICAL CONFIGURATION ERROR:\n\n' + errorMessage
+          errorMessage += '\n\n⚠️ ACTION REQUIRED:\nPlease ensure that SUPABASE_SERVICE_ROLE_KEY is set in your Netlify environment variables.'
+          errorMessage += '\n\nThis is a production configuration issue that must be fixed by your administrator.'
+        }
+        
+        alert(errorMessage)
+        setCreLeads([])
         return
       }
       
       const data = await response.json()
       const allLeads = data.leads || []
 
+      console.log('========== CRE LEADS DEBUG ==========')
       console.log('CRE leads from API:', allLeads.length)
+      console.log('Current fromCRE:', fromCRE)
+      console.log('forceNoExclusions:', forceNoExclusions)
+      console.log('Excluded IDs (state):', Array.from(recentlyTransferredCreIds))
+      console.log('Excluded UIDs (state):', Array.from(recentlyTransferredCreUids))
+      console.log('Extra excluded IDs:', extraExcludeIds || [])
+      console.log('Extra excluded UIDs:', extraExcludeUids || [])
+      console.log('Final excludeIds sent to API:', excludeIds || '(none)')
+      console.log('Final excludeUids sent to API:', excludeUids || '(none)')
+      
       // Debug: show raw rows' mapping to verify cre_id integrity from API
       try {
         console.log('Raw leads (id:uid:cre_id):', (allLeads as any[]).map(l => `${l.id}:${l.uid}:${l.cre_id}`).join(', '))
       } catch {}
+      
+      // Check if lead CD123123 is in the response
+      const cd123123 = allLeads.find((l: any) => l.uid === 'CD123123')
+      if (cd123123) {
+        console.log('✅ Found CD123123 in API response:', cd123123.id, cd123123.cre_id)
+      } else {
+        console.log('❌ CD123123 NOT in API response')
+      }
+      console.log('======================================')
 
       // Client-side defensive filter: ensure only leads for selected CRE
       // (API should already enforce this, but double-check for safety)
-      const leadsForCre = (allLeads as Lead[])
+      let leadsForCre = (allLeads as Lead[])
         .filter((lead: Lead) => lead.cre_id === fromCRE)
         .filter((lead: Lead) => !recentlyTransferredCreIds.has(lead.id))
         .filter((lead: Lead) => !recentlyTransferredCreUids.has(lead.uid))
       console.log('After client-side cre_id filter:', leadsForCre.length)
+      
+      // CRITICAL: Deduplicate by UID to prevent same lead appearing multiple times
+      // This handles edge cases where database might have duplicate records
+      const seenUids = new Set<string>()
+      leadsForCre = leadsForCre.filter((lead: Lead) => {
+        if (seenUids.has(lead.uid)) {
+          console.warn('Duplicate UID detected and removed:', lead.uid, 'for CRE:', fromCRE)
+          return false
+        }
+        seenUids.add(lead.uid)
+        return true
+      })
+      console.log('After deduplication:', leadsForCre.length)
 
       // Filter out excluded statuses (case-insensitive)
       const excludedStatuses = ['booked', 'retailed', 'waiting for approval', 'won', 'lost']
@@ -410,8 +465,9 @@ export default function LeadTransferPage() {
       console.log('Loading PS leads from:', url)
       
       const response = await fetch(url, {
+        cache: 'no-store',
         headers: {
-          'Cache-Control': 'no-cache, no-store',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache'
         }
       })
@@ -419,7 +475,22 @@ export default function LeadTransferPage() {
       if (!response.ok) {
         const errorData = await response.json()
         console.error('Error fetching PS leads:', errorData)
-        alert(`Error loading leads: ${errorData.error || 'Unknown error'}`)
+        
+        // Show detailed error message
+        let errorMessage = errorData.error || 'Unknown error'
+        if (errorData.details) {
+          errorMessage += '\n\nDetails: ' + errorData.details
+        }
+        
+        // Special handling for configuration errors
+        if (response.status === 500 && errorData.error?.includes('Service role key')) {
+          errorMessage = '🔴 CRITICAL CONFIGURATION ERROR:\n\n' + errorMessage
+          errorMessage += '\n\n⚠️ ACTION REQUIRED:\nPlease ensure that SUPABASE_SERVICE_ROLE_KEY is set in your Netlify environment variables.'
+          errorMessage += '\n\nThis is a production configuration issue that must be fixed by your administrator.'
+        }
+        
+        alert(errorMessage)
+        setPsLeads([])
         return
       }
       
@@ -562,6 +633,7 @@ export default function LeadTransferPage() {
     try {
       const response = await fetch('/api/admin/leads/transfer', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
@@ -634,6 +706,57 @@ export default function LeadTransferPage() {
         setSelectedCreLeads(new Set())
         setSelectedPsLeads(new Set())
 
+        // Store transfer target for quick access
+        setLastTransferTarget({
+          id: previewData.to.id,
+          name: previewData.to.full_name || previewData.to.username,
+          type: previewData.type
+        })
+        
+        // REAL-TIME REFRESH: Immediately refresh target CRE's leads
+        if (previewData.type === 'cre') {
+          // Clear exclusions for target CRE to show transferred leads
+          const targetCreId = previewData.to.id
+          try {
+            localStorage.removeItem(`lt_exclude_${targetCreId}`)
+            console.log('✅ Cleared exclusions for target CRE:', targetCreId)
+          } catch (e) {
+            console.error('Error clearing target CRE exclusions:', e)
+          }
+          
+          // If we're currently viewing the target CRE, refresh immediately
+          if (fromCRE === targetCreId) {
+            console.log('🔄 Refreshing target CRE leads immediately...')
+            // Clear the state for this CRE
+            setRecentlyTransferredCreIds(new Set())
+            setRecentlyTransferredCreUids(new Set())
+            setTimeout(async () => {
+              await loadCreLeads(undefined, undefined, true) // Load with NO exclusions
+            }, 200)
+          } else {
+            // Offer to switch to target CRE to see transferred leads
+            const targetName = previewData.to.full_name || previewData.to.username
+            const shouldSwitch = confirm(`✅ Transfer complete!\n\nWould you like to switch to "${targetName}" to see the transferred leads immediately?`)
+            
+            if (shouldSwitch) {
+              // Switch to target CRE
+              setFromCRE(targetCreId)
+              
+              // Clear any existing state
+              setCreLeads([])
+              setAllCreLeads([])
+              setSelectedCreLeads(new Set())
+              setRecentlyTransferredCreIds(new Set())
+              setRecentlyTransferredCreUids(new Set())
+              
+              // Load leads for target CRE with NO exclusions
+              setTimeout(async () => {
+                await loadCreLeads(undefined, undefined, true)
+              }, 300)
+            }
+          }
+        }
+        
         // Background refresh to reconcile with server (handles replication/caching)
         setTimeout(() => {
           if (previewData.type === 'cre') {
@@ -643,8 +766,11 @@ export default function LeadTransferPage() {
           }
         }, 500)
         
-        // Show success message
-        alert(`✅ Successfully transferred ${result.transferred} leads!`)
+        // Show success message (only if not switching to target CRE)
+        if (previewData.type !== 'cre' || fromCRE === previewData.to.id) {
+          const targetName = previewData.to.full_name || previewData.to.username
+          alert(`✅ Successfully transferred ${result.transferred} leads!\n\n🔄 The leads have been refreshed in real-time.`)
+        }
         
       } else {
         setTransferResult({
@@ -887,25 +1013,109 @@ export default function LeadTransferPage() {
                   </Button>
                   
                   <Button 
-                    onClick={() => {
+                    onClick={async () => {
                       if (fromCRE) {
                         try {
+                          console.log('🔄 Force Refresh: Clearing exclusions for CRE:', fromCRE)
+                          
+                          // Clear localStorage FIRST
                           localStorage.removeItem(`lt_exclude_${fromCRE}`)
+                          
+                          // Clear state
                           setRecentlyTransferredCreIds(new Set())
                           setRecentlyTransferredCreUids(new Set())
-                          console.log('Cleared exclusions for CRE:', fromCRE)
-                          alert('Exclusions cleared! Click "Load Leads" to refresh.')
+                          
+                          // Load with NO exclusions (forceNoExclusions = true)
+                          await loadCreLeads(undefined, undefined, true)
+                          
+                          console.log('✅ Force refresh complete for CRE:', fromCRE)
                         } catch (e) {
-                          console.error('Error clearing exclusions:', e)
+                          console.error('Error during force refresh:', e)
+                          setIsLoading(false)
                         }
                       }
                     }}
-                    disabled={!fromCRE}
+                    disabled={!fromCRE || isLoading}
+                    variant="outline"
+                    className="rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    Force Refresh
+                  </Button>
+                  
+                  <Button 
+                    onClick={() => {
+                      // Clear ALL exclusions for ALL CREs
+                      try {
+                        const keys = Object.keys(localStorage)
+                        keys.forEach(key => {
+                          if (key.startsWith('lt_exclude_')) {
+                            localStorage.removeItem(key)
+                          }
+                        })
+                        setRecentlyTransferredCreIds(new Set())
+                        setRecentlyTransferredCreUids(new Set())
+                        alert('All exclusions cleared! Click "Load Leads" to refresh.')
+                      } catch (e) {
+                        console.error('Error clearing all exclusions:', e)
+                      }
+                    }}
                     variant="outline"
                     className="rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
                   >
-                    Clear Exclusions
+                    Clear All Exclusions
                   </Button>
+                  
+                  {/* View Transferred Leads Button */}
+                  {lastTransferTarget && (
+                    <Button 
+                      onClick={() => {
+                        if (lastTransferTarget.type === 'cre') {
+                          // Switch to target CRE
+                          setFromCRE(lastTransferTarget.id)
+                          setActiveTab('cre')
+                          
+                          // Clear localStorage and state for target CRE
+                          try {
+                            localStorage.removeItem(`lt_exclude_${lastTransferTarget.id}`)
+                          } catch (e) {
+                            console.error('Error clearing localStorage:', e)
+                          }
+                          
+                          // Clear any existing state
+                          setCreLeads([])
+                          setAllCreLeads([])
+                          setSelectedCreLeads(new Set())
+                          setRecentlyTransferredCreIds(new Set())
+                          setRecentlyTransferredCreUids(new Set())
+                          
+                          // Load leads for target CRE with NO exclusions
+                          setTimeout(async () => {
+                            await loadCreLeads(undefined, undefined, true)
+                          }, 300)
+                        } else {
+                          // Switch to target PS
+                          setFromPS(lastTransferTarget.id)
+                          setActiveTab('ps')
+                          
+                          // Clear any existing state
+                          setPsLeads([])
+                          setSelectedPsLeads(new Set())
+                          
+                          // Load leads for target PS
+                          setTimeout(async () => {
+                            await loadPsLeads()
+                          }, 300)
+                        }
+                      }}
+                      disabled={isLoading}
+                      variant="default"
+                      className="rounded-xl bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                    >
+                      <Users className="h-4 w-4 mr-2" />
+                      View {lastTransferTarget.name}'s Leads
+                    </Button>
+                  )}
                 </div>
 
                 {/* Filters */}

@@ -19,10 +19,33 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Create Supabase client with no-store headers to bypass all caching
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    // CRITICAL: Validate that service role key is available
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     
+    if (!supabaseUrl) {
+      console.error('CRITICAL: NEXT_PUBLIC_SUPABASE_URL is not set')
+      return NextResponse.json(
+        { error: 'Server configuration error: Supabase URL not configured' },
+        { status: 500 }
+      )
+    }
+    
+    if (!supabaseServiceKey) {
+      console.error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not set in environment variables')
+      console.error('The service role key is REQUIRED for admin operations to bypass RLS policies')
+      console.error('Please set SUPABASE_SERVICE_ROLE_KEY in your Netlify environment variables')
+      return NextResponse.json(
+        { 
+          error: 'Server configuration error: Service role key not configured. This is required for admin operations. Please contact your administrator to set SUPABASE_SERVICE_ROLE_KEY in the environment variables.',
+          details: 'The SUPABASE_SERVICE_ROLE_KEY environment variable must be set in your production environment (Netlify) to enable admin operations like lead transfer. The anon key cannot be used as it is subject to RLS policies.'
+        },
+        { status: 500 }
+      )
+    }
+    
+    // Create Supabase client with service role key (bypasses RLS)
+    // Create Supabase client with unique request ID to force cache bypass
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
@@ -32,7 +55,8 @@ export async function GET(request: NextRequest) {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate',
           'Pragma': 'no-cache',
-          'Expires': '0'
+          'Expires': '0',
+          'X-Request-ID': `${Date.now()}-${Math.random()}` // Force unique request to bypass PostgREST cache
         }
       }
     })
@@ -43,46 +67,23 @@ export async function GET(request: NextRequest) {
     console.log('Exclude IDs:', excludeIdsParam || 'none')
     console.log('Exclude UIDs:', excludeUidsParam || 'none')
     
-    // CRITICAL: Fetch with retry to defeat replica lag
-    let followups: any[] = []
-    let attempts = 0
-    const maxAttempts = 2
+    // Fetch PS followup leads (cache is bypassed via X-Request-ID header)
+    const { data: followups, error: queryError } = await supabase
+      .from('ps_followup_master')
+      .select('*')
+      .eq('ps_id', psId)
+      .ilike('ps_branch', branch)
+      .order('created_at', { ascending: false })
     
-    while (attempts < maxAttempts) {
-      attempts++
-      const { data: queryData, error: queryError } = await supabase
-        .from('ps_followup_master')
-        .select('*')
-        .eq('ps_id', psId)
-        .ilike('ps_branch', branch)
-        .order('created_at', { ascending: false })
-      
-      if (queryError) {
-        console.error(`Query attempt ${attempts} error:`, queryError.message)
-        if (attempts >= maxAttempts) {
-          return NextResponse.json(
-            { error: 'Failed to fetch PS leads from database' },
-            { status: 500 }
-          )
-        }
-        await new Promise(resolve => setTimeout(resolve, 50))
-        continue
-      }
-      
-      followups = queryData || []
-      
-      // Verify all returned rows match the requested ps_id
-      const allMatch = followups.every((f: any) => String(f.ps_id).trim() === String(psId).trim())
-      if (!allMatch && attempts < maxAttempts) {
-        console.warn(`Attempt ${attempts}: Some followups have mismatched ps_id, retrying...`)
-        await new Promise(resolve => setTimeout(resolve, 100))
-        continue
-      }
-      
-      break
+    if (queryError) {
+      console.error('Query error:', queryError.message)
+      return NextResponse.json(
+        { error: 'Failed to fetch PS leads from database' },
+        { status: 500 }
+      )
     }
     
-    console.log('Query returned:', followups.length, 'PS followups after', attempts, 'attempts')
+    console.log('Query returned:', (followups || []).length, 'PS followups')
     
     // GUARD 3: Map to lead_master id for UI consistency using lead_uid
     const result = [] as any[]

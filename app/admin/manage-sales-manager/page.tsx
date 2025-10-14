@@ -129,13 +129,19 @@ const ManageSalesManagerPage = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
+      // Build payload without empty password to avoid backend 500s
+      const payload = { ...formData } as any
+      if (!payload.password) {
+        delete payload.password
+      }
+
       const response = await fetch(`/api/users/${selectedUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       })
 
       if (!response.ok) {
@@ -204,8 +210,6 @@ const ManageSalesManagerPage = () => {
     
     return matchesSearch && matchesBranch && matchesStatus
   })
-
-  const branches = Array.from(new Set(users.map(user => user.branch)))
 
   return (
     <DashboardLayout>
@@ -521,16 +525,23 @@ const ManageSalesManagerPage = () => {
                 </div>
                 <div>
                   <Label htmlFor="edit-branch">Branch</Label>
-                  <Input
-                    id="edit-branch"
-                    value={formData.branch}
-                    onChange={(e) => setFormData({...formData, branch: e.target.value})}
-                    placeholder="Enter branch"
-                  />
+                  <Select value={formData.branch || 'none'} onValueChange={(value) => setFormData({...formData, branch: value === 'none' ? '' : value})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Branch</SelectItem>
+                      {branches.map((branch) => (
+                        <SelectItem key={branch} value={branch}>
+                          {branch}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div>
-                <Label htmlFor="edit-password">New Password (leave blank to keep current)</Label>
+                <Label htmlFor="edit-password">Set New Password (optional)</Label>
                 <Input
                   id="edit-password"
                   type="password"

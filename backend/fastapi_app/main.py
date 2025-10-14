@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
@@ -4052,7 +4052,12 @@ async def approve_qualified_lead(
                 "updated_at": now_ist_iso()
             }
             
-            supabase.table('booking_and_retail_master').insert(master_record).execute()
+            # Upsert into booking_and_retail_master to avoid duplicate key errors
+            existing = supabase.table('booking_and_retail_master').select('id').eq('lead_uid', lead_uid).execute()
+            if existing.data:
+                supabase.table('booking_and_retail_master').update(master_record).eq('lead_uid', lead_uid).execute()
+            else:
+                supabase.table('booking_and_retail_master').insert(master_record).execute()
             
             # Set final_status to "Booked"
             supabase.table('ps_followup_master').update({
@@ -4079,6 +4084,14 @@ async def approve_qualified_lead(
                 "updated_at": now_ist_iso()
             }
             
+            # Ensure there is a row to update; if not, insert then update
+            existing = supabase.table('booking_and_retail_master').select('id').eq('lead_uid', lead_uid).execute()
+            if not existing.data:
+                supabase.table('booking_and_retail_master').insert({
+                    "lead_uid": lead_uid,
+                    "created_at": now_ist_iso(),
+                    "updated_at": now_ist_iso()
+                }).execute()
             supabase.table('booking_and_retail_master').update(master_update).eq('lead_uid', lead_uid).execute()
             
             # Set final_status to "Won" in ps_followup_master
@@ -4148,9 +4161,13 @@ async def reject_qualified_lead(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/qualified-leads/pending-approvals")
-async def get_pending_approvals(current_user=Depends(get_current_user)):
+async def get_pending_approvals(
+    branch: Optional[str] = Query(None),  # Branch filter for Sales Manager
+    current_user=Depends(get_current_user)
+):
     """Get booking and retail approvals for Sales Manager across statuses.
-
+    
+    If branch is provided, only returns requests from PS/GEMs in that branch.
     Returns requests with request_status in ['pending','approved','rejected'] so the UI can
     render Pending/Approved/Rejected sections and move items between them automatically.
     """
@@ -4166,7 +4183,22 @@ async def get_pending_approvals(current_user=Depends(get_current_user)):
             "retailed_status.eq." + status for status in tracked_statuses
         ]
 
-        response = supabase.table('qualified_leads').select('*').or_(",".join(or_clauses)).execute()
+        # Build query - if branch filter provided, add it
+        query = supabase.table('qualified_leads').select('*')
+        
+        # Apply OR condition for booking/retailed statuses
+        query = query.or_(",".join(or_clauses))
+        
+        # IMPORTANT: Filter by branch if provided (Sales Manager's branch)
+        if branch:
+            # Filter by the existing 'branch' column on qualified_leads
+            query = query.eq('branch', branch)
+            print(f"[FastAPI] 🏢 Filtering approval requests by branch: {branch}")
+        
+        response = query.execute()
+        
+        print(f"[FastAPI] 📊 Query returned {len(response.data or [])} qualified_leads rows" + 
+              (f" for branch '{branch}'" if branch else " (all branches)"))
 
         def map_status(raw: Optional[str]) -> Optional[str]:
             if not raw:
@@ -4219,9 +4251,20 @@ async def get_pending_approvals(current_user=Depends(get_current_user)):
                     'created_at': lead.get('created_at', now_ist_iso())
                 })
 
+        # Log the results
+        total_count = len(approval_requests)
+        booking_count = len([r for r in approval_requests if r['request_type'] == 'booking'])
+        retail_count = len([r for r in approval_requests if r['request_type'] == 'retailed'])
+        
+        if branch:
+            print(f"[FastAPI] Returning {total_count} approval requests for branch '{branch}': {booking_count} booking, {retail_count} retail")
+        else:
+            print(f"[FastAPI] Returning {total_count} approval requests (all branches): {booking_count} booking, {retail_count} retail")
+
         return approval_requests
 
     except Exception as e:
+        print(f"[FastAPI] Error in pending-approvals: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========================================

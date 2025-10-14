@@ -64,7 +64,9 @@ const ManageCREICROPPage = () => {
       }
 
       const data = await response.json()
-      setUsers(data)
+      // Handle both array response and object with users property
+      const usersList = Array.isArray(data) ? data : (data.users || [])
+      setUsers(usersList)
     } catch (error: any) {
       toast.error(error.message || 'Error fetching CRE ICROP users')
       console.error('Error fetching CRE ICROP users:', error)
@@ -189,7 +191,10 @@ const ManageCREICROPPage = () => {
     setIsEditDialogOpen(true)
   }
 
-  const filteredUsers = users.filter(user => {
+  // Ensure users is always an array before filtering
+  const usersArray = Array.isArray(users) ? users : []
+  
+  const filteredUsers = usersArray.filter(user => {
     const matchesSearch = user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -201,7 +206,7 @@ const ManageCREICROPPage = () => {
     return matchesSearch && matchesBranch && matchesStatus
   })
 
-  const branches = Array.from(new Set(users.map(user => user.branch)))
+  const branches = Array.from(new Set(usersArray.map(user => user.branch)))
 
   return (
     <DashboardLayout>
