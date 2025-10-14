@@ -1,64 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 
-// Force this route to be dynamic
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
-
-const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ source: string }> }
+  { params }: { params: { source: string } }
 ) {
   try {
-    const { source } = await params
-    const headerAuth = request.headers.get('authorization')
-    const cookieToken = request.cookies.get('access_token')?.value
-    const auth = headerAuth || (cookieToken ? `Bearer ${cookieToken}` : '')
-    
-    // Add cache-busting timestamp
-    const timestamp = Date.now()
+    const source = decodeURIComponent(params.source)
 
-    let response = await fetch(`${FASTAPI_URL}/api/leads/unassigned/${encodeURIComponent(source)}?_t=${timestamp}`, {
-      method: 'GET',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        Authorization: auth 
-      },
-    })
+    // Initialize Supabase client with service role
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-    if (response.status === 401 || response.status === 403) {
-      response = await fetch(`${FASTAPI_URL}/api/public/unassigned/${encodeURIComponent(source)}?_t=${timestamp}`, {
-        method: 'GET',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
-      })
-    }
-
-    if (!response.ok) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       return NextResponse.json(
-        { error: 'Failed to fetch leads for source' },
-        { status: response.status }
+        { error: 'Server configuration error' },
+        { status: 500 }
       )
     }
 
-    const data = await response.json()
-    const nextResponse = NextResponse.json(data)
-    nextResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
-    nextResponse.headers.set('Pragma', 'no-cache')
-    nextResponse.headers.set('Expires', '0')
-    return nextResponse
-  } catch (error) {
-    console.error('Error fetching leads for source:', error)
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false }
+    })
+
+    // Fetch unassigned leads for specific source
+    const { data: leads, error } = await supabase
+      .from('lead_master')
+      .select('*')
+      .eq('assigned', 'No')
+      .eq('source', source)
+      .in('final_status', ['Pending', 'Follow-up'])
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    if (error) {
+      console.error(`Error fetching unassigned leads for ${source}:`, error)
+      return NextResponse.json(
+        { error: 'Failed to fetch leads', details: error.message },
+        { status: 500 }
+      )
+    }
+
+    const response = NextResponse.json(leads || [])
+    
+    // Add no-cache headers
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    response.headers.set('Pragma', 'no-cache')
+    
+    return response
+
+  } catch (error: any) {
+    console.error('API Error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: error.message || 'Internal server error' },
       { status: 500 }
     )
   }

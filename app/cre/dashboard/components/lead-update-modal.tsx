@@ -710,9 +710,16 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     }
 
     // Main validation for all scenarios
+    // Exception: when call outcome is a terminal lost reason, follow-up date is NOT required
+    const isLostCallOutcome = (val?: string) => {
+      const v = (val || "").trim().toLowerCase()
+      return v === "lost to co-dealer" || v === "lost to competitor"
+    }
     if (currentStatus === "Qualified" && !formData.follow_up_date) {
-      toast.error("Please select a follow-up date before submitting.")
-      return
+      if (!isLostCallOutcome(formData.call_status)) {
+        toast.error("Please select a follow-up date before submitting.")
+        return
+      }
     }
 
     if (selectedStatus === "qualified") {
@@ -912,6 +919,12 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       } else if (!formData.follow_up_date) {
         delete (updateData as any).follow_up_date
       }
+      // Terminal lost outcomes during follow-up should close the lead as Lost, no follow-up date needed
+      if (isLostCallOutcome(normalized)) {
+        ;(updateData as any).final_status = "Lost"
+        ;(updateData as any).lead_status = "Lost"
+        delete (updateData as any).follow_up_date
+      }
     }
 
     // For non-qualified flows (Fresh → Pending/Qualified/Lost), allow call_status to drive lead_status
@@ -920,7 +933,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       const normalized = formData.call_status.trim()
       ;(updateData as any).lead_status = normalized
       // If Not Interested via call outcome, close as Lost
-      if (normalized.toLowerCase() === "not interested") {
+      if (normalized.toLowerCase() === "not interested" || isLostCallOutcome(normalized)) {
         ;(updateData as any).final_status = "Lost"
       }
       if (normalized.toLowerCase() === "call me back") {
@@ -1541,7 +1554,17 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                     <div>
                       <Label className="text-xs font-medium text-gray-600 mb-2 block">Call Outcome</Label>
                       <div className="space-y-2">
-                        <Select value={formData.call_status} onValueChange={(value) => setFormData(prev => ({ ...prev, call_status: value }))}>
+                        <Select value={formData.call_status} onValueChange={(value) => {
+                          const v = (value || '').trim().toLowerCase()
+                          const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
+                          setFormData(prev => ({
+                            ...prev,
+                            call_status: value,
+                            // Auto-close as Lost and clear follow-up date for terminal lost outcomes
+                            sales_outcome: isTerminalLost ? 'Lost' : prev.sales_outcome,
+                            follow_up_date: isTerminalLost ? '' : prev.follow_up_date
+                          }))
+                        }}>
                            <SelectTrigger>
                              <SelectValue placeholder="Select outcome" />
                            </SelectTrigger>
@@ -1599,14 +1622,28 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                        </div>
                     </div>
                     <div>
-                      <Label className="text-xs font-medium text-gray-600 mb-2 block">Next Follow-up Date *</Label>
-                    <Input
-                      type="date"
-                      value={formData.follow_up_date || tomorrow}
-                      onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
-                        className="h-10 text-sm"
-                    />
-                  </div>
+                      <Label className="text-xs font-medium text-gray-600 mb-2 block">
+                        {(() => {
+                          const v = (formData.call_status || '').trim().toLowerCase()
+                          const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
+                          return isTerminalLost ? 'Next Follow-up Date (not required for Lost)' : 'Next Follow-up Date *'
+                        })()}
+                      </Label>
+                      {(() => {
+                        const v = (formData.call_status || '').trim().toLowerCase()
+                        const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
+                        return (
+                          <Input
+                            type="date"
+                            value={isTerminalLost ? today : (formData.follow_up_date || tomorrow)}
+                            onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                            disabled={isTerminalLost}
+                            readOnly={isTerminalLost}
+                            className={`h-10 text-sm ${isTerminalLost ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          />
+                        )
+                      })()}
+                    </div>
                 </div>
 
                   {/* Sales Outcome */}

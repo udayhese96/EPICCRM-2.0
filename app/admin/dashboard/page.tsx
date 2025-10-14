@@ -25,43 +25,73 @@ import { useState } from "react"
 export default function AdminDashboard() {
   const router = useRouter()
   const [loggingOut, setLoggingOut] = useState(false)
+  const [loadingCard, setLoadingCard] = useState<string | null>(null)
 
   const QuickCard = ({
     title,
     desc,
     icon: Icon,
     accent = "blue",
-    onClick
+    onClick,
+    cardId
   }: {
     title: string
     desc: string
     icon: any
     accent?: "blue" | "green" | "purple" | "indigo" | "teal" | "pink" | "orange" | "red" | "cyan" | "gray"
     onClick?: () => void
+    cardId?: string
   }) => {
-    const palettes: Record<string, { icon: string; grad: string }> = {
-      blue: { icon: "text-blue-600", grad: "from-blue-50 to-blue-100" },
-      green: { icon: "text-green-600", grad: "from-green-50 to-green-100" },
-      purple: { icon: "text-purple-600", grad: "from-purple-50 to-purple-100" },
-      indigo: { icon: "text-indigo-600", grad: "from-indigo-50 to-indigo-100" },
-      teal: { icon: "text-teal-600", grad: "from-teal-50 to-teal-100" },
-      pink: { icon: "text-pink-600", grad: "from-pink-50 to-pink-100" },
-      orange: { icon: "text-orange-600", grad: "from-orange-50 to-orange-100" },
-      red: { icon: "text-red-600", grad: "from-red-50 to-red-100" },
-      cyan: { icon: "text-cyan-600", grad: "from-cyan-50 to-cyan-100" },
-      gray: { icon: "text-gray-600", grad: "from-gray-50 to-gray-100" },
+    const palettes: Record<string, { icon: string; grad: string; spinner: string }> = {
+      blue: { icon: "text-blue-600", grad: "from-blue-50 to-blue-100", spinner: "border-blue-600" },
+      green: { icon: "text-green-600", grad: "from-green-50 to-green-100", spinner: "border-green-600" },
+      purple: { icon: "text-purple-600", grad: "from-purple-50 to-purple-100", spinner: "border-purple-600" },
+      indigo: { icon: "text-indigo-600", grad: "from-indigo-50 to-indigo-100", spinner: "border-indigo-600" },
+      teal: { icon: "text-teal-600", grad: "from-teal-50 to-teal-100", spinner: "border-teal-600" },
+      pink: { icon: "text-pink-600", grad: "from-pink-50 to-pink-100", spinner: "border-pink-600" },
+      orange: { icon: "text-orange-600", grad: "from-orange-50 to-orange-100", spinner: "border-orange-600" },
+      red: { icon: "text-red-600", grad: "from-red-50 to-red-100", spinner: "border-red-600" },
+      cyan: { icon: "text-cyan-600", grad: "from-cyan-50 to-cyan-100", spinner: "border-cyan-600" },
+      gray: { icon: "text-gray-600", grad: "from-gray-50 to-gray-100", spinner: "border-gray-600" },
     }
     const p = palettes[accent]
+    const isLoading = cardId && loadingCard === cardId
+
+    const handleClick = async () => {
+      if (!onClick || isLoading) return
+      
+      if (cardId) {
+        setLoadingCard(cardId)
+        // Simulate loading with a beautiful animation
+        await new Promise(resolve => setTimeout(resolve, 600))
+      }
+      
+      onClick()
+    }
 
     return (
       <Card
-        onClick={onClick}
-        className="rounded-3xl bg-white/80 backdrop-blur-md border border-white/60 shadow-[0_10px_30px_rgba(16,24,40,0.06)] hover:shadow-[0_16px_40px_rgba(16,24,40,0.10)] transition-all duration-300 cursor-pointer group"
+        onClick={handleClick}
+        className={`rounded-3xl bg-white/80 backdrop-blur-md border border-white/60 shadow-[0_10px_30px_rgba(16,24,40,0.06)] hover:shadow-[0_16px_40px_rgba(16,24,40,0.10)] transition-all duration-300 cursor-pointer group relative overflow-hidden ${isLoading ? 'pointer-events-none' : ''}`}
       >
+        {/* Loading overlay */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className={`w-8 h-8 border-3 ${p.spinner} border-t-transparent rounded-full animate-spin`} />
+              <span className={`text-xs font-medium ${p.icon}`}>Loading...</span>
+            </div>
+          </div>
+        )}
+        
         <CardHeader className="pb-2">
           <div className="flex items-center space-x-3">
-            <div className={`p-2 rounded-2xl bg-gradient-to-br ${p.grad} group-hover:scale-105 transition-transform`}>
-              <Icon className={`h-5 w-5 ${p.icon}`} />
+            <div className={`p-2 rounded-2xl bg-gradient-to-br ${p.grad} group-hover:scale-105 transition-transform ${isLoading ? 'scale-105 animate-pulse' : ''}`}>
+              {isLoading ? (
+                <Loader2 className={`h-5 w-5 ${p.icon} animate-spin`} />
+              ) : (
+                <Icon className={`h-5 w-5 ${p.icon}`} />
+              )}
             </div>
             <CardTitle className="text-sm font-semibold text-gray-900">{title}</CardTitle>
           </div>
@@ -136,6 +166,7 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <QuickCard
+                cardId="upload-data"
                 title="Upload Data"
                 desc="Import leads and customer data"
                 icon={Upload}
@@ -143,6 +174,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/upload-data")}
               />
               <QuickCard
+                cardId="assign-leads"
                 title="Assign Leads"
                 desc="Distribute leads to team members"
                 icon={UserPlus}
@@ -150,18 +182,21 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/assign-leads")}
               />
               <QuickCard
+                cardId="manage-leads"
                 title="Manage Leads"
                 desc="View and edit lead information"
                 icon={Edit}
                 accent="green"
               />
               <QuickCard
+                cardId="export-leads"
                 title="Export Leads"
                 desc="Download lead data and reports"
                 icon={Download}
                 accent="blue"
               />
               <QuickCard
+                cardId="export-walkin"
                 title="Export Walk-in"
                 desc="Download walk-in data by branch/date"
                 icon={Building2}
@@ -171,12 +206,14 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <QuickCard
+                cardId="duplicate-leads"
                 title="Duplicate Leads"
                 desc="Identify and manage duplicate entries"
                 icon={Copy}
                 accent="pink"
               />
               <QuickCard
+                cardId="lead-transfer"
                 title="Lead Transfer"
                 desc="Transfer leads between team members"
                 icon={ArrowRightLeft}
@@ -195,6 +232,7 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <QuickCard
+                cardId="manage-cre"
                 title="Manage CREs"
                 desc="Configure Customer Relationship Executives"
                 icon={Users}
@@ -202,6 +240,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/manage-cre")}
               />
               <QuickCard
+                cardId="manage-ps"
                 title="Manage PS"
                 desc="Configure Product Specialists"
                 icon={UserPlus}
@@ -209,6 +248,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/manage-ps")}
               />
               <QuickCard
+                cardId="manage-cre-tl"
                 title="Manage CRE TL"
                 desc="Configure CRE Team Leaders"
                 icon={Shield}
@@ -216,6 +256,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/manage-cre-team-leader")}
               />
               <QuickCard
+                cardId="manage-cre-icrop"
                 title="Manage CRE ICROP"
                 desc="Configure CRE ICROP Users"
                 icon={Building2}
@@ -226,6 +267,7 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <QuickCard
+                cardId="manage-sales-manager"
                 title="Manage Sales Manager"
                 desc="Configure Sales Managers"
                 icon={Users}
@@ -233,6 +275,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/manage-sales-manager")}
               />
               <QuickCard
+                cardId="manage-team-leaders"
                 title="Manage Team Leaders"
                 desc="Configure Team Leaders and PS assignments"
                 icon={Shield}
@@ -240,6 +283,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/manage-team-leaders")}
               />
               <QuickCard
+                cardId="all-users"
                 title="All Users"
                 desc="View and manage all users"
                 icon={Users}
@@ -247,6 +291,7 @@ export default function AdminDashboard() {
                 onClick={() => router.push("/admin/users")}
               />
               <QuickCard
+                cardId="manage-branches"
                 title="Manage Branches"
                 desc="Configure branch locations"
                 icon={Building2}
@@ -265,18 +310,21 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <QuickCard
+                cardId="view-analytics"
                 title="View Analytics"
                 desc="Comprehensive system analytics"
                 icon={BarChart3}
                 accent="blue"
               />
               <QuickCard
+                cardId="analytics-2"
                 title="Analytics 2.0"
                 desc="Open Streamlit dashboard in a new tab"
                 icon={Rocket}
                 accent="red"
               />
               <QuickCard
+                cardId="security-audit"
                 title="Security Audit"
                 desc="System security and access logs"
                 icon={Shield}

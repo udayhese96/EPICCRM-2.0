@@ -109,12 +109,33 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       },
     })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      return NextResponse.json({ error: errorData.detail || 'Failed to delete user' }, { status: response.status })
+    // Some backends return 204 No Content on successful delete
+    if (response.ok && response.status === 204) {
+      return NextResponse.json({ success: true }, { status: 200 })
     }
 
-    const data = await response.json()
+    if (!response.ok) {
+      // Fallback: attempt to delete directly in Supabase
+      try {
+        const supabase = await createClient()
+        const { error } = await supabase
+          .from('users')
+          .delete()
+          .eq('id', params.id)
+        if (error) {
+          const errorData = await response.json().catch(() => ({} as any))
+          return NextResponse.json({ error: errorData.detail || error.message || 'Failed to delete user' }, { status: response.status })
+        }
+        return NextResponse.json({ success: true }, { status: 200 })
+      } catch (fallbackErr: any) {
+        const errorData = await response.json().catch(() => ({} as any))
+        return NextResponse.json({ error: errorData.detail || fallbackErr?.message || 'Failed to delete user' }, { status: response.status || 500 })
+      }
+    }
+
+    // Try to parse JSON if present; otherwise treat as success
+    const text = await response.text()
+    const data = text ? JSON.parse(text) : { success: true }
     return NextResponse.json(data, { status: 200 })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
