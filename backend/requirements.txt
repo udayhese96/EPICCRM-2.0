@@ -44,7 +44,7 @@ fastapi[all]==0.104.1
 
 # Additional utilities
 click==8.2.1
-typing-extensions==4.14.0
+typing-extensions>=4.14.1
 
 # Development and debugging (optional)
 rich==13.9.4
