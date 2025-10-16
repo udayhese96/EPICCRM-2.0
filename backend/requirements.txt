@@ -5,12 +5,11 @@ python-multipart==0.0.6
 starlette==0.27.0
 
 # Pydantic for data validation (updated versions for better compatibility)
-pydantic==2.11.7
-pydantic_core==2.33.2
+pydantic==2.12.1
 email-validator==2.3.0
 
 # Database dependencies
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.11
 supabase==2.19.0
 supabase-auth==2.19.0
 postgrest==2.19.0
@@ -45,7 +44,7 @@ fastapi[all]==0.104.1
 
 # Additional utilities
 click==8.2.1
-typing-extensions==4.14.0
+typing-extensions>=4.14.1
 
 # Development and debugging (optional)
 rich==13.9.4
