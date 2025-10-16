@@ -154,7 +154,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         cre_name: user?.name || user?.first_name || user?.username || "",
         cre_id: user?.id,
         assigned: "Yes",
-        lead_status: "", // CRE leads start as fresh for qualification
+        lead_status: "Qualified",
         final_status: "Pending",
         lead_category: null,
         remarks: formData.remarks || "",

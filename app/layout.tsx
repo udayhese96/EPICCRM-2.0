@@ -5,6 +5,7 @@ import { Plus_Jakarta_Sans } from 'next/font/google'
 // import { Analytics } from '@vercel/analytics/next' // Disabled for development
 // Temporarily enable console for debugging
 import './globals.css'
+import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
   title: 'EPIC CRM 2.0',
@@ -47,6 +48,8 @@ export default function RootLayout({
         <DisableConsoleInProd />
         {children}
         {/* <Analytics /> */}
+        {/* Global notifications */}
+        <Toaster position="top-right" richColors duration={2000} closeButton />
       </body>
     </html>
   )

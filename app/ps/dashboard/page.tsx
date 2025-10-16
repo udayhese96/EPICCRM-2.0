@@ -1674,6 +1674,11 @@ export default function PSDashboard() {
 
           // Mark as seen
           localStorage.setItem(`walkin_lead_seen_${lead.lead_uid}`, 'true')
+
+          // Auto-remove walk-in notification after 2 seconds
+          setTimeout(() => {
+            setNotifications(prev => prev.filter(n => n.id !== notification.id))
+          }, 2000)
         })
       }
     }
@@ -1842,7 +1847,7 @@ export default function PSDashboard() {
   // Main component return statement
   return (
     <>
-      <Toaster position="top-right" richColors />
+      <Toaster position="top-right" richColors duration={2000} closeButton />
       <DashboardLayout>
       {/* Modern Background */}
       <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100/20 relative overflow-hidden">
