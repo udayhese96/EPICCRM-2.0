@@ -289,6 +289,7 @@ export default function TeamLeaderAnalyticsDashboard() {
 
   // Source distribution data
   const sourceData = useMemo(() => {
+    if (!Array.isArray(filteredData) || filteredData.length === 0) return []
     const sourceCounts = filteredData.reduce((acc, item) => {
       acc[item.source] = (acc[item.source] || 0) + 1
       return acc
@@ -303,6 +304,7 @@ export default function TeamLeaderAnalyticsDashboard() {
 
   // Lead category distribution
   const categoryData = useMemo(() => {
+    if (!Array.isArray(filteredData) || filteredData.length === 0) return []
     const categoryCounts = filteredData.reduce((acc, item) => {
       const category = item.lead_category || 'Uncategorized'
       acc[category] = (acc[category] || 0) + 1
