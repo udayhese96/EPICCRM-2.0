@@ -5,8 +5,7 @@ python-multipart==0.0.6
 starlette==0.27.0
 
 # Pydantic for data validation (updated versions for better compatibility)
-pydantic==2.11.7
-pydantic_core==2.33.2
+pydantic==2.12.1
 email-validator==2.3.0
 
 # Database dependencies
