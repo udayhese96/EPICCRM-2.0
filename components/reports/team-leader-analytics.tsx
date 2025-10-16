@@ -55,9 +55,11 @@ interface TeamAnalyticsProps {
 }
 
 export function TeamLeaderAnalytics({ teamPerformance, individualPerformance }: TeamAnalyticsProps) {
-  const topPerformer = individualPerformance.reduce((top, current) => 
-    current.metrics.conversion_rate > top.metrics.conversion_rate ? current : top
-  )
+  const topPerformer = individualPerformance.length > 0
+    ? individualPerformance.reduce((top, current) => 
+        current.metrics.conversion_rate > top.metrics.conversion_rate ? current : top
+      )
+    : null
 
   const avgConversionRate = individualPerformance.length > 0 
     ? individualPerformance.reduce((sum, perf) => sum + perf.metrics.conversion_rate, 0) / individualPerformance.length

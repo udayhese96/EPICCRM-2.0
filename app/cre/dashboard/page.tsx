@@ -720,8 +720,14 @@ export default function CREDashboard() {
 
       if (response.ok) {
         alert('Lost status approved successfully!')
-        fetchLostRequests()
-        fetchAssignedLeads() // Refresh main leads
+        // Ensure UI removes the lead from other sections immediately
+        setLeads(prev => prev.filter(l => l.uid !== leadUid))
+        setLostRequests(prev => prev.filter(r => r.lead_uid !== leadUid))
+        await fetchLostRequests()
+        await fetchAssignedLeads() // Refresh main leads
+        try {
+          window.dispatchEvent(new CustomEvent('lead-status-changed', { detail: { leadUid, newStatus: 'Lost' } }))
+        } catch {}
       } else {
         const errorData = await response.json()
         alert(`Error: ${errorData.error || 'Failed to approve lost status'}`)
@@ -752,8 +758,8 @@ export default function CREDashboard() {
 
       if (response.ok) {
         alert('Lost status rejected successfully!')
-        fetchLostRequests()
-        fetchAssignedLeads() // Refresh main leads
+        await fetchLostRequests()
+        await fetchAssignedLeads() // Refresh main leads
       } else {
         const errorData = await response.json()
         alert(`Error: ${errorData.error || 'Failed to reject lost status'}`)
@@ -897,7 +903,12 @@ export default function CREDashboard() {
         if (process.env.NODE_ENV === 'development') {
           console.log('Filtering pending leads:', leads.length, 'total leads')
         }
-        const pendingCandidates = leads.filter(lead => ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !!(lead?.first_call_date) && !isFinalizedWon(lead))
+        const pendingCandidates = leads.filter(lead => {
+          const fs = (lead?.final_status ?? "").toString().toLowerCase()
+          const ls = (lead?.lead_status ?? "").toString().toLowerCase()
+          const isLostish = fs === 'lost' || fs === 'lost requested' || ls === 'lost'
+          return fs === "pending" && !!(lead?.first_call_date) && !isFinalizedWon(lead) && !isLostish
+        })
         if (process.env.NODE_ENV === 'development') {
           console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
         }
@@ -911,7 +922,12 @@ export default function CREDashboard() {
         if (process.env.NODE_ENV === 'development') {
           console.log('Filtering qualified leads:', leads.length, 'total leads')
         }
-        const qualifiedCandidates = leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead))
+        const qualifiedCandidates = leads.filter(lead => {
+          const fs = (lead?.final_status ?? "").toString().toLowerCase()
+          const ls = (lead?.lead_status ?? "").toString().toLowerCase()
+          const isLostish = fs === 'lost' || fs === 'lost requested' || ls === 'lost'
+          return (lead?.lead_status === "Qualified") && fs === "pending" && !isFinalizedWon(lead) && !isLostish
+        })
         if (process.env.NODE_ENV === 'development') {
           console.log('Qualified candidates:', qualifiedCandidates.length, qualifiedCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status })))
         }

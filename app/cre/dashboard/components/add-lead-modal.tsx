@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { User, Phone, Mail, MapPin, Building, Car, Calendar } from "lucide-react"
+import React, { useRef } from "react"
 
 interface User {
   id: string
@@ -61,6 +62,7 @@ const toyotaModels: { [key: string]: string[] } = {
 }
 
 export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps) {
+  const tradeInSectionRef = useRef<HTMLDivElement | null>(null)
   const [formData, setFormData] = useState({
     customer_name: "",
     customer_mobile_number: "",
@@ -68,6 +70,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
     source: "",
     sub_source: "",
     follow_up_date: "",
+    trade_in: "",
     trade_in_make: "",
     trade_in_model: "",
     trade_in_make_other: "",
@@ -92,6 +95,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         source: "",
         sub_source: "",
         follow_up_date: "",
+        trade_in: "",
         trade_in_make: "",
         trade_in_model: "",
         trade_in_make_other: "",
@@ -117,6 +121,13 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
     if (!/^\d{10}$/.test(mobile)) {
       alert("Enter a valid 10-digit mobile number")
       return
+    }
+    // If user selected trade-in Yes, ensure details are provided
+    if (formData.trade_in === 'Yes') {
+      if (!formData.trade_in_make || !formData.trade_in_model || !formData.trade_in_year || !formData.trade_in_km || !formData.trade_in_ownership) {
+        alert('Please fill all trade-in details')
+        return
+      }
     }
     if (formData.trade_in_year) {
       const yearNum = Number(formData.trade_in_year)
@@ -158,6 +169,7 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
         final_status: "Pending",
         lead_category: null,
         remarks: formData.remarks || "",
+        trade_in: formData.trade_in || "",
         // Trade-in details (optional)
         trade_in_make: tradeInMake || null,
         trade_in_model: tradeInModel || null,
@@ -282,6 +294,31 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+            {/* Trade-in intent quick selector */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Trade-in</Label>
+              <div className="flex flex-wrap gap-2">
+                {['Yes','Additional','Buying for first time'].map(option => (
+                  <Button
+                    key={option}
+                    type="button"
+                    variant={formData.trade_in === option ? 'default' : 'outline'}
+                    className={`h-9 ${formData.trade_in === option ? 'bg-blue-600 text-white' : ''}`}
+                    onClick={() => {
+                      setFormData(prev => ({ ...prev, trade_in: option }))
+                      if (option === 'Yes') {
+                        // Smoothly reveal the section and scroll into view
+                        setTimeout(() => {
+                          tradeInSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        }, 0)
+                      }
+                    }}
+                  >
+                    {option}
+                  </Button>
+                ))}
+              </div>
+            </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="source" className="text-sm font-medium">
@@ -348,15 +385,16 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
             </CardContent>
           </Card>
 
-          {/* Trade-in Details (Optional) */}
-          <Card className="border-l-4 border-l-purple-500">
+        {/* Trade-in Details (Shown when trade-in is Yes) */}
+        <Card className="border-l-4 border-l-purple-500" ref={tradeInSectionRef}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center space-x-2">
                 <Car className="h-5 w-5 text-purple-600" />
                 <span>Trade-in Details (Optional)</span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+          {formData.trade_in === 'Yes' && (
+          <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="trade_in_make" className="text-sm font-medium">
@@ -467,7 +505,8 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
                   </Select>
                 </div>
               </div>
-            </CardContent>
+          </CardContent>
+          )}
           </Card>
 
           {/* Model and Variant Information */}

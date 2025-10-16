@@ -748,9 +748,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       const missingFields = []
       if (!formData.pending_reason) missingFields.push("Pending Reason")
       if (!formData.general_remarks) missingFields.push("Remarks")
-      if (formData.pending_reason === "Call me back" && !formData.follow_up_date) {
-        missingFields.push("Follow-up Date")
-      }
+      // Require follow-up date for ALL pending reasons (including Call me back)
+      if (!formData.follow_up_date) missingFields.push("Follow-up Date")
       
       if (missingFields.length > 0) {
         toast.error(`Please fill in all required fields: ${missingFields.join(", ")}`)
@@ -864,14 +863,14 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
           final_status: selectedStatus === "qualified" ? "Pending" :
                        selectedStatus === "unqualified" ? "Lost" : 
                        selectedStatus === "pending" ? "Pending" : "Pending",
-          // Ensure follow up date exists only when needed
+          // Ensure follow up date exists for qualified and all pending reasons
           follow_up_date: selectedStatus === "qualified" ? (formData.follow_up_date || tomorrow) : 
-                         selectedStatus === "pending" && formData.pending_reason === "Call me back" ? (formData.follow_up_date || tomorrow) : 
-                         selectedStatus === "pending" ? undefined : // No follow-up date for RNR, DND, Busy, etc.
-                         selectedStatus === "unqualified" ? undefined : // No follow-up date for lost leads
+                         selectedStatus === "pending" ? (formData.follow_up_date || tomorrow) : 
+                         selectedStatus === "unqualified" ? undefined : 
                          (formData.follow_up_date || undefined),
           is_lost: selectedStatus === "unqualified",
-          needs_follow_up: selectedStatus === "pending" && formData.pending_reason === "Call me back",
+          // Mark all pending updates as needing follow-up
+          needs_follow_up: selectedStatus === "pending",
           // Add pending_reasons for pending status
           pending_reasons: (() => {
             const result = buildPendingReasons()
@@ -2220,8 +2219,8 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                 </div>
               </div>
 
-              {/* Follow Up Date - Show only when "Call me back" is selected */}
-              {formData.pending_reason === "Call me back" && (
+              {/* Follow Up Date - Required for ALL pending reasons */}
+              {selectedStatus === "pending" && (
                 <div className="relative overflow-hidden bg-white/70 backdrop-blur-sm shadow-[0_4px_10px_rgba(0,0,0,0.05)] rounded-lg p-4">
                   <div className="flex items-center space-x-2 mb-4">
                     <div className="p-2 bg-blue-100/80 rounded-lg backdrop-blur-sm">
@@ -2240,7 +2239,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         className="h-10 text-sm"
                       />
                       <p className="text-xs text-gray-600 mt-2">
-                        Lead will be moved to fresh leads follow-up section after update.
+                        Lead will be moved to the correct follow-up section after update.
                       </p>
                     </div>
                   </div>
