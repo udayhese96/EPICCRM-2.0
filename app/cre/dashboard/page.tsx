@@ -194,11 +194,25 @@ export default function CREDashboard() {
     // Listen for immediate refresh events after modal submits
     const immediateRefresh = async () => {
       if (process.env.NODE_ENV === 'development') {
-        console.log('🔄 [Event] Lead master updated event triggered')
+        console.log('🔄 [Event] Lead master updated event triggered (immediate hard refetch)')
       }
-      requestRefresh({ immediate: true, force: true })
-      // Staggered follow-up refresh to catch propagation lag
-      setTimeout(() => requestRefresh({ immediate: true, force: true }), 900)
+      try {
+        setIsRefreshing(true)
+        // Hard refetch both lists to reflect new insertions immediately
+        await fetchAssignedLeads()
+        await fetchLostRequests()
+      } finally {
+        setIsRefreshing(false)
+      }
+      // Additional staggered refetches to cover eventual consistency
+      setTimeout(async () => {
+        await fetchAssignedLeads()
+        await fetchLostRequests()
+      }, 600)
+      setTimeout(async () => {
+        await fetchAssignedLeads()
+        await fetchLostRequests()
+      }, 1500)
     }
     
     // Listen for lead status changes specifically
@@ -206,8 +220,17 @@ export default function CREDashboard() {
       if (process.env.NODE_ENV === 'development') {
         console.log('🔄 [Event] Lead status change event triggered')
       }
-      requestRefresh({ immediate: true, force: true })
-      setTimeout(() => requestRefresh({ immediate: true, force: true }), 900)
+      try {
+        setIsRefreshing(true)
+        await fetchAssignedLeads()
+        await fetchLostRequests()
+      } finally {
+        setIsRefreshing(false)
+      }
+      setTimeout(async () => {
+        await fetchAssignedLeads()
+        await fetchLostRequests()
+      }, 600)
     }
     
     window.addEventListener('lead-master-updated', immediateRefresh as any)
