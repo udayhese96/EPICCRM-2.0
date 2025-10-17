@@ -39,7 +39,6 @@ services:
     env: node
     buildCommand: npm install && npm run build
     startCommand: npm start
-    staticPublishPath: .next
     envVars:
       - key: NODE_VERSION
         value: 20
