@@ -106,9 +106,9 @@ export default function CRETeamLeaderDashboard() {
 
     if (searchTerm.trim()) {
       filtered = filtered.filter(lead => 
-        lead.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.customer_mobile_number.includes(searchTerm) ||
-        lead.lead_uid.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
       )
@@ -629,7 +629,7 @@ export default function CRETeamLeaderDashboard() {
                 <div className="overflow-auto max-h-[700px]">
                   <div className="min-w-[1600px]">
                     <div className="bg-gradient-to-r from-orange-50/40 to-orange-100/40 border-b border-gray-200/60 px-6 py-4 sticky top-0 z-10">
-                      <div className="grid grid-cols-[50px_140px_200px_120px_150px_140px_140px_140px_180px_120px] gap-6 text-xs font-semibold text-gray-700 uppercase">
+                      <div className="grid grid-cols-[50px_140px_200px_120px_120px_150px_140px_140px_140px_180px_120px] gap-6 text-xs font-semibold text-gray-700 uppercase">
                         <div className="text-center">
                           <input
                             type="checkbox"
@@ -647,6 +647,7 @@ export default function CRETeamLeaderDashboard() {
                         <div>Date</div>
                         <div>Customer</div>
                         <div>Source</div>
+                        <div>CRE</div>
                         <div>Lead Details</div>
                         <div>Branch</div>
                         <div>GEM User</div>
@@ -661,7 +662,7 @@ export default function CRETeamLeaderDashboard() {
                         <div key={lead.id} className={`border-b border-gray-200/60 px-6 py-4 ${
                           index % 2 === 0 ? 'bg-white/70' : 'bg-gray-50/60'
                         } hover:bg-orange-50/40`}>
-                          <div className="grid grid-cols-[50px_140px_200px_120px_150px_140px_140px_140px_180px_120px] gap-6 items-center">
+                          <div className="grid grid-cols-[50px_140px_200px_120px_120px_150px_140px_140px_140px_180px_120px] gap-6 items-center">
                             <div className="text-center">
                               <input
                                 type="checkbox"
@@ -689,6 +690,9 @@ export default function CRETeamLeaderDashboard() {
                             <Badge className="bg-blue-100 text-blue-700 text-xs truncate">
                               {lead.source}
                             </Badge>
+                            <div className="text-sm text-gray-800 truncate">
+                              {lead.cre_name || '-'}
+                            </div>
 
                             <div>
                               <div className="text-sm font-semibold text-gray-900 truncate">{lead.lead_uid}</div>

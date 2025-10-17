@@ -65,8 +65,8 @@ export default function AssignLeadsPage() {
   const SOURCE_OPTIONS: { [key: string]: string[] } = {
     "Google": ["Web", "Tele In", "GMB Tele In"],
     "WhatsApp": ["Tele In", "Bulk Message"],
-    "Car Dekho": ["CD B", "CD G"],
-    "Car Wale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
+    "CarDekho": ["CD B", "CD G"],
+    "CarWale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
     "OEM": ["Dealer CMS", "TKM"],
     "Meta": ["Web"],
     "Tele Out": ["Web"],
@@ -261,27 +261,38 @@ export default function AssignLeadsPage() {
                     'Expires': '0'
                   }
                 })
-                if (!r2.ok) return [src, 0] as const
+                if (!r2.ok) return []
                 const list: any[] = await r2.json()
                 console.log(`[assign-leads] list for ${src}:`, list.length, list)
                 console.log(`[assign-leads] ${src} leads:`, list.map(l => `${l.uid}(${l.assigned})`))
-                return [src, list.length] as const
+                return list
               }
               const list: any[] = await r.json()
               console.log(`[assign-leads] list for ${src}:`, list.length, list)
               console.log(`[assign-leads] ${src} leads:`, list.map(l => `${l.uid}(${l.assigned})`))
-              return [src, list.length] as const
+              return list
             } catch (err) {
               console.error(`[assign-leads] Error fetching ${src}:`, err)
-              return [src, 0] as const
+              return []
             }
           })
         )
+        
+        // Group leads by source + subsource combination
         const by_source: Record<string, number> = {}
         let total_unassigned = 0
-        for (const [src, cnt] of results) {
-          if (cnt > 0) by_source[src] = cnt
-          total_unassigned += cnt
+        
+        for (const leads of results) {
+          for (const lead of leads) {
+            const source = lead.source || 'Unknown'
+            const subSource = lead.sub_source || ''
+            
+            // Create combined key: "Meta + Ads" or just "Meta" if no subsource
+            const combinedKey = subSource ? `${source} + ${subSource}` : source
+            
+            by_source[combinedKey] = (by_source[combinedKey] || 0) + 1
+            total_unassigned += 1
+          }
         }
         console.log('[assign-leads] recomputed by_source:', by_source, 'total:', total_unassigned)
         setUnassignedData({
@@ -309,19 +320,30 @@ export default function AssignLeadsPage() {
                 'Expires': '0'
               }
             })
-            if (!r.ok) return [src, 0] as const
+            if (!r.ok) return []
             const list: any[] = await r.json()
             console.log(`[assign-leads] Fallback found ${list.length} leads for ${src}`)
-            return [src, list.length] as const
+            return list
           } catch {
-            return [src, 0] as const
+            return []
           }
         }))
+        
+        // Group leads by source + subsource combination in fallback
         const by_source: Record<string, number> = {}
         let total_unassigned = 0
-        for (const [src, cnt] of probe) {
-          if (cnt > 0) by_source[src] = cnt
-          total_unassigned += cnt
+        
+        for (const leads of probe) {
+          for (const lead of leads) {
+            const source = lead.source || 'Unknown'
+            const subSource = lead.sub_source || ''
+            
+            // Create combined key: "Meta + Ads" or just "Meta" if no subsource
+            const combinedKey = subSource ? `${source} + ${subSource}` : source
+            
+            by_source[combinedKey] = (by_source[combinedKey] || 0) + 1
+            total_unassigned += 1
+          }
         }
         console.log('[assign-leads] Fallback - Setting unassigned data:', by_source)
         setUnassignedData({ by_source, total_unassigned, available_cres: creList })

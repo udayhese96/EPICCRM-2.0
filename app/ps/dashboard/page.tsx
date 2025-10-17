@@ -510,6 +510,26 @@ interface PSFollowUp {
   fifth_call_date: string
   fifth_call_remark: string
   fifth_call_lead_status?: string
+  // CRE call history fields
+  cre_name?: string
+  cre_first_remark?: string
+  cre_second_remark?: string
+  cre_third_remark?: string
+  cre_fourth_remark?: string
+  cre_fifth_remark?: string
+  cre_sixth_remark?: string
+  cre_first_call_date?: string
+  cre_second_call_date?: string
+  cre_third_call_date?: string
+  cre_fourth_call_date?: string
+  cre_fifth_call_date?: string
+  cre_sixth_call_date?: string
+  cre_first_call_lead_status?: string
+  cre_second_call_lead_status?: string
+  cre_third_call_lead_status?: string
+  cre_fourth_call_lead_status?: string
+  cre_fifth_call_lead_status?: string
+  cre_sixth_call_lead_status?: string
   sixth_call_date: string
   sixth_call_remark: string
   sixth_call_lead_status?: string
@@ -658,7 +678,7 @@ export default function PSDashboard() {
   }, [followUps])
   
   // Filter states
-  const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('today')
+  const [dateFilter, setDateFilter] = useState<'today'|'all'|'range'>('all')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [pendingFilter, setPendingFilter] = useState<'all'|'hot'|'warm'|'cold'>('all')
@@ -693,9 +713,9 @@ export default function PSDashboard() {
     setActiveTab(tab)
     setActiveSubTab('requested') // Reset sub-tab to 'requested' when switching main tabs
     
-    // Reset filters based on tab
+    // Reset filters based on tab - set all to 'all' for better UX
     if (tab === 'today') {
-      setDateFilter('today')
+      setDateFilter('all')  // Changed from 'today' to 'all'
       setStartDate('')
       setEndDate('')
       setTodaySearch('')
@@ -704,9 +724,16 @@ export default function PSDashboard() {
       setStartDate('')
       setEndDate('')
     } else if (tab === 'pending') {
+      setDateFilter('all')  // Set to 'all' instead of keeping current filter
       setPendingFilter('all')
     } else if (tab === 'walkin') {
+      setDateFilter('all')  // Set to 'all' instead of keeping current filter
       setWalkinSearch('')
+    } else {
+      // For all other tabs (fresh, booked, retailed), set to 'all'
+      setDateFilter('all')
+      setStartDate('')
+      setEndDate('')
     }
   }
 
@@ -1584,8 +1611,10 @@ export default function PSDashboard() {
   const { freshCount, todayCount, pendingCount, walkinCount, freshList, todayList, pendingList, walkinList } = useMemo(() => {
     // Fresh leads: Use server-side classification from backend
     const freshBaseList = followUps.filter(f => f.is_fresh === true)
+    // Apply date filter for fresh list display
+    const filteredFreshList = applyDateFilter(freshBaseList)
     // Apply search for fresh list
-    const freshList = freshBaseList.filter(f => {
+    const freshList = filteredFreshList.filter(f => {
       if (!freshSearch.trim()) return true
       const q = freshSearch.toLowerCase()
       return (
@@ -1594,6 +1623,7 @@ export default function PSDashboard() {
         f.lead_uid?.toLowerCase().includes(q)
       )
     })
+    // IMPORTANT: Count should show ALL fresh leads regardless of filter
     const freshCount = freshBaseList.length
 
     
@@ -1628,13 +1658,16 @@ export default function PSDashboard() {
         f.lead_uid?.toLowerCase().includes(q)
       )
     })
-    const pendingCount = filteredPendingList.length
+    // IMPORTANT: Count should show ALL pending leads regardless of filter
+    const pendingCount = basePendingList.length
 
     // Walk-in leads: Filter by source (walk-in/digital leads)
     const baseWalkinList = followUps.filter(f =>
       ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(f.source || '')
     )
-    const walkinList = baseWalkinList.filter(f => {
+    // Apply date filter for walk-in list display
+    const filteredWalkinList = applyDateFilter(baseWalkinList)
+    const walkinList = filteredWalkinList.filter(f => {
       if (!walkinSearch.trim()) return true
       const q = walkinSearch.toLowerCase()
       return (
@@ -1643,6 +1676,7 @@ export default function PSDashboard() {
         f.lead_uid?.toLowerCase().includes(q)
       )
     })
+    // IMPORTANT: Count should show ALL walk-in leads regardless of filter
     const walkinCount = baseWalkinList.length
 
     return { freshCount, todayCount, pendingCount, walkinCount, freshList, todayList: todayListSearched, pendingList, walkinList }
@@ -2857,27 +2891,29 @@ export default function PSDashboard() {
                           <MessageSquare className="w-4 h-4 mr-2 text-orange-500" />
                           Call History
                         </h3>
-                        <div className="space-y-2 max-h-32 overflow-y-auto bg-gray-50/50 rounded-xl p-3">
+                        <div className="space-y-3 max-h-64 overflow-y-auto bg-gray-50/50 rounded-xl p-3">
+                          {/* CRE Call History */}
                           {[
-                            { remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status },
-                            { remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status },
-                            { remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status },
-                            { remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status },
-                            { remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status },
-                            { remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status },
-                            { remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status },
-                            { remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status },
-                            { remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status },
-                            { remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status }
+                            { remark: selectedFollowUp.cre_first_remark, date: selectedFollowUp.cre_first_call_date, status: selectedFollowUp.cre_first_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name },
+                            { remark: selectedFollowUp.cre_second_remark, date: selectedFollowUp.cre_second_call_date, status: selectedFollowUp.cre_second_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name },
+                            { remark: selectedFollowUp.cre_third_remark, date: selectedFollowUp.cre_third_call_date, status: selectedFollowUp.cre_third_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name },
+                            { remark: selectedFollowUp.cre_fourth_remark, date: selectedFollowUp.cre_fourth_call_date, status: selectedFollowUp.cre_fourth_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name },
+                            { remark: selectedFollowUp.cre_fifth_remark, date: selectedFollowUp.cre_fifth_call_date, status: selectedFollowUp.cre_fifth_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name },
+                            { remark: selectedFollowUp.cre_sixth_remark, date: selectedFollowUp.cre_sixth_call_date, status: selectedFollowUp.cre_sixth_call_lead_status, type: 'CRE', creName: selectedFollowUp.cre_name }
                           ]
                             .filter(call => call.remark)
                             .map((call, index) => (
-                              <div key={index} className="text-xs bg-white rounded-lg p-2 border border-gray-200/50">
+                              <div key={`cre-${index}`} className="text-xs bg-blue-50 rounded-lg p-2 border border-blue-200">
                                 <div className="flex justify-between items-start mb-1">
-                                  <span className="font-semibold text-gray-700">Call #{index + 1}</span>
-                                  <span className="text-gray-500">{call.date ? formatDate(call.date) : ''}</span>
+                                  <div className="flex items-center">
+                                    <span className="font-semibold text-blue-800">CRE Call #{index + 1}</span>
+                                    <Badge className="ml-2 bg-blue-100 text-blue-700 border-0 font-medium text-xs px-2 py-0.5">
+                                      {call.creName || 'CRE'}
+                                    </Badge>
+                                  </div>
+                                  <span className="text-blue-600">{call.date ? formatDate(call.date) : ''}</span>
                                 </div>
-                                <div className="text-gray-600 mb-1">{call.remark}</div>
+                                <div className="text-blue-700 mb-1">{call.remark}</div>
                                 {call.status && (
                                   <Badge className="bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 border-0 font-medium text-xs px-2 py-0.5">
                                     {call.status}
@@ -2885,7 +2921,51 @@ export default function PSDashboard() {
                                 )}
                               </div>
                             ))}
+                          
+                          {/* PS Call History */}
+                          {[
+                            { remark: selectedFollowUp.first_call_remark, date: selectedFollowUp.first_call_date, status: selectedFollowUp.first_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.second_call_remark, date: selectedFollowUp.second_call_date, status: selectedFollowUp.second_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.third_call_remark, date: selectedFollowUp.third_call_date, status: selectedFollowUp.third_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.fourth_call_remark, date: selectedFollowUp.fourth_call_date, status: selectedFollowUp.fourth_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.fifth_call_remark, date: selectedFollowUp.fifth_call_date, status: selectedFollowUp.fifth_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.sixth_call_remark, date: selectedFollowUp.sixth_call_date, status: selectedFollowUp.sixth_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.seventh_call_remark, date: selectedFollowUp.seventh_call_date, status: selectedFollowUp.seventh_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.eighth_call_remark, date: selectedFollowUp.eighth_call_date, status: selectedFollowUp.eighth_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.ninth_call_remark, date: selectedFollowUp.ninth_call_date, status: selectedFollowUp.ninth_call_lead_status, type: 'PS' },
+                            { remark: selectedFollowUp.tenth_call_remark, date: selectedFollowUp.tenth_call_date, status: selectedFollowUp.tenth_call_lead_status, type: 'PS' }
+                          ]
+                            .filter(call => call.remark)
+                            .map((call, index) => (
+                              <div key={`ps-${index}`} className="text-xs bg-orange-50 rounded-lg p-2 border border-orange-200">
+                                <div className="flex justify-between items-start mb-1">
+                                  <div className="flex items-center">
+                                    <span className="font-semibold text-orange-800">PS Call #{index + 1}</span>
+                                    <Badge className="ml-2 bg-orange-100 text-orange-700 border-0 font-medium text-xs px-2 py-0.5">
+                                      PS
+                                    </Badge>
+                                  </div>
+                                  <span className="text-orange-600">{call.date ? formatDate(call.date) : ''}</span>
+                                </div>
+                                <div className="text-orange-700 mb-1">{call.remark}</div>
+                                {call.status && (
+                                  <Badge className="bg-gradient-to-r from-orange-100 to-amber-100 text-orange-700 border-0 font-medium text-xs px-2 py-0.5">
+                                    {call.status}
+                                  </Badge>
+                                )}
+                              </div>
+                            ))}
+                          
+                          {/* No call history message */}
                           {![
+                            // CRE calls
+                            selectedFollowUp.cre_first_remark,
+                            selectedFollowUp.cre_second_remark,
+                            selectedFollowUp.cre_third_remark,
+                            selectedFollowUp.cre_fourth_remark,
+                            selectedFollowUp.cre_fifth_remark,
+                            selectedFollowUp.cre_sixth_remark,
+                            // PS calls
                             selectedFollowUp.first_call_remark,
                             selectedFollowUp.second_call_remark,
                             selectedFollowUp.third_call_remark,
@@ -2897,7 +2977,7 @@ export default function PSDashboard() {
                             selectedFollowUp.ninth_call_remark,
                             selectedFollowUp.tenth_call_remark
                           ].some(remark => remark) && (
-                            <div className="text-center text-xs text-gray-500 py-2">
+                            <div className="text-center text-xs text-gray-500 py-4">
                               No call history available
                             </div>
                           )}

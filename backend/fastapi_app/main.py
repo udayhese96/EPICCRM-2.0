@@ -1100,7 +1100,29 @@ async def get_users(role: Optional[str] = None, current_user=Depends(get_current
         # Team leaders can only see PS assigned to them when asking for role=ps
         if current_user.role == 'team_leader':
             if role == 'ps':
-                query = query.eq('team_leader_id', current_user.id)
+                # Get PS users assigned to this team leader using team_leader_id in users table
+                print(f"[Users API] Team leader {current_user.username} (ID: {current_user.id}) requesting PS users")
+                try:
+                    # Use team_leader_id method (primary method)
+                    print(f"[Users API] Using team_leader_id method")
+                    query = query.eq('team_leader_id', current_user.id)
+                except Exception as e:
+                    print(f"[Users API] team_leader_id method failed: {e}")
+                    # Fallback: try ps_assignments table method
+                    try:
+                        print(f"[Users API] Falling back to ps_assignments method")
+                        assignments_response = supabase.table('ps_assignments').select('ps_user_id').eq('sales_team_leader_id', current_user.id).execute()
+                        assigned_ps_ids = [assignment['ps_user_id'] for assignment in assignments_response.data or []]
+                        print(f"[Users API] Found {len(assigned_ps_ids)} assigned PS users: {assigned_ps_ids}")
+                        
+                        if assigned_ps_ids:
+                            query = query.in_('id', assigned_ps_ids)
+                        else:
+                            print(f"[Users API] No PS users assigned to team leader {current_user.id}")
+                            return []
+                    except Exception as e2:
+                        print(f"[Users API] ps_assignments fallback also failed: {e2}")
+                        return []
             else:
                 # Prevent broad access for other roles
                 query = query.eq('id', current_user.id)
@@ -1109,6 +1131,10 @@ async def get_users(role: Optional[str] = None, current_user=Depends(get_current
         return [UserResponse(**user) for user in response.data]
         
     except Exception as e:
+        print(f"[Users API] Error in get_users: {e}")
+        print(f"[Users API] Error type: {type(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/users", response_model=UserResponse)
@@ -1279,6 +1305,9 @@ class CRELeadCreate(BaseModel):
     final_status: str = "Pending"
     lead_category: Optional[str] = None
     remarks: Optional[str] = None
+    # Vehicle interest details
+    model_interested: Optional[str] = None
+    variant: Optional[str] = None
     # Trade-in details (optional)
     trade_in_make: Optional[str] = None
     trade_in_model: Optional[str] = None
@@ -1569,6 +1598,8 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
             "final_status": lead_data.final_status,
             "lead_category": lead_data.lead_category,
             "first_remark": lead_data.remarks,
+            "model_interested": lead_data.model_interested,
+            "variant": lead_data.variant,
             "follow_up_date": lead_data.follow_up_date,  # Follow-up date as provided
             "first_call_date": now_ist_iso(),  # CRE adding lead counts as first call
             "date": now_ist_iso(),
@@ -1594,6 +1625,9 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
                 "source": lead_data.source,
                 "sub_source": lead_data.sub_source,
                 "remarks": lead_data.remarks,
+                # Vehicle interest details
+                "model_interested": lead_data.model_interested,
+                "variant": lead_data.variant,
                 # Trade-in details
                 "trade_in_make": lead_data.trade_in_make,
                 "trade_in_model": lead_data.trade_in_model,
@@ -1635,6 +1669,8 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
                                 "sub_source": lead_data.sub_source,
                                 "cre_name": lead_data.cre_name,
                                 "first_remark": lead_data.remarks,
+                                "model_interested": lead_data.model_interested,
+                                "variant": lead_data.variant,
                                 "created_at": now_ist_iso(),
                                 "updated_at": now_ist_iso()
                             }
@@ -2410,16 +2446,34 @@ async def get_unassigned_leads():
 async def get_unassigned_leads_by_source(source: str):
     """Get unassigned leads for a specific source (see rule above)."""
     try:
-        # Use database query to get only unassigned leads for specific source
-        # This is much more efficient than fetching all leads and filtering in memory
-        query = (
-            supabase
-                .table('lead_master')
-                .select('*')
-                .ilike('source', source)  # Case-insensitive source matching
-                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
-                .execute()
-        )
+        # Parse combined source format (e.g., "Meta + Ads" -> source="Meta", subsource="Ads")
+        if ' + ' in source:
+            source_part, subsource_part = source.split(' + ', 1)
+            source_part = source_part.strip()
+            subsource_part = subsource_part.strip()
+            
+            # Query with both source and subsource
+            query = (
+                supabase
+                    .table('lead_master')
+                    .select('*')
+                    .ilike('source', source_part)
+                    .ilike('sub_source', subsource_part)
+                    .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                    .execute()
+            )
+            print(f"[unassigned/{source}] Parsed as source='{source_part}', subsource='{subsource_part}'")
+        else:
+            # Original logic for simple source
+            query = (
+                supabase
+                    .table('lead_master')
+                    .select('*')
+                    .ilike('source', source)  # Case-insensitive source matching
+                    .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                    .execute()
+            )
+            print(f"[unassigned/{source}] Using simple source matching")
         
         filtered_leads = query.data or []
         print(f"[unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' directly from database")
@@ -2504,16 +2558,34 @@ async def get_unassigned_public():
 @app.get("/api/public/unassigned/{source}")
 async def get_unassigned_public_by_source(source: str):
     try:
-        # Use database query to get only unassigned leads for specific source
-        # This is much more efficient than fetching all leads and filtering in memory
-        query = (
-            supabase
-                .table('lead_master')
-                .select('*')
-                .ilike('source', source)  # Case-insensitive source matching
-                .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
-                .execute()
-        )
+        # Parse combined source format (e.g., "Meta + Ads" -> source="Meta", subsource="Ads")
+        if ' + ' in source:
+            source_part, subsource_part = source.split(' + ', 1)
+            source_part = source_part.strip()
+            subsource_part = subsource_part.strip()
+            
+            # Query with both source and subsource
+            query = (
+                supabase
+                    .table('lead_master')
+                    .select('*')
+                    .ilike('source', source_part)
+                    .ilike('sub_source', subsource_part)
+                    .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                    .execute()
+            )
+            print(f"[public/unassigned/{source}] Parsed as source='{source_part}', subsource='{subsource_part}'")
+        else:
+            # Original logic for simple source
+            query = (
+                supabase
+                    .table('lead_master')
+                    .select('*')
+                    .ilike('source', source)  # Case-insensitive source matching
+                    .or_('assigned.neq.Yes,cre_name.is.null,cre_name.eq.')
+                    .execute()
+            )
+            print(f"[public/unassigned/{source}] Using simple source matching")
         
         filtered_leads = query.data or []
         print(f"[public/unassigned/{source}] Found {len(filtered_leads)} unassigned leads for source '{source}' directly from database")
@@ -2526,6 +2598,411 @@ async def get_unassigned_public_by_source(source: str):
 @app.get("/api/test")
 async def test_endpoint():
     return {"message": "API is working", "timestamp": now_ist_iso()}
+
+# Debug endpoint for team leader dashboard
+@app.get("/api/debug/tl-dashboard")
+async def debug_tl_dashboard(current_user=Depends(get_current_user)):
+    """Debug endpoint to check team leader dashboard data"""
+    try:
+        # Get current user info
+        user_info = {
+            "id": current_user.id,
+            "username": current_user.username,
+            "role": current_user.role
+        }
+        
+        # Get PS users assigned to this team leader
+        ps_users_response = supabase.table('users').select('id, full_name, username, role, team_leader_id').eq('role', 'ps').eq('team_leader_id', current_user.id).execute()
+        assigned_ps_users = ps_users_response.data or []
+        
+        # Get all PS users (for comparison)
+        all_ps_response = supabase.table('users').select('id, full_name, username, role, team_leader_id').eq('role', 'ps').execute()
+        all_ps_users = all_ps_response.data or []
+        
+        # Get leads in ps_followup_master
+        leads_response = supabase.table('ps_followup_master').select('ps_name, lead_uid, ps_assigned_at').limit(10).execute()
+        sample_leads = leads_response.data or []
+        
+        # Get unique PS names from leads
+        unique_ps_names = list(set([lead.get('ps_name') for lead in sample_leads if lead.get('ps_name')]))
+        
+        # Check if any assigned PS users have leads
+        assigned_ps_names = []
+        for ps in assigned_ps_users:
+            if ps.get('full_name'):
+                assigned_ps_names.append(ps['full_name'])
+            if ps.get('username'):
+                assigned_ps_names.append(ps['username'])
+        assigned_ps_names = list(set(assigned_ps_names))
+        
+        # Find leads for assigned PS users
+        leads_for_assigned_ps = []
+        if assigned_ps_names:
+            leads_response = supabase.table('ps_followup_master').select('ps_name, lead_uid, ps_assigned_at').in_('ps_name', assigned_ps_names).limit(10).execute()
+            leads_for_assigned_ps = leads_response.data or []
+        
+        return {
+            "current_user": user_info,
+            "assigned_ps_users": assigned_ps_users,
+            "assigned_ps_names": assigned_ps_names,
+            "all_ps_users": all_ps_users,
+            "sample_leads": sample_leads,
+            "unique_ps_names_in_leads": unique_ps_names,
+            "leads_for_assigned_ps": leads_for_assigned_ps,
+            "total_leads_count": len(sample_leads),
+            "name_mismatch_detected": len(leads_for_assigned_ps) == 0 and len(assigned_ps_names) > 0
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/team-leader/ps-performance")
+async def get_ps_performance(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Get Product Specialist performance analytics for Team Leaders"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Get PS users assigned to this team leader
+        ps_users_response = supabase.table('users').select('id, full_name, username').eq('role', 'ps').eq('team_leader_id', current_user.id).execute()
+        assigned_ps_users = ps_users_response.data or []
+        assigned_ps_names = []
+        for ps in assigned_ps_users:
+            if ps.get('full_name'):
+                assigned_ps_names.append(ps['full_name'])
+            if ps.get('username'):
+                assigned_ps_names.append(ps['username'])
+        assigned_ps_names = list(set(assigned_ps_names))  # Remove duplicates
+        
+        print(f"[TL Analytics] PS Performance - Team leader {current_user.username} has {len(assigned_ps_users)} assigned PS users: {assigned_ps_names}")
+        
+        if not assigned_ps_names:
+            print(f"[TL Analytics] PS Performance - No PS users assigned to team leader {current_user.username}")
+            return []
+        
+        query = supabase.table('ps_followup_master').select('*')
+        
+        # Filter by assigned PS users
+        query = query.in_('ps_name', assigned_ps_names)
+        
+        # Apply date filtering if provided
+        if from_date:
+            query = query.gte('ps_assigned_at', from_date)
+        if to_date:
+            query = query.lte('ps_assigned_at', to_date)
+        
+        response = query.execute()
+        print(f"[TL Analytics] PS Performance - Found {len(response.data or [])} records in ps_followup_master for assigned PS users")
+        
+        # Process data to calculate PS performance
+        ps_data = {}
+        
+        for row in response.data or []:
+            ps_name = row.get('ps_name')
+            if not ps_name:
+                continue
+                
+            if ps_name not in ps_data:
+                ps_data[ps_name] = {
+                    'ps_name': ps_name,
+                    'leads_assigned': 0,
+                    'leads_contacted': 0,
+                    'gap': 0
+                }
+            
+            # Count leads assigned
+            ps_data[ps_name]['leads_assigned'] += 1
+            
+            # Count leads contacted (has any call remark or status)
+            has_contact = any([
+                row.get('first_call_remark'),
+                row.get('second_call_remark'),
+                row.get('third_call_remark'),
+                row.get('fourth_call_remark'),
+                row.get('fifth_call_remark'),
+                row.get('lead_status')
+            ])
+            
+            if has_contact:
+                ps_data[ps_name]['leads_contacted'] += 1
+        
+        # Calculate gaps
+        for ps_name in ps_data:
+            ps_data[ps_name]['gap'] = ps_data[ps_name]['leads_assigned'] - ps_data[ps_name]['leads_contacted']
+        
+        return list(ps_data.values())
+        
+    except Exception as e:
+        print(f"[TL Analytics] Error fetching PS performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/team-leader/source-analysis")
+async def get_source_analysis(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Get source-wise leads analysis for Team Leaders"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Get PS users assigned to this team leader
+        ps_users_response = supabase.table('users').select('id, full_name, username').eq('role', 'ps').eq('team_leader_id', current_user.id).execute()
+        assigned_ps_users = ps_users_response.data or []
+        assigned_ps_names = []
+        for ps in assigned_ps_users:
+            if ps.get('full_name'):
+                assigned_ps_names.append(ps['full_name'])
+            if ps.get('username'):
+                assigned_ps_names.append(ps['username'])
+        assigned_ps_names = list(set(assigned_ps_names))  # Remove duplicates
+        
+        print(f"[TL Analytics] Source Analysis - Team leader {current_user.username} has {len(assigned_ps_users)} assigned PS users: {assigned_ps_names}")
+        
+        if not assigned_ps_names:
+            print(f"[TL Analytics] Source Analysis - No PS users assigned to team leader {current_user.username}")
+            return []
+        
+        query = supabase.table('ps_followup_master').select('*')
+        
+        # Filter by assigned PS users
+        query = query.in_('ps_name', assigned_ps_names)
+        
+        # Apply date filtering if provided
+        if from_date:
+            query = query.gte('ps_assigned_at', from_date)
+        if to_date:
+            query = query.lte('ps_assigned_at', to_date)
+        
+        response = query.execute()
+        print(f"[TL Analytics] Source Analysis - Found {len(response.data or [])} records in ps_followup_master for assigned PS users")
+        
+        # Process data for source analysis
+        ps_data = {}
+        
+        # Fetch actual sources from database instead of hardcoding
+        sources_response = supabase.table('ps_followup_master').select('source').not_.is_('source', 'null').execute()
+        unique_sources = list(set([row.get('source') for row in sources_response.data or [] if row.get('source')]))
+        sources = sorted(unique_sources) if unique_sources else ['Other']
+        
+        for row in response.data or []:
+            ps_name = row.get('ps_name')
+            source = row.get('source', 'Other')
+            final_status = row.get('final_status', 'Pending')
+            
+            if not ps_name:
+                continue
+                
+            if ps_name not in ps_data:
+                ps_data[ps_name] = {
+                    'ps_name': ps_name,
+                    'total_leads': 0,
+                    'won_leads': 0,
+                    'win_rate': 0.0,
+                    'sources': {}
+                }
+                
+                # Initialize all sources
+                for s in sources:
+                    ps_data[ps_name]['sources'][s] = {
+                        'total': 0,
+                        'won': 0,
+                        'win_rate': 0.0
+                    }
+            
+            # Update totals
+            ps_data[ps_name]['total_leads'] += 1
+            if final_status.lower() == 'won':
+                ps_data[ps_name]['won_leads'] += 1
+            
+            # Update source-specific data
+            if source in ps_data[ps_name]['sources']:
+                ps_data[ps_name]['sources'][source]['total'] += 1
+                if final_status.lower() == 'won':
+                    ps_data[ps_name]['sources'][source]['won'] += 1
+        
+        # Calculate win rates
+        for ps_name in ps_data:
+            if ps_data[ps_name]['total_leads'] > 0:
+                ps_data[ps_name]['win_rate'] = round((ps_data[ps_name]['won_leads'] / ps_data[ps_name]['total_leads']) * 100, 1)
+            
+            for source in ps_data[ps_name]['sources']:
+                source_data = ps_data[ps_name]['sources'][source]
+                if source_data['total'] > 0:
+                    source_data['win_rate'] = round((source_data['won'] / source_data['total']) * 100, 1)
+        
+        return list(ps_data.values())
+        
+    except Exception as e:
+        print(f"[TL Analytics] Error fetching source analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/team-leader/followup-summary")
+async def get_followup_summary(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    mode: str = "all",
+    current_user=Depends(get_current_user)
+):
+    """Get Product Specialist follow-up summary for Team Leaders"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Get PS users assigned to this team leader
+        ps_users_response = supabase.table('users').select('id, full_name, username').eq('role', 'ps').eq('team_leader_id', current_user.id).execute()
+        assigned_ps_users = ps_users_response.data or []
+        assigned_ps_names = []
+        for ps in assigned_ps_users:
+            if ps.get('full_name'):
+                assigned_ps_names.append(ps['full_name'])
+            if ps.get('username'):
+                assigned_ps_names.append(ps['username'])
+        assigned_ps_names = list(set(assigned_ps_names))  # Remove duplicates
+        
+        print(f"[TL Analytics] Follow-up Summary - Team leader {current_user.username} has {len(assigned_ps_users)} assigned PS users: {assigned_ps_names}")
+        
+        if not assigned_ps_names:
+            print(f"[TL Analytics] Follow-up Summary - No PS users assigned to team leader {current_user.username}")
+            return []
+        
+        query = supabase.table('ps_followup_master').select('*')
+        
+        # Filter by assigned PS users
+        query = query.in_('ps_name', assigned_ps_names)
+        
+        # Apply date filtering if provided
+        if from_date:
+            query = query.gte('ps_assigned_at', from_date)
+        if to_date:
+            query = query.lte('ps_assigned_at', to_date)
+        
+        # Apply mode filtering
+        if mode == "pending":
+            query = query.eq('final_status', 'Pending')
+        
+        response = query.execute()
+        print(f"[TL Analytics] Follow-up Summary - Found {len(response.data or [])} records in ps_followup_master for assigned PS users")
+        
+        # Process data for follow-up summary
+        ps_data = {}
+        
+        for row in response.data or []:
+            ps_name = row.get('ps_name')
+            source = row.get('source', '')
+            
+            if not ps_name:
+                continue
+                
+            # Classify lead type
+            lead_type = 'WALK-IN' if source in ['Walk-in', 'Digital'] else 'CRE'
+            
+            if ps_name not in ps_data:
+                ps_data[ps_name] = {
+                    'ps_name': ps_name,
+                    'followups': {}
+                }
+                
+                # Initialize F1-F7 for both CRE and WALK-IN
+                for i in range(1, 8):
+                    ps_data[ps_name]['followups'][f'F{i}'] = {
+                        'CRE': 0,
+                        'WALK-IN': 0
+                    }
+            
+            # Determine follow-up stage based on call count
+            call_count = 0
+            call_fields = [
+                'first_call_remark', 'second_call_remark', 'third_call_remark',
+                'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark'
+            ]
+            
+            for field in call_fields:
+                if row.get(field):
+                    call_count += 1
+            
+            # Map to follow-up stage (F1-F7)
+            if call_count == 0:
+                stage = 'F1'
+            elif call_count <= 7:
+                stage = f'F{call_count}'
+            else:
+                stage = 'F7'  # Cap at F7
+            
+            ps_data[ps_name]['followups'][stage][lead_type] += 1
+        
+        # Convert to list format
+        result = []
+        for ps_name in ps_data:
+            ps_result = {'ps_name': ps_name}
+            for stage in ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7']:
+                ps_result[stage] = ps_data[ps_name]['followups'][stage]
+            result.append(ps_result)
+        
+        return result
+        
+    except Exception as e:
+        print(f"[TL Analytics] Error fetching follow-up summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/debug/cre-call-history")
+async def debug_cre_call_history():
+    """Debug endpoint to check CRE call history data"""
+    try:
+        # Check lead_master for any leads with CRE call history
+        response = supabase.table('lead_master').select(
+            'uid', 'customer_name', 'customer_mobile_number', 'cre_name',
+            'first_remark', 'second_remark', 'third_remark', 'fourth_remark', 'fifth_remark', 'sixth_remark',
+            'first_call_date', 'second_call_date', 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date',
+            'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
+        ).not_.is_('first_remark', 'null').limit(5).execute()
+        
+        leads_with_cre_calls = []
+        for lead in response.data or []:
+            cre_calls = []
+            call_fields = [
+                ('first_remark', 'first_call_date', None),  # first_call_lead_status doesn't exist
+                ('second_remark', 'second_call_date', 'second_call_lead_status'),
+                ('third_remark', 'third_call_date', 'third_call_lead_status'),
+                ('fourth_remark', 'fourth_call_date', 'fourth_call_lead_status'),
+                ('fifth_remark', 'fifth_call_date', 'fifth_call_lead_status'),
+                ('sixth_remark', 'sixth_call_date', 'sixth_call_lead_status')
+            ]
+            
+            for remark_field, date_field, status_field in call_fields:
+                remark = lead.get(remark_field)
+                if remark and remark.strip():
+                    cre_calls.append({
+                        'remark': remark,
+                        'date': lead.get(date_field),
+                        'status': lead.get(status_field),
+                        'field': remark_field
+                    })
+            
+            if cre_calls:
+                leads_with_cre_calls.append({
+                    'uid': lead['uid'],
+                    'customer_name': lead['customer_name'],
+                    'customer_mobile_number': lead['customer_mobile_number'],
+                    'cre_name': lead['cre_name'],
+                    'cre_calls': cre_calls
+                })
+        
+        return {
+            "total_leads_checked": len(response.data or []),
+            "leads_with_cre_calls": len(leads_with_cre_calls),
+            "sample_leads": leads_with_cre_calls[:3]  # Show first 3 for debugging
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # Public endpoint to fetch leads assigned to a specific CRE username
 @app.get("/api/public/cre-assigned/{username}")
@@ -2806,7 +3283,7 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 'first_call_date', 'second_call_date', 'third_call_date', 'fourth_call_date',
                 'fifth_call_date', 'sixth_call_date', 'seventh_call_date', 'eighth_call_date', 
                 'ninth_call_date', 'tenth_call_date',
-                'first_call_lead_status', 'second_call_lead_status', 'third_call_lead_status', 
+                'second_call_lead_status', 'third_call_lead_status', 
                 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status',
                 'seventh_call_lead_status', 'eighth_call_lead_status', 'ninth_call_lead_status', 
                 'tenth_call_lead_status'
@@ -2818,7 +3295,7 @@ async def get_lead_remarks(lead_uid: str, current_user=Depends(get_current_user)
                 
                 # Collect PS remarks with lead status
                 ps_call_fields = [
-                    ('first_call_remark', 'first_call_date', 'first_call_lead_status'),
+                    ('first_call_remark', 'first_call_date', None),  # first_call_lead_status doesn't exist
                     ('second_call_remark', 'second_call_date', 'second_call_lead_status'),
                     ('third_call_remark', 'third_call_date', 'third_call_lead_status'),
                     ('fourth_call_remark', 'fourth_call_date', 'fourth_call_lead_status'),
@@ -3137,7 +3614,16 @@ async def get_qualified_leads(
 async def get_cre_team_leader_qualified_leads(current_user=Depends(get_current_user)):
     """Get qualified leads from qualified_leads table for CRE Team Leader dashboard"""
     try:
-        response = supabase.table('qualified_leads').select('*').order('created_at', desc=True).execute()
+        # Only show active-qualified leads (exclude Won/Lost/Booked/Retailed)
+        # Show leads with NULL final_status or specific pending statuses
+        response = (
+            supabase
+                .table('qualified_leads')
+                .select('*')
+                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .order('created_at', desc=True)
+                .execute()
+        )
         print(f"[GET Qualified Leads] Returning {len(response.data or [])} leads")
         if response.data:
             print(f"[GET Qualified Leads] Sample lead: {response.data[0]}")
@@ -3495,7 +3981,7 @@ async def get_ps_followups(
     source: Optional[str] = None,
     current_user=Depends(get_current_user)
 ):
-    """Get PS follow-ups with server-side classification - ALWAYS FETCH FRESH DATA"""
+    """Get PS follow-ups with server-side classification and CRE call history - ALWAYS FETCH FRESH DATA"""
     try:
         # Create a fresh Supabase client to bypass any caching
         fresh_supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -3523,7 +4009,7 @@ async def get_ps_followups(
         # Execute query with ordering
         response = query.order('follow_up_date', desc=False).execute()
         
-        # Add server-side classification to each row
+        # Add server-side classification and CRE call history to each row
         fresh_count = 0
         pending_count = 0
         
@@ -3559,7 +4045,76 @@ async def get_ps_followups(
             if row['is_pending']:
                 pending_count += 1
         
-        # Return raw data with is_fresh/is_pending flags (bypass Pydantic validation)
+            # Fetch CRE call history from lead_master
+            try:
+                lead_uid = row.get('lead_uid')
+                if lead_uid:
+                    cre_response = fresh_supabase.table('lead_master').select(
+                        'cre_name', 'first_remark', 'second_remark', 'third_remark', 'fourth_remark', 'fifth_remark', 'sixth_remark',
+                        'first_call_date', 'second_call_date', 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date',
+                        'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
+                    ).eq('uid', lead_uid).execute()
+                    
+                    if cre_response.data and len(cre_response.data) > 0:
+                        cre_data = cre_response.data[0]
+                        # Add CRE call history fields to the row
+                        row.update({
+                            'cre_name': cre_data.get('cre_name'),
+                            'cre_first_remark': cre_data.get('first_remark'),
+                            'cre_second_remark': cre_data.get('second_remark'),
+                            'cre_third_remark': cre_data.get('third_remark'),
+                            'cre_fourth_remark': cre_data.get('fourth_remark'),
+                            'cre_fifth_remark': cre_data.get('fifth_remark'),
+                            'cre_sixth_remark': cre_data.get('sixth_remark'),
+                            'cre_first_call_date': cre_data.get('first_call_date'),
+                            'cre_second_call_date': cre_data.get('second_call_date'),
+                            'cre_third_call_date': cre_data.get('third_call_date'),
+                            'cre_fourth_call_date': cre_data.get('fourth_call_date'),
+                            'cre_fifth_call_date': cre_data.get('fifth_call_date'),
+                            'cre_sixth_call_date': cre_data.get('sixth_call_date'),
+                            'cre_first_call_lead_status': None,  # This column doesn't exist in the database
+                            'cre_second_call_lead_status': cre_data.get('second_call_lead_status'),
+                            'cre_third_call_lead_status': cre_data.get('third_call_lead_status'),
+                            'cre_fourth_call_lead_status': cre_data.get('fourth_call_lead_status'),
+                            'cre_fifth_call_lead_status': cre_data.get('fifth_call_lead_status'),
+                            'cre_sixth_call_lead_status': cre_data.get('sixth_call_lead_status'),
+                        })
+                    else:
+                        # Initialize empty CRE call history fields
+                        row.update({
+                            'cre_name': None,
+                            'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
+                            'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
+                            'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
+                            'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
+                            'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
+                            'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
+                        })
+                else:
+                    # Initialize empty CRE call history fields if no lead_uid
+                    row.update({
+                        'cre_name': None,
+                        'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
+                        'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
+                        'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
+                        'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
+                        'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
+                        'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
+                    })
+            except Exception as cre_error:
+                print(f"[PS API] Error fetching CRE call history for lead_uid {row.get('lead_uid')}: {cre_error}")
+                # Initialize empty CRE call history fields on error
+                row.update({
+                    'cre_name': None,
+                    'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
+                    'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
+                    'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
+                    'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
+                    'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
+                    'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
+                })
+        
+        # Return raw data with is_fresh/is_pending flags and CRE call history (bypass Pydantic validation)
         return response.data or []
     except Exception as e:
         print(f"[PS API] Error fetching follow-ups: {e}")

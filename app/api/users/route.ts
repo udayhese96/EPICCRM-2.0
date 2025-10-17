@@ -18,6 +18,9 @@ export async function GET(request: NextRequest) {
     if (role) {
       url += `?role=${role}`
     }
+    
+    // Note: team_leader_id parameter is handled by backend using ps_assignments table
+    // No need to pass it as query parameter anymore
 
     const response = await fetch(url, {
       method: 'GET',

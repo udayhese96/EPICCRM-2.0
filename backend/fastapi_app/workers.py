@@ -472,6 +472,8 @@ def process_cre_lead(task_data: dict):
                 "sub_source": task_data.get('sub_source', ''),
                 "cre_name": task_data.get('cre_name', ''),
                 "first_remark": task_data.get('remarks', ''),
+                "model_interested": task_data.get('model_interested'),
+                "variant": task_data.get('variant'),
                 "created_at": now_ist_iso(),
                 "updated_at": now_ist_iso()
             }
