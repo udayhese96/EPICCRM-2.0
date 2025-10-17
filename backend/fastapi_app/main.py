@@ -1347,10 +1347,48 @@ async def upload_leads_bulk(
         
         # Determine file type and parse
         if file.filename.endswith('.csv'):
-            # Parse CSV
-            text_content = content.decode('utf-8')
-            csv_reader = csv.DictReader(io.StringIO(text_content))
-            rows = list(csv_reader)
+            try:
+                import pandas as pd
+                
+                # Try multiple encodings in order of likelihood for CSV files
+                encodings_to_try = ['cp1252', 'latin-1', 'iso-8859-1', 'utf-8', 'utf-16']
+                df = None
+                successful_encoding = None
+                
+                for encoding in encodings_to_try:
+                    try:
+                        df = pd.read_csv(
+                            io.BytesIO(content),
+                            encoding=encoding,
+                            skipinitialspace=True,
+                            skip_blank_lines=True,
+                            on_bad_lines='skip'
+                        )
+                        
+                        # Check if we got actual data (more than just headers)
+                        if len(df) > 0:
+                            successful_encoding = encoding
+                            break
+                    except Exception:
+                        continue
+                
+                if df is None or len(df) == 0:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="Could not parse CSV file with any supported encoding. Please save your file as UTF-8."
+                    )
+                
+                # Strip whitespace from column names (fixes the trailing space issue)
+                df.columns = df.columns.str.strip()
+                
+                # Convert to dict records
+                rows = df.to_dict('records')
+                    
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"[Bulk Upload] Pandas CSV parsing failed: {e}")
+                raise HTTPException(status_code=400, detail=f"CSV parsing error: {str(e)}")
         elif file.filename.endswith(('.xlsx', '.xls')):
             # Parse Excel
             try:
@@ -1362,7 +1400,17 @@ async def upload_leads_bulk(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file format. Please use CSV or Excel.")
         
-        print(f"[Bulk Upload] Processing {len(rows)} rows from {file.filename}")
+        if len(rows) == 0:
+            return {
+                "total": 0,
+                "success": 0,
+                "failed": 0,
+                "duplicate_db_count": 0,
+                "duplicate_file_count": 0,
+                "duplicate_in_db": [],
+                "duplicate_in_file": [],
+                "errors": ["No data rows found in CSV file. Please check if the file has data below the header row."]
+            }
         
         # Normalize column names (lowercase, strip spaces)
         normalized_rows = []
@@ -1388,6 +1436,7 @@ async def upload_leads_bulk(
                 existing_numbers = {lead['customer_mobile_number'] for lead in existing_leads_response.data if lead.get('customer_mobile_number')}
         except Exception as e:
             print(f"[Bulk Upload] Warning: Could not fetch existing leads: {e}")
+            existing_numbers = set()
         
         # Process each row
         for idx, row in enumerate(normalized_rows, start=2):  # Start at 2 because row 1 is header
@@ -1472,7 +1521,6 @@ async def upload_leads_bulk(
                 if response.data:
                     success_count += 1
                     existing_numbers.add(mobile)  # Add to existing_numbers to prevent future duplicates
-                    print(f"[Bulk Upload] Row {idx}: Successfully inserted lead {lead_uid}")
                 else:
                     errors.append(f"Row {idx}: Database insertion failed")
                     failed_count += 1
@@ -1480,7 +1528,6 @@ async def upload_leads_bulk(
             except Exception as e:
                 errors.append(f"Row {idx}: {str(e)}")
                 failed_count += 1
-                print(f"[Bulk Upload] Row {idx} error: {e}")
         
         result = {
             "total": len(normalized_rows),
@@ -1492,8 +1539,6 @@ async def upload_leads_bulk(
             "duplicate_in_file": duplicate_in_file[:10],  # Return first 10 file duplicates
             "errors": errors[:20]  # Return first 20 errors to avoid huge response
         }
-        
-        print(f"[Bulk Upload] Complete: {success_count} success, {failed_count} failed ({len(duplicate_in_db)} DB dupes, {len(duplicate_in_file)} file dupes)")
         
         return result
         
