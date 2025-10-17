@@ -37,6 +37,7 @@ export default function DashboardPage() {
             'receptionist': '/receptionist/dashboard',
             'ps': '/ps/dashboard',
             'cre': '/cre/dashboard',
+            'team_leader': '/team-leader-dashboard',
             'cre_team_leader': '/cre-team-leader/dashboard',
             'cre_icrop': '/cre-icrop/dashboard',
             'branch_head': '/branch-head/dashboard',
