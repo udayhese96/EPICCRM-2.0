@@ -256,7 +256,7 @@ class LeadBatchProcessor:
         """Update related tables (qualified_leads, ps_followup_master, trade_in_master)"""
         
         # Update qualified_leads if lead is qualified
-        if lead.final_status == "Pending" and lead.lead_status in ["Qualified", "Pending"]:
+        if lead.final_status == "Pending" and lead.lead_status == "Qualified":
             self.upsert_qualified_lead(cur, lead)
 
         # Always sync customer_location to qualified_leads if present
