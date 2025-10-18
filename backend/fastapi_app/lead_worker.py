@@ -45,8 +45,8 @@ def _create_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Add metadata - use correct column names for lead_master table
         lead_data.update({
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_ist_iso(),
+            'updated_at': now_ist_iso()
             # No created_by column in lead_master
         })
         
@@ -94,7 +94,7 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
             if fud:
                 # If client sent only a date (YYYY-MM-DD), add current time
                 if len(fud) == 10 and fud.count('-') == 2 and 'T' not in fud:
-                    current_time = datetime.now().isoformat().split('T')[1]
+                    current_time = now_ist_iso().split('T')[1]
                     update_data["follow_up_date"] = f"{fud}T{current_time}"
                 else:
                     update_data["follow_up_date"] = fud
@@ -169,7 +169,7 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     if next_call_remark:
                         # Set the remark and date for this call
                         update_data[next_call_remark] = note
-                        update_data[next_call_date] = datetime.now().isoformat()
+                        update_data[next_call_date] = now_ist_iso()
                         # Map column names to call numbers for logging
                         call_mapping = {
                             'second_remark': 'F1',
@@ -183,7 +183,7 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     else:
                         # All follow-up slots filled, append to last remark
                         update_data["sixth_remark"] = f"{lead_info.get('sixth_remark', '')} | {note}".strip()
-                        update_data["sixth_call_date"] = datetime.now().isoformat()
+                        update_data["sixth_call_date"] = now_ist_iso()
                         logger.info(f"Lead {lead_id}: All follow-up slots full, appended to sixth_remark")
                 
                 # Remove followup_note as it's not a column in lead_master
@@ -197,13 +197,13 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                 if 'follow_up_date' not in update_data or not update_data.get('follow_up_date'):
                     # Set follow-up date to next business day or 2 days from now
                     from datetime import timedelta
-                    next_followup = datetime.now() + timedelta(days=2)
+                    next_followup = datetime.now(ZoneInfo("Asia/Kolkata")) + timedelta(days=2)
                     update_data['follow_up_date'] = next_followup.isoformat()
                     logger.info(f"Lead {lead_id}: Auto-set next follow-up date for '{call_status}' status")
         
         # Add metadata - use correct column names for lead_master table
         update_data.update({
-            'updated_at': datetime.now().isoformat()
+            'updated_at': now_ist_iso()
             # No updated_by column in lead_master
         })
         
@@ -237,7 +237,7 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                         print(f"✅ [Background Worker] Syncing lead to qualified_leads: {lead_id}")
                         logger.info(f"Lead {lead_id}: Syncing qualified_leads from update path")
                         # Build payload similar to qualification flow
-                        now_ts = datetime.now().isoformat()
+                        now_ts = now_ist_iso()
                         q_data = {
                             'lead_uid': ld.get('uid'),
                             'customer_name': ld.get('customer_name', ''),
@@ -339,7 +339,7 @@ def _bulk_update_leads(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Add metadata - use correct column names for lead_master table
         update_data.update({
-            'updated_at': datetime.now().isoformat()
+            'updated_at': now_ist_iso()
             # No updated_by column in lead_master
         })
         
@@ -396,7 +396,7 @@ def _qualify_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         existing_qualified = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
         already_qualified = bool(existing_qualified.data)
         
-        current_time = datetime.now().isoformat()
+        current_time = now_ist_iso()
         
         # Update lead_master with F1 (qualifying call)
         form_data = data.get('form_data', {})

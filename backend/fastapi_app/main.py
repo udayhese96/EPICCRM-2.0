@@ -211,17 +211,19 @@ def sync_final_status(lead_uid: str, final_status: str) -> None:
         except Exception:
             pass
 
-    # qualified_leads
-    try:
-        supabase.table('qualified_leads').update({
-            'final_status': final_status,
-            'updated_at': timestamp
-        }).eq('lead_uid', lead_uid).execute()
-    except Exception as e:
+    # qualified_leads - Update status instead of deleting the record
+    if final_status in ['Lost', 'lost', 'Unqualified', 'unqualified']:
         try:
-            print(f"[sync_final_status] qualified_leads update failed for {lead_uid}: {e}")
-        except Exception:
-            pass
+            supabase.table('qualified_leads').update({
+                'final_status': final_status,
+                'updated_at': timestamp
+            }).eq('lead_uid', lead_uid).execute()
+            print(f"[sync_final_status] Updated qualified_leads status for lead {lead_uid} to {final_status}")
+        except Exception as e:
+            try:
+                print(f"[sync_final_status] qualified_leads update failed for {lead_uid}: {e}")
+            except Exception:
+                pass
 
 # Pydantic models
 class LeadCreate(BaseModel):
@@ -493,6 +495,14 @@ async def get_lost_requests(current_user=Depends(get_current_user)):
         response = supabase.table('ps_followup_master').select('*').eq('final_status', 'Lost Requested').execute()
         
         print(f"[DEBUG] Found {len(response.data or [])} Lost Requested leads")
+        
+        # Debug: Show all leads with their final_status for debugging
+        if response.data:
+            print(f"[DEBUG] All leads in ps_followup_master with Lost Requested status:")
+            for lead in response.data:
+                print(f"   - {lead.get('lead_uid')}: final_status='{lead.get('final_status')}', cre_name='{lead.get('cre_name')}'")
+        else:
+            print(f"[DEBUG] No leads found with Lost Requested status")
         
         # Filter by CRE name (case-insensitive)
         # Try to match against both username and full_name since cre_name might be either
@@ -3099,7 +3109,7 @@ async def get_cre_assigned(
             tab_lower = tab.lower()
             if tab_lower == 'fresh':
                 # Fresh leads: not qualified, not won/lost, no first_call_date
-                query = query.is_('first_call_date', 'null').neq('lead_status', 'Qualified').not_.in_('final_status', ['booked', 'retailed'])
+                query = query.is_('first_call_date', 'null').neq('lead_status', 'Qualified').not_.in_('final_status', ['booked', 'retailed', 'Lost', 'lost'])
             elif tab_lower == 'followup':
                 # Follow-up leads: have follow_up_date set, not won/lost
                 # Exclude by final_status = Lost OR truly unqualified lead_status (but allow RNR, Call me back, etc.)
@@ -3111,15 +3121,31 @@ async def get_cre_assigned(
                 query = query.eq('lead_status', 'Qualified').eq('final_status', 'Pending')
             elif tab_lower == 'lost':
                 # Lost leads: final_status in ['lost', 'unqualified']
-                query = query.in_('final_status', ['lost', 'unqualified'])
+                query = query.in_('final_status', ['lost', 'unqualified', 'Lost', 'Lost'])
             elif tab_lower == 'wonlost':
                 # Won/Lost leads: final_status in ['booked', 'retailed', 'lost', 'unqualified']
-                query = query.in_('final_status', ['booked', 'retailed', 'lost', 'unqualified'])
-            # 'all' or any other value: no additional filtering
+                query = query.in_('final_status', ['booked', 'retailed', 'lost', 'unqualified', 'Lost', 'Lost'])
+            # 'all' or any other value: exclude lost leads by default
+            else:
+                # For 'all' tab, exclude lost leads by default
+                query = query.not_.in_('final_status', ['Lost', 'lost', 'unqualified', 'Unqualified'])
+        else:
+            # No tab specified, exclude lost leads by default
+            query = query.not_.in_('final_status', ['Lost', 'lost', 'unqualified', 'Unqualified'])
 
         response = query.order('created_at', desc=True).execute()
-        print(f"Found {len(response.data or [])} leads")
+        print(f"Found {len(response.data or [])} leads after filtering")
         print(f"Sample lead UIDs: {[lead.get('uid') for lead in (response.data or [])[:3]]}")
+        
+        # Debug: Check if any lost leads are still being returned
+        if response.data:
+            lost_leads = [lead for lead in response.data if lead.get('final_status', '').lower() in ['lost', 'unqualified']]
+            if lost_leads:
+                print(f"⚠️ [DEBUG] Found {len(lost_leads)} lost leads still in results after filtering:")
+                for lead in lost_leads:
+                    print(f"   - {lead.get('uid')}: final_status='{lead.get('final_status')}', lead_status='{lead.get('lead_status')}'")
+            else:
+                print(f"✅ [DEBUG] No lost leads found in results - filtering working correctly")
         
         # DEBUG: Show problematic leads if any
         if response.data:
@@ -4487,6 +4513,8 @@ async def approve_lost_status(
 ):
     """CRE approves lost status for a lead"""
     try:
+        print(f"[Lost Approval] Processing approval for lead {lead_uid} by user {current_user.username}")
+        
         # Check if user is CRE
         if current_user.role not in ['cre', 'cre_icrop']:
             raise HTTPException(status_code=403, detail="Access denied - CRE role required")
@@ -4495,34 +4523,63 @@ async def approve_lost_status(
         followup_response = supabase.table('ps_followup_master').select('*').eq('lead_uid', lead_uid).eq('final_status', 'Lost Requested').execute()
         
         if not followup_response.data:
+            print(f"[Lost Approval] No lost request found for lead {lead_uid}")
             raise HTTPException(status_code=404, detail="Lost request not found")
         
         followup = followup_response.data[0]
+        print(f"[Lost Approval] Found lost request for lead {lead_uid}, CRE: {followup.get('cre_name')}")
         
         # Check if CRE matches the lead's CRE (case-insensitive)
         cre_name = followup.get('cre_name', '').lower()
         user_name = current_user.username.lower()
         
         if not cre_name or cre_name != user_name:
+            print(f"[Lost Approval] Access denied - CRE mismatch: {cre_name} vs {user_name}")
             raise HTTPException(status_code=403, detail="Access denied - You can only approve lost status for your own leads")
         
-        # Note: qualified_leads table doesn't have final_status column, so we skip this update
-        
-        # Update ps_followup_master
-        supabase.table('ps_followup_master').update({
+        # Update ps_followup_master to Lost status
+        print(f"[Lost Approval] Updating ps_followup_master for lead {lead_uid}")
+        followup_update = supabase.table('ps_followup_master').update({
             "final_status": "Lost",
             "updated_at": now_ist_iso()
         }).eq('lead_uid', lead_uid).execute()
-
-        # Sync final_status across tables
-        try:
-            sync_final_status(lead_uid, "Lost")
-        except Exception:
-            pass
         
+        if followup_update.data:
+            print(f"[Lost Approval] Successfully updated ps_followup_master for lead {lead_uid}")
+        else:
+            print(f"[Lost Approval] Warning: ps_followup_master update returned no data for lead {lead_uid}")
+
+        # Update lead_master to Lost status
+        print(f"[Lost Approval] Updating lead_master for lead {lead_uid}")
+        lead_update = supabase.table('lead_master').update({
+            "final_status": "Lost",
+            "updated_at": now_ist_iso()
+        }).eq('uid', lead_uid).execute()
+        
+        if lead_update.data:
+            print(f"[Lost Approval] Successfully updated lead_master for lead {lead_uid}")
+        else:
+            print(f"[Lost Approval] Warning: lead_master update returned no data for lead {lead_uid}")
+
+        # Update qualified_leads table to mark lead as lost (don't delete the record)
+        print(f"[Lost Approval] Updating qualified_leads status for lead {lead_uid}")
+        qualified_update = supabase.table('qualified_leads').update({
+            "final_status": "Lost",
+            "updated_at": now_ist_iso()
+        }).eq('lead_uid', lead_uid).execute()
+        
+        if qualified_update.data:
+            print(f"[Lost Approval] Successfully updated qualified_leads status for lead {lead_uid}")
+        else:
+            print(f"[Lost Approval] Warning: qualified_leads update returned no data for lead {lead_uid}")
+        
+        print(f"[Lost Approval] Successfully approved lost status for lead {lead_uid}")
         return {"message": f"Lost status approved for {lead_uid}."}
         
     except Exception as e:
+        print(f"[Lost Approval] Error approving lost status for lead {lead_uid}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/leads/{lead_uid}/lost-reject")
@@ -5039,7 +5096,7 @@ async def update_qualified_lead_icrop_id(
         # Update the qualified lead with ICROP ID
         response = supabase.table('qualified_leads').update({
             'icrop_id': icrop_id,
-            'updated_at': datetime.now().isoformat()
+            'updated_at': now_ist_iso()
         }).eq('id', lead_id).execute()
         
         if not response.data:
@@ -5051,13 +5108,13 @@ async def update_qualified_lead_icrop_id(
         if lead_uid:
             supabase.table('ps_followup_master').update({
                 'icrop_id': icrop_id,
-                'updated_at': datetime.now().isoformat()
+                'updated_at': now_ist_iso()
             }).eq('lead_uid', lead_uid).execute()
             
             # Also update in lead_master table
             supabase.table('lead_master').update({
                 'icrop_id': icrop_id,
-                'updated_at': datetime.now().isoformat()
+                'updated_at': now_ist_iso()
             }).eq('uid', lead_uid).execute()
         
         return {
@@ -5132,8 +5189,8 @@ async def create_ps_assignment(assignment_data: PSAssignmentCreate, current_user
         response = supabase.table('ps_assignments').insert({
             'ps_user_id': assignment_data.ps_user_id,
             'sales_team_leader_id': assignment_data.sales_team_leader_id,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
+            'created_at': now_ist_iso(),
+            'updated_at': now_ist_iso()
         }).execute()
         
         if not response.data:
@@ -5161,7 +5218,7 @@ async def update_ps_assignment(assignment_id: str, assignment_data: PSAssignment
                 raise HTTPException(status_code=400, detail="Sales team leader not found or invalid role")
         
         # Update assignment
-        update_data = {'updated_at': datetime.now().isoformat()}
+        update_data = {'updated_at': now_ist_iso()}
         if assignment_data.sales_team_leader_id:
             update_data['sales_team_leader_id'] = assignment_data.sales_team_leader_id
         

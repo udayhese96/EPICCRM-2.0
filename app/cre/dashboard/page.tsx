@@ -290,6 +290,8 @@ export default function CREDashboard() {
     if (user?.username && activeTab) {
       console.log(`🔄 [Tab Change] Fetching leads for tab: ${activeTab}`)
       fetchAssignedLeads()
+      // Also refresh lost requests when tab changes (especially for lost confirmation tab)
+      fetchLostRequests()
       // Reset status filter to "all" when tab changes
       setStatusFilter("all")
     }
@@ -418,11 +420,23 @@ export default function CREDashboard() {
           table: 'ps_followup_master'
         }, 
         (payload) => {
-          // Refresh leads data when ICROP IDs are updated
+          // Refresh leads data when ICROP IDs are updated or lost status changes
           if (process.env.NODE_ENV === 'development') {
             console.log('🔄 [Real-time] Follow-up change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
+            console.log('🔄 [Real-time] Old final_status:', (payload.old as any)?.final_status)
+            console.log('🔄 [Real-time] New final_status:', (payload.new as any)?.final_status)
             console.log('🔄 [Real-time] Refreshing leads data due to follow-up change')
           }
+          
+          // Check if this is a lost status change
+          const oldStatus = (payload.old as any)?.final_status
+          const newStatus = (payload.new as any)?.final_status
+          
+          if (oldStatus === 'Lost Requested' && newStatus === 'Lost') {
+            console.log('🔄 [Real-time] Lost lead approved - refreshing lost requests')
+            fetchLostRequests()
+          }
+          
           fetchAssignedLeads()
         }
       )
@@ -507,14 +521,21 @@ export default function CREDashboard() {
         qs.append('tab', activeTab)
       }
       
-      // Cache-busting to avoid any intermediate caching layers
-      const cacheBuster = Date.now().toString()
+      // Aggressive cache-busting to avoid any intermediate caching layers
+      const cacheBuster = Date.now().toString() + Math.random().toString(36).substr(2, 9)
       qs.append('_t', cacheBuster)
+      qs.append('_r', Math.random().toString(36).substr(2, 9))
       
       if (process.env.NODE_ENV === 'development') {
         console.debug('[CRE fetch] requesting /api/cre-assigned with tab=', activeTab, '_t=', cacheBuster)
       }
-      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } })
+      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { 
+        headers: { 
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        } 
+      })
       
       if (response.ok) {
         const raw = await response.json()
@@ -642,25 +663,33 @@ export default function CREDashboard() {
 
   const fetchLostRequests = async () => {
     try {
+      console.log('[Lost Requests] Fetching lost requests...')
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch('/api/leads/lost-requests', {
+      // Add cache-busting to lost requests
+      const cacheBuster = Date.now().toString() + Math.random().toString(36).substr(2, 9)
+      const response = await fetch(`/api/leads/lost-requests?_t=${cacheBuster}&_r=${Math.random().toString(36).substr(2, 9)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       })
 
       if (response.ok) {
         const data = await response.json()
+        console.log(`[Lost Requests] Fetched ${data?.length || 0} lost requests`)
+        console.log(`[Lost Requests] Data:`, data)
         setLostRequests(data || [])
       } else {
-        console.error('Error fetching lost requests:', response.status, response.statusText)
+        console.error('[Lost Requests] Error fetching lost requests:', response.status, response.statusText)
       }
     } catch (e) {
-      console.error('Failed to fetch lost requests', e)
+      console.error('[Lost Requests] Failed to fetch lost requests', e)
     }
   }
 
@@ -706,6 +735,11 @@ export default function CREDashboard() {
 
   const handleApproveLost = async (leadUid: string) => {
     try {
+      console.log(`[Lost Approval] Starting approval process for lead ${leadUid}`)
+      
+      // Show processing state
+      setIsRefreshing(true)
+      
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
@@ -719,22 +753,61 @@ export default function CREDashboard() {
       })
 
       if (response.ok) {
+        const result = await response.json()
+        console.log(`[Lost Approval] Success response:`, result)
         alert('Lost status approved successfully!')
-        // Ensure UI removes the lead from other sections immediately
+        
+        // Immediately remove the lead from local state
         setLeads(prev => prev.filter(l => l.uid !== leadUid))
         setLostRequests(prev => prev.filter(r => r.lead_uid !== leadUid))
-        await fetchLostRequests()
-        await fetchAssignedLeads() // Refresh main leads
+        
+        // Force refresh all data to ensure consistency
+        console.log(`[Lost Approval] Refreshing data after approval`)
+        
+        // Clear any cached data first
+        setLeads([])
+        setLostRequests([])
+        
+        // Immediate refresh without delay
+        console.log(`[Lost Approval] Immediate refresh attempt`)
+        await Promise.all([
+          fetchLostRequests(),
+          fetchAssignedLeads(true) // Force refresh
+        ])
+        
+        // Wait a moment for database to be updated and refresh again
+        await new Promise(resolve => setTimeout(resolve, 300))
+        console.log(`[Lost Approval] Second refresh attempt`)
+        await Promise.all([
+          fetchLostRequests(),
+          fetchAssignedLeads(true) // Force refresh
+        ])
+        
+        // Final refresh to ensure consistency
+        await new Promise(resolve => setTimeout(resolve, 500))
+        console.log(`[Lost Approval] Final refresh attempt`)
+        await Promise.all([
+          fetchLostRequests(),
+          fetchAssignedLeads(true) // Force refresh
+        ])
+        
+        console.log(`[Lost Approval] Data refresh completed for lead ${leadUid}`)
+        
+        // Dispatch custom event for other components
         try {
           window.dispatchEvent(new CustomEvent('lead-status-changed', { detail: { leadUid, newStatus: 'Lost' } }))
         } catch {}
       } else {
         const errorData = await response.json()
+        console.error(`[Lost Approval] Error response:`, errorData)
         alert(`Error: ${errorData.error || 'Failed to approve lost status'}`)
       }
     } catch (error) {
-      console.error('Error approving lost status:', error)
+      console.error('[Lost Approval] Error approving lost status:', error)
       alert('Failed to approve lost status')
+    } finally {
+      // Always reset refreshing state
+      setIsRefreshing(false)
     }
   }
 
@@ -1734,7 +1807,11 @@ export default function CREDashboard() {
                   ? "bg-red-100 text-red-800 border-red-300 shadow-sm" 
                   : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
               }`}
-              onClick={() => setActiveTab("lostconfirm")}
+              onClick={() => {
+                setActiveTab("lostconfirm")
+                // Refresh lost requests when tab is clicked
+                fetchLostRequests()
+              }}
               aria-label="View lost confirmation requests"
             >
               <Calendar className="h-4 w-4" />
