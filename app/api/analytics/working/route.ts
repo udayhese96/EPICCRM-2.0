@@ -88,12 +88,12 @@ export async function GET(request: NextRequest) {
       lead.created_at && lead.created_at.startsWith(thisMonth)
     ).length
 
-    const qualifiedLeads = enrichedData.filter((lead: any) => 
+    const qualifiedLeadsCount = enrichedData.filter((lead: any) => 
       lead.final_status === 'QUALIFIED' || lead.final_status === 'Won'
     ).length
 
     const monthlyConversionRate = monthlyLeads > 0 
-      ? (qualifiedLeads / monthlyLeads) * 100 
+      ? (qualifiedLeadsCount / monthlyLeads) * 100 
       : 0
 
     const activeCREs = new Set(
