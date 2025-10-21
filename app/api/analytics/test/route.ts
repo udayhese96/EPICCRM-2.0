@@ -143,12 +143,12 @@ export async function GET(request: NextRequest) {
       : 0
 
     const activeCREs = new Set(
-      enrichedData
+      dataToUse
         .filter((lead: any) => lead.cre_name && lead.assigned === 'Yes')
         .map((lead: any) => lead.cre_name)
     ).size
 
-    const retailedLeads = enrichedData.filter((lead: any) => 
+    const retailedLeads = dataToUse.filter((lead: any) => 
       lead.qualified_leads?.some((ql: any) => ql.retailed_status === 'APPROVED') ||
       lead.booking_and_retail_master?.some((brm: any) => brm.retailed_status === 'APPROVED')
     ).length
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
       date.setDate(date.getDate() - i)
       const dateStr = date.toISOString().split('T')[0]
       
-      const dayLeads = enrichedData.filter((lead: any) => lead.created_at && lead.created_at.startsWith(dateStr))
+      const dayLeads = dataToUse.filter((lead: any) => lead.created_at && lead.created_at.startsWith(dateStr))
       const dayQualified = dayLeads.filter((lead: any) => 
         lead.final_status === 'QUALIFIED' || lead.final_status === 'Won'
       )
@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Source performance ranking from your actual data
-    const sourceStats = enrichedData.reduce((acc: any, lead: any) => {
+    const sourceStats = dataToUse.reduce((acc: any, lead: any) => {
       const source = lead.source || 'Unknown'
       if (!acc[source]) {
         acc[source] = { total: 0, qualified: 0 }
@@ -207,7 +207,7 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.conversionRate - a.conversionRate)
 
     // CRE leaderboard from your actual data
-    const creStats = enrichedData.reduce((acc: any, lead: any) => {
+    const creStats = dataToUse.reduce((acc: any, lead: any) => {
       const creName = lead.cre_name || 'Unknown'
       
       if (!acc[creName]) {
@@ -260,7 +260,7 @@ export async function GET(request: NextRequest) {
     const alerts = []
     
     // Overdue follow-ups
-    const overdueFollowups = enrichedData.filter((lead: any) => 
+    const overdueFollowups = dataToUse.filter((lead: any) => 
       lead.follow_up_date && 
       new Date(lead.follow_up_date) < new Date() &&
       !['QUALIFIED', 'Won', 'Lost'].includes(lead.final_status || '')
