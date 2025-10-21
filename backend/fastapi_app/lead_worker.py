@@ -4,12 +4,21 @@ Processes lead operations in background for ultra-fast UI
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from .database import get_supabase_client
 from .redis_cache import cache, invalidate_on_lead_change
 
 logger = logging.getLogger(__name__)
+
+def now_ist_iso() -> str:
+    """Get current IST time as ISO string"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+    except ImportError:
+        # Fallback for systems without zoneinfo
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 def process_lead_operation(job_data: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
     """Process lead operation in background"""
@@ -75,18 +84,21 @@ def _create_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': str(e)}
 
 def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Process lead_master changes and sync to qualified_leads and tradein_master"""
+    """Sync qualified_leads and tradein_master after lead_master has been updated directly"""
     try:
         supabase = get_supabase_client()
         lead_id = data.get('lead_id')
         update_data = data.get('update_data', {})
         user_info = data.get('user_info', {})
         
-        print(f"🔄 [Background Worker] Processing lead_master changes for lead: {lead_id}")
-        print(f"🔄 [Background Worker] Update data: {update_data}")
+        print(f"🔄 [Background Worker] Syncing qualified_leads and tradein_master for lead: {lead_id}")
+        print(f"🔄 [Background Worker] Lead_master already updated directly, syncing secondary tables...")
         
         if not lead_id:
             return {'success': False, 'message': 'Lead ID is required'}
+        
+        # Skip lead_master update since it's already done directly
+        # Just sync qualified_leads and tradein_master
         
         # Handle follow-up date logic
         if 'follow_up_date' in update_data:
@@ -201,100 +213,89 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     update_data['follow_up_date'] = next_followup.isoformat()
                     logger.info(f"Lead {lead_id}: Auto-set next follow-up date for '{call_status}' status")
         
-        # Add metadata - use correct column names for lead_master table
-        update_data.update({
-            'updated_at': now_ist_iso()
-            # No updated_by column in lead_master
-        })
-        
-        # Update lead_master table
-        response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
-        
-        if response.data:
-            # Invalidate cache
-            invalidate_on_lead_change(lead_id, 'update')
+        # Lead_master is already updated directly, now sync qualified_leads and tradein_master
+        # Invalidate cache since lead_master was updated
+        invalidate_on_lead_change(lead_id, 'update')
 
-            # If this update effectively qualifies the lead, upsert into qualified_leads
-            try:
-                print(f"🔄 [Background Worker] Checking if lead should be synced to qualified_leads: {lead_id}")
-                current_lead_resp = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
-                if current_lead_resp.data:
-                    ld = current_lead_resp.data[0]
-                    lead_status_val = (ld.get('lead_status') or ld.get('status') or '').strip()
-                    final_status_val = (ld.get('final_status') or '').strip()
-                    first_remark_val = (ld.get('first_remark') or '').strip()
+        # Check if this update qualifies the lead and sync to qualified_leads
+        try:
+            print(f"🔄 [Background Worker] Checking if lead should be synced to qualified_leads: {lead_id}")
+            current_lead_resp = supabase.table('lead_master').select('*').eq('uid', lead_id).execute()
+            if current_lead_resp.data:
+                ld = current_lead_resp.data[0]
+                lead_status_val = (ld.get('lead_status') or ld.get('status') or '').strip()
+                final_status_val = (ld.get('final_status') or '').strip()
+                first_remark_val = (ld.get('first_remark') or '').strip()
+                
+                print(f"🔄 [Background Worker] Lead status: {lead_status_val}, Final status: {final_status_val}, First remark: {first_remark_val[:50]}...")
+                
+                should_sync_qualified = (
+                    (lead_status_val == 'Qualified')
+                    or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() == 'Qualified')
+                )
+                
+                print(f"🔄 [Background Worker] Should sync to qualified_leads: {should_sync_qualified}")
+                
+                if should_sync_qualified:
+                    print(f"✅ [Background Worker] Syncing lead to qualified_leads: {lead_id}")
+                    logger.info(f"Lead {lead_id}: Syncing qualified_leads from update path")
+                    # Build payload similar to qualification flow
+                    now_ts = now_ist_iso()
+                    q_data = {
+                        'lead_uid': ld.get('uid'),
+                        'customer_name': ld.get('customer_name', ''),
+                        'customer_mobile_number': ld.get('customer_mobile_number', ''),
+                        'customer_location': ld.get('customer_location', ''),
+                        'source': ld.get('source', ''),
+                        'sub_source': ld.get('sub_source', ''),
+                        'cre_name': ld.get('cre_name', ''),
+                        'lead_category': ld.get('lead_category', ''),
+                        'model_interested': ld.get('model_interested', ''),
+                        'first_remark': first_remark_val,
+                        'variant': ld.get('variant', ''),
+                        'buying_plan': ld.get('buying_plan', ''),
+                        'finance_option': ld.get('finance_option', ''),
+                        'profession': ld.get('profession', ''),
+                        'test_drive_type': ld.get('test_drive_type', ''),
+                        'trade_in': ld.get('trade_in', ''),
+                        'branch': ld.get('branch', ''),
+                        'ps_name': ld.get('ps_name', ''),
+                        'updated_at': now_ts,
+                        # Explicitly set booking/retail timestamps to null to override database defaults
+                        'booking_requested_at': None,
+                        'retailed_requested_at': None,
+                        'booking_approved_timestamp': None,
+                        'retailed_approved_timestamp': None,
+                        'booking_approved_by': None,
+                        'retailed_approved_by': None
+                    }
+                    # Insert or update depending on existence
+                    existing_q = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
+                    if existing_q.data:
+                        print(f"✅ [Background Worker] Updating existing qualified_leads row for lead: {lead_id}")
+                        logger.info(f"Lead {lead_id}: Updating existing qualified_leads row with customer_location='{q_data.get('customer_location')}'")
+                        supabase.table('qualified_leads').update(q_data).eq('lead_uid', lead_id).execute()
+                    else:
+                        print(f"✅ [Background Worker] Inserting new qualified_leads row for lead: {lead_id}")
+                        logger.info(f"Lead {lead_id}: Inserting new qualified_leads row with customer_location='{q_data.get('customer_location')}'")
+                        q_data['created_at'] = now_ts
+                        supabase.table('qualified_leads').insert(q_data).execute()
                     
-                    print(f"🔄 [Background Worker] Lead status: {lead_status_val}, Final status: {final_status_val}, First remark: {first_remark_val[:50]}...")
-                    
-                    should_sync_qualified = (
-                        (lead_status_val == 'Qualified')
-                        or ('lead_status' in update_data and str(update_data.get('lead_status', '')).strip() == 'Qualified')
-                    )
-                    
-                    print(f"🔄 [Background Worker] Should sync to qualified_leads: {should_sync_qualified}")
-                    
-                    if should_sync_qualified:
-                        print(f"✅ [Background Worker] Syncing lead to qualified_leads: {lead_id}")
-                        logger.info(f"Lead {lead_id}: Syncing qualified_leads from update path")
-                        # Build payload similar to qualification flow
-                        now_ts = now_ist_iso()
-                        q_data = {
-                            'lead_uid': ld.get('uid'),
-                            'customer_name': ld.get('customer_name', ''),
-                            'customer_mobile_number': ld.get('customer_mobile_number', ''),
-                            'customer_location': ld.get('customer_location', ''),
-                            'source': ld.get('source', ''),
-                            'sub_source': ld.get('sub_source', ''),
-                            'cre_name': ld.get('cre_name', ''),
-                            'lead_category': ld.get('lead_category', ''),
-                            'model_interested': ld.get('model_interested', ''),
-                            'first_remark': first_remark_val,
-                            'variant': ld.get('variant', ''),
-                            'buying_plan': ld.get('buying_plan', ''),
-                            'finance_option': ld.get('finance_option', ''),
-                            'profession': ld.get('profession', ''),
-                            'test_drive_type': ld.get('test_drive_type', ''),
-                            'trade_in': ld.get('trade_in', ''),
-                            'branch': ld.get('branch', ''),
-                            'ps_name': ld.get('ps_name', ''),
-                            'updated_at': now_ts,
-                            # Explicitly set booking/retail timestamps to null to override database defaults
-                            'booking_requested_at': None,
-                            'retailed_requested_at': None,
-                            'booking_approved_timestamp': None,
-                            'retailed_approved_timestamp': None,
-                            'booking_approved_by': None,
-                            'retailed_approved_by': None
-                        }
-                        # Insert or update depending on existence
-                        existing_q = supabase.table('qualified_leads').select('id').eq('lead_uid', lead_id).execute()
-                        if existing_q.data:
-                            print(f"✅ [Background Worker] Updating existing qualified_leads row for lead: {lead_id}")
-                            logger.info(f"Lead {lead_id}: Updating existing qualified_leads row with customer_location='{q_data.get('customer_location')}'")
-                            supabase.table('qualified_leads').update(q_data).eq('lead_uid', lead_id).execute()
-                        else:
-                            print(f"✅ [Background Worker] Inserting new qualified_leads row for lead: {lead_id}")
-                            logger.info(f"Lead {lead_id}: Inserting new qualified_leads row with customer_location='{q_data.get('customer_location')}'")
-                            q_data['created_at'] = now_ts
-                            supabase.table('qualified_leads').insert(q_data).execute()
+                    # IMPORTANT: Skip trade-in processing on generic update path.
+                    # Trade-in insert/update is handled exclusively in the 'qualify' operation
+                    print(f"ℹ️ [Background Worker] Skipping trade-in processing on update path for lead: {lead_id}")
                         
-                        # IMPORTANT: Skip trade-in processing on generic update path.
-                        # Trade-in insert/update is handled exclusively in the 'qualify' operation
-                        print(f"ℹ️ [Background Worker] Skipping trade-in processing on update path for lead: {lead_id}")
-                            
-            except Exception as sync_err:
-                logger.warning(f"Lead {lead_id}: Failed to sync qualified_leads on update: {sync_err}")
-                print(f"❌ [Background Worker] Failed to sync qualified_leads: {sync_err}")
-            
-            print(f"✅ [Background Worker] Lead processing completed: {lead_id}")
-            logger.info(f"Lead updated successfully: {lead_id}")
-            return {
-                'success': True,
-                'lead_id': lead_id,
-                'message': 'Lead updated successfully'
-            }
-        else:
-            return {'success': False, 'message': 'Lead not found or update failed'}
+        except Exception as sync_err:
+            logger.warning(f"Lead {lead_id}: Failed to sync qualified_leads on update: {sync_err}")
+            print(f"❌ [Background Worker] Failed to sync qualified_leads: {sync_err}")
+        
+        print(f"✅ [Background Worker] Background sync completed: {lead_id}")
+        logger.info(f"Background sync completed for lead: {lead_id}")
+        return {
+            'success': True,
+            'lead_id': lead_id,
+            'message': 'Background sync completed successfully'
+        }
             
     except Exception as e:
         logger.error(f"Lead update failed: {e}")

@@ -18,11 +18,11 @@ INSERT INTO lead_master (
     variant
 ) VALUES
 -- 5 test leads with different source + subsource combinations
-('Test Customer 1', '9876540001', 'Meta', 'Ads', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '1 day', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day', 'Mount Road', 'New', 'Innova', 'GX'),
-('Test Customer 2', '9876540002', 'Meta', 'Web', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '2 days', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days', 'Mount Road', 'New', 'Fortuner', 'VX'),
-('Test Customer 3', '9876540003', 'Google', 'Web', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '3 days', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days', 'Mount Road', 'New', 'Camry', 'ZX'),
-('Test Customer 4', '9876540004', 'CarDekho', 'CD B', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '4 days', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days', 'Mount Road', 'New', 'Glanza', 'GX'),
-('Test Customer 5', '9876540005', 'Referral', '', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '5 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days', 'Mount Road', 'New', 'Urban Cruiser', 'VX');
+('Test Customer 1', '9876540454', 'Meta', 'Ads', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '1 day', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day', 'Mount Road', 'New', 'Innova', 'GX'),
+('Test Customer 2', '9876540565', 'Meta', 'Web', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '2 days', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days', 'Mount Road', 'New', 'Fortuner', 'VX'),
+('Test Customer 3', '9876540403', 'Meta', 'Web', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '3 days', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days', 'Mount Road', 'New', 'Camry', 'ZX'),
+('Test Customer 4', '9876540504', 'CarDekho', 'CD B', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '4 days', NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days', 'Mount Road', 'New', 'Glanza', 'GX'),
+('Test Customer 5', '9876540905', 'Referral', '', 'No', NULL, 'Pending', CURRENT_DATE - INTERVAL '5 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days', 'Mount Road', 'New', 'Urban Cruiser', 'VX');
 
 -- Show summary of inserted leads
 SELECT 
