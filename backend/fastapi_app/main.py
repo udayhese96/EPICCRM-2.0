@@ -1952,6 +1952,10 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             update_data["customer_mobile_number"] = lead_data.phone
         if lead_data.status is not None:
             update_data["lead_status"] = lead_data.status
+        
+        # Handle lead_status field specifically (from frontend)
+        if lead_data.lead_status is not None:
+            update_data["lead_status"] = lead_data.lead_status
 
         if lead_data.first_remark is not None:
             update_data["first_remark"] = lead_data.first_remark
@@ -2055,8 +2059,43 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             'user_id': 'public'
         }
 
-        # Process update in background for ultra-fast response
-        result = update_lead_async(uid, update_data, user_info)
+        # ALWAYS update lead_master directly for immediate UI sync
+        print(f"🔄 [FastAPI] Updating lead_master directly for immediate sync: {uid}")
+        try:
+            # Direct database update to lead_master for all changes
+            response = supabase.table('lead_master').update(update_data).eq('uid', uid).execute()
+            
+            if response.data:
+                print(f"✅ [FastAPI] Lead_master updated successfully: {uid}")
+                result = {
+                    'success': True,
+                    'lead_id': uid,
+                    'message': 'Lead updated successfully',
+                    'status': 'completed'
+                }
+                
+                # Trigger background processing for qualified_leads and tradein_master sync
+                try:
+                    print(f"🔄 [FastAPI] Triggering background sync for qualified_leads and tradein_master: {uid}")
+                    update_lead_async(uid, {}, user_info)  # Empty update_data since we already updated lead_master
+                except Exception as bg_error:
+                    print(f"⚠️ [FastAPI] Background sync failed (lead_master still updated): {bg_error}")
+            else:
+                print(f"❌ [FastAPI] Lead_master update failed: {uid}")
+                result = {
+                    'success': False,
+                    'lead_id': uid,
+                    'message': 'Failed to update lead',
+                    'status': 'error'
+                }
+        except Exception as e:
+            print(f"❌ [FastAPI] Lead_master update error: {e}")
+            result = {
+                'success': False,
+                'lead_id': uid,
+                'message': f'Database update failed: {str(e)}',
+                'status': 'error'
+            }
         
         # Add trade-in data if needed
         if (lead_data.trade_in or "").lower() == "yes":
