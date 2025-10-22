@@ -713,10 +713,14 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     // Exception: when call outcome is a terminal lost reason, follow-up date is NOT required
     const isLostCallOutcome = (val?: string) => {
       const v = (val || "").trim().toLowerCase()
-      return v === "lost to co-dealer" || v === "lost to competitor"
+      return v === "lost to co-dealer" || v === "lost to competitor" || v === "not interested"
     }
+    
+    // Check if sales outcome is Lost
+    const isSalesOutcomeLost = formData.sales_outcome === "Lost"
+    
     if (currentStatus === "Qualified" && !formData.follow_up_date) {
-      if (!isLostCallOutcome(formData.call_status)) {
+      if (!isLostCallOutcome(formData.call_status) && !isSalesOutcomeLost) {
         toast.error("Please select a follow-up date before submitting.")
         return
       }
@@ -1030,14 +1034,30 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
       // Proactively notify dashboard to refresh immediately
       try {
-        window.dispatchEvent(new CustomEvent('lead-master-updated', { detail: { uid: lead?.uid } }))
-        // Also trigger lead status change event for immediate section updates
-        window.dispatchEvent(new CustomEvent('lead-status-changed', {
+        // Get current user from localStorage
+        const supabaseUser = localStorage.getItem("supabase_user")
+        const currentUser = supabaseUser ? JSON.parse(supabaseUser) : null
+        
+        // Dispatch CRE-specific events to avoid affecting other CREs
+        const eventName = `lead-master-updated-${currentUser?.username}`
+        window.dispatchEvent(new CustomEvent(eventName, { 
+          detail: { 
+            uid: lead?.uid,
+            creName: currentUser?.username,
+            currentUser: currentUser?.username 
+          } 
+        }))
+        
+        // Also trigger CRE-specific lead status change event
+        const statusEventName = `lead-status-changed-${currentUser?.username}`
+        window.dispatchEvent(new CustomEvent(statusEventName, {
           detail: {
             leadUid: lead?.uid,
             oldStatus: lead?.lead_status,
             newStatus: (updateData as any).lead_status,
-            selectedStatus: selectedStatus
+            selectedStatus: selectedStatus,
+            creName: currentUser?.username,
+            currentUser: currentUser?.username
           }
         }))
       } catch {}

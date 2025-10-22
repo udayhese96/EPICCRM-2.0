@@ -191,7 +191,7 @@ export default function CREDashboard() {
     fetchAssignedLeads()
     fetchLostRequests()
 
-    // Listen for immediate refresh events after modal submits
+    // Listen for CRE-specific immediate refresh events after modal submits
     const immediateRefresh = async () => {
       if (process.env.NODE_ENV === 'development') {
         console.log('🔄 [Event] Lead master updated event triggered (immediate hard refetch)')
@@ -215,7 +215,7 @@ export default function CREDashboard() {
       }, 1500)
     }
     
-    // Listen for lead status changes specifically
+    // Listen for CRE-specific lead status changes
     const handleLeadStatusChange = async () => {
       if (process.env.NODE_ENV === 'development') {
         console.log('🔄 [Event] Lead status change event triggered')
@@ -233,8 +233,14 @@ export default function CREDashboard() {
       }, 600)
     }
     
-    window.addEventListener('lead-master-updated', immediateRefresh as any)
-    window.addEventListener('lead-status-changed', handleLeadStatusChange as any)
+    // Listen for CRE-specific events only
+    if (!user?.username) return () => {}
+    
+    const creSpecificEventName = `lead-master-updated-${user.username}`
+    const creSpecificStatusEventName = `lead-status-changed-${user.username}`
+    
+    window.addEventListener(creSpecificEventName, immediateRefresh as any)
+    window.addEventListener(creSpecificStatusEventName, handleLeadStatusChange as any)
     checkRedisWorkerStatus()
     
     // Set up real-time subscriptions instead of polling
@@ -272,8 +278,9 @@ export default function CREDashboard() {
       if (cleanup) {
         cleanup()
       }
-      window.removeEventListener('lead-master-updated', immediateRefresh as any)
-      window.removeEventListener('lead-status-changed', handleLeadStatusChange as any)
+      // Cleanup CRE-specific event listeners
+      window.removeEventListener(creSpecificEventName, immediateRefresh as any)
+      window.removeEventListener(creSpecificStatusEventName, handleLeadStatusChange as any)
       // Cleanup polling intervals
       clearInterval(primaryPolling)
       clearInterval(countPolling)
@@ -318,7 +325,7 @@ export default function CREDashboard() {
     try {
       const supabase = createClient()
     
-    // Subscribe to lead_master changes (no server-side filter to avoid case-sensitivity issues)
+    // Subscribe to lead_master changes with server-side filtering for efficiency
     const leadSubscription = supabase
       .channel(`lead_master_changes_${user.username}`)
       .on(
@@ -326,20 +333,13 @@ export default function CREDashboard() {
         {
           event: '*',
           schema: 'public',
-          table: 'lead_master'
+          table: 'lead_master',
+          filter: `cre_name=eq.${user.username}`
         },
         (payload) => {
-          const newCre = ((payload.new as any)?.cre_name || '').toLowerCase()
-          const oldCre = ((payload.old as any)?.cre_name || '').toLowerCase()
-          const usernameLower = user.username.toLowerCase()
-
-          // Only react if this change is relevant to the logged-in CRE (case-insensitive)
-          if (newCre !== usernameLower && oldCre !== usernameLower) {
-            return
-          }
-
+          // Server-side filtering ensures we only receive events for this CRE's leads
           if (process.env.NODE_ENV === 'development') {
-            console.log('🔄 [Real-time] Lead master change detected:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
+            console.log('🔄 [Real-time] Lead master change detected for this CRE:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
             console.log('🔄 [Real-time] Lead status change:', {
               old_status: (payload.old as any)?.lead_status,
               new_status: (payload.new as any)?.lead_status,
