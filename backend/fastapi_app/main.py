@@ -4111,12 +4111,37 @@ async def get_ps_followups(
     source: Optional[str] = None,
     current_user=Depends(get_current_user)
 ):
-    """Get PS follow-ups with optimized performance"""
+    """Get PS follow-ups with ULTRA-optimized single-query JOIN approach"""
     try:
-        print(f"[PS Followup] Starting request for user: {current_user.username}, role: {current_user.role}")
+        print(f"[PS Followup] Starting ULTRA-optimized request for user: {current_user.username}, role: {current_user.role}")
+
+        # Use Supabase foreign key expansion - SINGLE QUERY with JOIN
+        # This replaces N+1 queries with just 1 query - MASSIVE performance boost!
+        select_fields = """
+            *,
+            lead_master:lead_uid(
+                cre_name,
+                first_remark,
+                second_remark,
+                third_remark,
+                fourth_remark,
+                fifth_remark,
+                sixth_remark,
+                first_call_date,
+                second_call_date,
+                third_call_date,
+                fourth_call_date,
+                fifth_call_date,
+                sixth_call_date,
+                second_call_lead_status,
+                third_call_lead_status,
+                fourth_call_lead_status,
+                fifth_call_lead_status,
+                sixth_call_lead_status
+            )
+        """
         
-        # Use existing supabase client for better performance
-        query = supabase.table('ps_followup_master').select('*')
+        query = supabase.table('ps_followup_master').select(select_fields)
 
         # Apply role-based filtering
         if current_user.role == 'ps':
@@ -4135,40 +4160,65 @@ async def get_ps_followups(
                 query = query.eq('source', source)
         # No else clause - show all sources by default for PS users
         
-        # Execute query with ordering and limit for performance
-        print(f"[PS Followup] Executing query...")
-        response = query.order('follow_up_date', desc=False).limit(1000).execute()
+        # Execute SINGLE optimized query with JOIN
+        print(f"[PS Followup] Executing ULTRA-optimized query with foreign key expansion...")
+        response = query.order('follow_up_date', desc=False).limit(2000).execute()
         print(f"[PS Followup] Query completed, found {len(response.data or [])} records")
-        
-        # Add server-side classification (simplified for performance)
+
+        # Process results and flatten lead_master data
         fresh_count = 0
         pending_count = 0
-        
-        print(f"[PS Followup] Processing {len(response.data or [])} records...")
-        for i, row in enumerate(response.data or []):
-            # Simplified classification - only check essential fields
+
+        for row in (response.data or []):
+            # Flatten lead_master nested object
+            lead_master_data = row.pop('lead_master', None)
+            
+            if lead_master_data:
+                row['cre_name'] = lead_master_data.get('cre_name')
+                row['cre_first_remark'] = lead_master_data.get('first_remark')
+                row['cre_second_remark'] = lead_master_data.get('second_remark')
+                row['cre_third_remark'] = lead_master_data.get('third_remark')
+                row['cre_fourth_remark'] = lead_master_data.get('fourth_remark')
+                row['cre_fifth_remark'] = lead_master_data.get('fifth_remark')
+                row['cre_sixth_remark'] = lead_master_data.get('sixth_remark')
+                row['cre_first_call_date'] = lead_master_data.get('first_call_date')
+                row['cre_second_call_date'] = lead_master_data.get('second_call_date')
+                row['cre_third_call_date'] = lead_master_data.get('third_call_date')
+                row['cre_fourth_call_date'] = lead_master_data.get('fourth_call_date')
+                row['cre_fifth_call_date'] = lead_master_data.get('fifth_call_date')
+                row['cre_sixth_call_date'] = lead_master_data.get('sixth_call_date')
+                row['cre_first_call_lead_status'] = None  # Doesn't exist in DB
+                row['cre_second_call_lead_status'] = lead_master_data.get('second_call_lead_status')
+                row['cre_third_call_lead_status'] = lead_master_data.get('third_call_lead_status')
+                row['cre_fourth_call_lead_status'] = lead_master_data.get('fourth_call_lead_status')
+                row['cre_fifth_call_lead_status'] = lead_master_data.get('fifth_call_lead_status')
+                row['cre_sixth_call_lead_status'] = lead_master_data.get('sixth_call_lead_status')
+            else:
+                # No lead_master match - set all to None
+                row.update({
+                    'cre_name': None, 'cre_first_remark': None, 'cre_second_remark': None,
+                    'cre_third_remark': None, 'cre_fourth_remark': None, 'cre_fifth_remark': None,
+                    'cre_sixth_remark': None, 'cre_first_call_date': None, 'cre_second_call_date': None,
+                    'cre_third_call_date': None, 'cre_fourth_call_date': None, 'cre_fifth_call_date': None,
+                    'cre_sixth_call_date': None, 'cre_first_call_lead_status': None,
+                    'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
+                    'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None,
+                    'cre_sixth_call_lead_status': None
+                })
+            
+            # Lightweight classification - only check essential fields
             has_updates = any([
                 (row.get('first_call_remark') or '').strip(),
                 row.get('first_call_date'),
-                (row.get('first_call_lead_status') or '').strip(),
                 (row.get('second_call_remark') or '').strip(),
                 row.get('second_call_date'),
-                (row.get('second_call_lead_status') or '').strip(),
                 (row.get('third_call_remark') or '').strip(),
                 row.get('third_call_date'),
-                (row.get('third_call_lead_status') or '').strip(),
-                (row.get('fourth_call_remark') or '').strip(),
-                row.get('fourth_call_date'),
-                (row.get('fourth_call_lead_status') or '').strip(),
-                (row.get('fifth_call_remark') or '').strip(),
-                row.get('fifth_call_date'),
-                (row.get('fifth_call_lead_status') or '').strip(),
             ])
             
             final_status = (row.get('final_status') or '').lower().strip()
             is_closed = final_status in ['won', 'lost']
             
-            # Server-side classification
             row['is_fresh'] = not has_updates and not is_closed
             row['is_pending'] = has_updates and not is_closed
             
@@ -4176,26 +4226,15 @@ async def get_ps_followups(
                 fresh_count += 1
             if row['is_pending']:
                 pending_count += 1
-            
-            # Skip expensive CRE call history fetching for performance
-            # Initialize empty CRE call history fields
-            row.update({
-                'cre_name': None,
-                'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
-                'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
-                'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
-                'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
-                'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
-                'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
-            })
-        
-        print(f"[PS Followup] Processing completed. Fresh: {fresh_count}, Pending: {pending_count}")
+
+        print(f"[PS Followup] ULTRA-optimized processing completed. Fresh: {fresh_count}, Pending: {pending_count}")
         
         # Return optimized data (bypass Pydantic validation for performance)
         return response.data or []
+        
     except Exception as e:
         print(f"[PS API] Error fetching follow-ups: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch PS follow-ups: {str(e)}")
 
 @app.post("/api/ps/leads")
 async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
