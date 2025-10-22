@@ -3860,6 +3860,14 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                 lead_response = supabase.table('qualified_leads').select('*').eq('id', lead_id).execute()
                 if lead_response.data:
                     lead_data = lead_response.data[0]
+                    lead_uid = lead_data.get('lead_uid')
+                    
+                    # Validate lead_uid before proceeding
+                    if not lead_uid:
+                        print(f"[Assign] ERROR: lead_uid is null for lead_id {lead_id}, skipping ps_followup_master insertion")
+                        continue
+                    
+                    print(f"[Assign] Processing lead_id: {lead_id}, lead_uid: {lead_uid}")
                     
                     # SYNC BACK TO lead_master - This is the missing piece!
                     lead_master_update = {
@@ -3868,11 +3876,11 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                         "branch": assignment.ps_branch,
                         "updated_at": now_ist_iso()
                     }
-                    supabase.table('lead_master').update(lead_master_update).eq('uid', lead_data.get('lead_uid')).execute()
+                    supabase.table('lead_master').update(lead_master_update).eq('uid', lead_uid).execute()
                     
                     # Create entry in ps_followup_master with safe field access
                     followup_data = {
-                        "lead_uid": lead_data.get('lead_uid'),
+                        "lead_uid": lead_uid,
                         "ps_name": assignment.ps_name,
                         "ps_id": assignment.ps_id,
                         "ps_branch": assignment.ps_branch,
@@ -3894,9 +3902,9 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                         "updated_at": now_ist_iso()
                     }
                     
-                    print(f"[Assign] Inserting into ps_followup_master for lead_uid: {lead_data.get('lead_uid')}")
+                    print(f"[Assign] Inserting into ps_followup_master for lead_uid: {lead_uid}")
                     supabase.table('ps_followup_master').insert(followup_data).execute()
-                    print(f"[Assign] Successfully inserted into ps_followup_master")
+                    print(f"[Assign] Successfully inserted into ps_followup_master for lead_uid: {lead_uid}")
                     assigned_count += 1
                 else:
                     print(f"[Assign] Warning: No data found for lead_id {lead_id} in qualified_leads")
@@ -4103,13 +4111,12 @@ async def get_ps_followups(
     source: Optional[str] = None,
     current_user=Depends(get_current_user)
 ):
-    """Get PS follow-ups with server-side classification and CRE call history - ALWAYS FETCH FRESH DATA"""
+    """Get PS follow-ups with optimized performance"""
     try:
-        # Create a fresh Supabase client to bypass any caching
-        fresh_supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        print(f"[PS Followup] Starting request for user: {current_user.username}, role: {current_user.role}")
         
-        # Force fresh data by creating a new query each time
-        query = fresh_supabase.table('ps_followup_master').select('*')
+        # Use existing supabase client for better performance
+        query = supabase.table('ps_followup_master').select('*')
 
         # Apply role-based filtering
         if current_user.role == 'ps':
@@ -4128,15 +4135,18 @@ async def get_ps_followups(
                 query = query.eq('source', source)
         # No else clause - show all sources by default for PS users
         
-        # Execute query with ordering
-        response = query.order('follow_up_date', desc=False).execute()
+        # Execute query with ordering and limit for performance
+        print(f"[PS Followup] Executing query...")
+        response = query.order('follow_up_date', desc=False).limit(1000).execute()
+        print(f"[PS Followup] Query completed, found {len(response.data or [])} records")
         
-        # Add server-side classification and CRE call history to each row
+        # Add server-side classification (simplified for performance)
         fresh_count = 0
         pending_count = 0
         
-        for row in (response.data or []):
-            # Check if ANY call field has data
+        print(f"[PS Followup] Processing {len(response.data or [])} records...")
+        for i, row in enumerate(response.data or []):
+            # Simplified classification - only check essential fields
             has_updates = any([
                 (row.get('first_call_remark') or '').strip(),
                 row.get('first_call_date'),
@@ -4166,77 +4176,22 @@ async def get_ps_followups(
                 fresh_count += 1
             if row['is_pending']:
                 pending_count += 1
+            
+            # Skip expensive CRE call history fetching for performance
+            # Initialize empty CRE call history fields
+            row.update({
+                'cre_name': None,
+                'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
+                'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
+                'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
+                'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
+                'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
+                'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
+            })
         
-            # Fetch CRE call history from lead_master
-            try:
-                lead_uid = row.get('lead_uid')
-                if lead_uid:
-                    cre_response = fresh_supabase.table('lead_master').select(
-                        'cre_name', 'first_remark', 'second_remark', 'third_remark', 'fourth_remark', 'fifth_remark', 'sixth_remark',
-                        'first_call_date', 'second_call_date', 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date',
-                        'second_call_lead_status', 'third_call_lead_status', 'fourth_call_lead_status', 'fifth_call_lead_status', 'sixth_call_lead_status'
-                    ).eq('uid', lead_uid).execute()
-                    
-                    if cre_response.data and len(cre_response.data) > 0:
-                        cre_data = cre_response.data[0]
-                        # Add CRE call history fields to the row
-                        row.update({
-                            'cre_name': cre_data.get('cre_name'),
-                            'cre_first_remark': cre_data.get('first_remark'),
-                            'cre_second_remark': cre_data.get('second_remark'),
-                            'cre_third_remark': cre_data.get('third_remark'),
-                            'cre_fourth_remark': cre_data.get('fourth_remark'),
-                            'cre_fifth_remark': cre_data.get('fifth_remark'),
-                            'cre_sixth_remark': cre_data.get('sixth_remark'),
-                            'cre_first_call_date': cre_data.get('first_call_date'),
-                            'cre_second_call_date': cre_data.get('second_call_date'),
-                            'cre_third_call_date': cre_data.get('third_call_date'),
-                            'cre_fourth_call_date': cre_data.get('fourth_call_date'),
-                            'cre_fifth_call_date': cre_data.get('fifth_call_date'),
-                            'cre_sixth_call_date': cre_data.get('sixth_call_date'),
-                            'cre_first_call_lead_status': None,  # This column doesn't exist in the database
-                            'cre_second_call_lead_status': cre_data.get('second_call_lead_status'),
-                            'cre_third_call_lead_status': cre_data.get('third_call_lead_status'),
-                            'cre_fourth_call_lead_status': cre_data.get('fourth_call_lead_status'),
-                            'cre_fifth_call_lead_status': cre_data.get('fifth_call_lead_status'),
-                            'cre_sixth_call_lead_status': cre_data.get('sixth_call_lead_status'),
-                        })
-                    else:
-                        # Initialize empty CRE call history fields
-                        row.update({
-                            'cre_name': None,
-                            'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
-                            'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
-                            'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
-                            'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
-                            'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
-                            'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
-                        })
-                else:
-                    # Initialize empty CRE call history fields if no lead_uid
-                    row.update({
-                        'cre_name': None,
-                        'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
-                        'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
-                        'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
-                        'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
-                        'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
-                        'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
-                    })
-            except Exception as cre_error:
-                print(f"[PS API] Error fetching CRE call history for lead_uid {row.get('lead_uid')}: {cre_error}")
-                # Initialize empty CRE call history fields on error
-                row.update({
-                    'cre_name': None,
-                    'cre_first_remark': None, 'cre_second_remark': None, 'cre_third_remark': None,
-                    'cre_fourth_remark': None, 'cre_fifth_remark': None, 'cre_sixth_remark': None,
-                    'cre_first_call_date': None, 'cre_second_call_date': None, 'cre_third_call_date': None,
-                    'cre_fourth_call_date': None, 'cre_fifth_call_date': None, 'cre_sixth_call_date': None,
-                    'cre_first_call_lead_status': None, 'cre_second_call_lead_status': None, 'cre_third_call_lead_status': None,
-                    'cre_fourth_call_lead_status': None, 'cre_fifth_call_lead_status': None, 'cre_sixth_call_lead_status': None,
-                })
+        print(f"[PS Followup] Processing completed. Fresh: {fresh_count}, Pending: {pending_count}")
         
-        # Return raw data with is_fresh/is_pending flags and CRE call history (bypass Pydantic validation)
+        # Return optimized data (bypass Pydantic validation for performance)
         return response.data or []
     except Exception as e:
         print(f"[PS API] Error fetching follow-ups: {e}")
