@@ -511,7 +511,6 @@ interface PSFollowUp {
   fifth_call_remark: string
   fifth_call_lead_status?: string
   // CRE call history fields
-  cre_name?: string
   cre_first_remark?: string
   cre_second_remark?: string
   cre_third_remark?: string
@@ -1247,6 +1246,7 @@ export default function PSDashboard() {
         }, 1000)
 
         // Dispatch custom events for immediate refresh across components
+        // Note: PS dashboard events are global since PS users can see leads from multiple CREs
         window.dispatchEvent(new CustomEvent('lead-master-updated'))
         window.dispatchEvent(new CustomEvent('lead-status-changed'))
 

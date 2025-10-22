@@ -11,7 +11,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     
     // Forward to FastAPI backend
-    const response = await fetch(`${process.env.FASTAPI_URL || 'http://localhost:8000'}/api/receptionist/leads`, {
+    const FASTAPI_URL = process.env.FASTAPI_URL || process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'
+    const response = await fetch(`${FASTAPI_URL}/api/receptionist/leads`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
