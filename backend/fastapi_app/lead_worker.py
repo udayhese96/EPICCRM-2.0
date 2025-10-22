@@ -91,6 +91,8 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
         update_data = data.get('update_data', {})
         user_info = data.get('user_info', {})
         
+        print(f"🔄 [Background Worker] STARTING _update_lead for lead: {lead_id}")
+        print(f"🔄 [Background Worker] update_data received: {update_data}")
         print(f"🔄 [Background Worker] Syncing qualified_leads and tradein_master for lead: {lead_id}")
         print(f"🔄 [Background Worker] Lead_master already updated directly, syncing secondary tables...")
         
@@ -139,8 +141,11 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info(f"Lead {lead_id}: Processing first_call_date for qualification: '{update_data['first_call_date']}'")
 
         # Handle follow-up notes and call progression (F1, F2, F3, etc.)
+        print(f"🔍 [Background Worker] Checking follow-up logic for lead: {lead_id}")
+        print(f"🔍 [Background Worker] followup_note in update_data: {'followup_note' in update_data}")
         logger.info(f"Lead {lead_id}: Checking follow-up logic. followup_note in update_data: {'followup_note' in update_data}")
         if 'followup_note' in update_data:
+            print(f"🔍 [Background Worker] followup_note value: '{update_data.get('followup_note')}'")
             logger.info(f"Lead {lead_id}: followup_note value: '{update_data.get('followup_note')}'")
         
         if 'followup_note' in update_data and update_data.get('followup_note'):
@@ -212,6 +217,31 @@ def _update_lead(data: Dict[str, Any]) -> Dict[str, Any]:
                     next_followup = datetime.now(ZoneInfo("Asia/Kolkata")) + timedelta(days=2)
                     update_data['follow_up_date'] = next_followup.isoformat()
                     logger.info(f"Lead {lead_id}: Auto-set next follow-up date for '{call_status}' status")
+        
+        # Update lead_master with processed followup data (if any followup processing occurred)
+        print(f"🔍 [Background Worker] Checking if followup data needs to be saved to lead_master")
+        print(f"🔍 [Background Worker] update_data keys: {list(update_data.keys())}")
+        followup_keys = ['second_remark', 'third_remark', 'fourth_remark', 'fifth_remark', 'sixth_remark', 'second_call_date', 'third_call_date', 'fourth_call_date', 'fifth_call_date', 'sixth_call_date']
+        has_followup_data = any(key in update_data for key in followup_keys)
+        print(f"🔍 [Background Worker] Has followup data to save: {has_followup_data}")
+        
+        if update_data and has_followup_data:
+            print(f"🔄 [Background Worker] Updating lead_master with processed followup data: {lead_id}")
+            print(f"🔄 [Background Worker] Followup data to save: {[(k, v) for k, v in update_data.items() if k in followup_keys]}")
+            logger.info(f"Lead {lead_id}: Updating lead_master with followup data: {list(update_data.keys())}")
+            try:
+                followup_update_response = supabase.table('lead_master').update(update_data).eq('uid', lead_id).execute()
+                if followup_update_response.data:
+                    print(f"✅ [Background Worker] Lead_master updated with followup data: {lead_id}")
+                    logger.info(f"Lead {lead_id}: Successfully updated lead_master with followup data")
+                else:
+                    print(f"❌ [Background Worker] Failed to update lead_master with followup data: {lead_id}")
+                    logger.error(f"Lead {lead_id}: Failed to update lead_master with followup data")
+            except Exception as e:
+                print(f"❌ [Background Worker] Error updating lead_master with followup data: {e}")
+                logger.error(f"Lead {lead_id}: Error updating lead_master with followup data: {e}")
+        else:
+            print(f"ℹ️ [Background Worker] No followup data to save to lead_master for lead: {lead_id}")
         
         # Lead_master is already updated directly, now sync qualified_leads and tradein_master
         # Invalidate cache since lead_master was updated

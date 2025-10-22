@@ -2041,11 +2041,66 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                 update_data["first_remark"] = str(lead_data.existing_remarks).strip()
                 update_data["first_call_date"] = now_ist_iso()
 
-        # Handle follow-up notes - pass to background worker for proper follow-up logic
+        # Handle follow-up notes - process directly for immediate results
+        # NOTE: followup_note should NOT be added to update_data for direct lead_master update
+        # as it doesn't exist as a column. Process it directly and map to appropriate remark field
+        followup_note_for_worker = None
         if (lead_data.followup_note or "").strip():
-            note = (lead_data.followup_note or "").strip()
-            update_data["followup_note"] = note
-            print(f"🔍 [FastAPI] Added followup_note to update_data: '{note}'")
+            followup_note_for_worker = (lead_data.followup_note or "").strip()
+            print(f"🔍 [FastAPI] Detected followup_note for direct processing: '{followup_note_for_worker}'")
+            
+            # Process followup_note directly and add to update_data
+            note = followup_note_for_worker.strip()
+            if note:
+                # Get current lead data to determine which call we're on
+                current_lead = supabase.table('lead_master').select('*').eq('uid', uid).execute()
+                if current_lead.data:
+                    lead_info = current_lead.data[0]
+                    
+                    # Call progression logic:
+                    # Qualification = first_remark (qualifying call - PROTECTED, cannot be overwritten)
+                    # F1 = second_remark (first follow-up)
+                    # F2 = third_remark (second follow-up)
+                    # F3 = fourth_remark (third follow-up)
+                    # F4 = fifth_remark (fourth follow-up)
+                    # F5 = sixth_remark (fifth follow-up)
+                    
+                    call_sequence = [
+                        ('second_remark', 'second_call_date'),       # F1 - First follow-up
+                        ('third_remark', 'third_call_date'),         # F2 - Second follow-up
+                        ('fourth_remark', 'fourth_call_date'),       # F3 - Third follow-up
+                        ('fifth_remark', 'fifth_call_date'),         # F4 - Fourth follow-up
+                        ('sixth_remark', 'sixth_call_date')          # F5 - Fifth follow-up
+                    ]
+                    
+                    # Find the next empty call slot (start from F1, skip qualification as it's the first call)
+                    next_call_remark = None
+                    next_call_date = None
+                    for remark_field, date_field in call_sequence:
+                        if not lead_info.get(remark_field):
+                            next_call_remark = remark_field
+                            next_call_date = date_field
+                            break
+                    
+                    if next_call_remark:
+                        # Set the remark and date for this call
+                        update_data[next_call_remark] = note
+                        update_data[next_call_date] = now_ist_iso()
+                        # Map column names to call numbers for logging
+                        call_mapping = {
+                            'second_remark': 'F1',
+                            'third_remark': 'F2', 
+                            'fourth_remark': 'F3',
+                            'fifth_remark': 'F4',
+                            'sixth_remark': 'F5'
+                        }
+                        call_number = call_mapping.get(next_call_remark, next_call_remark)
+                        print(f"🔍 [FastAPI] Set {next_call_remark} = '{note}' (Follow-up {call_number})")
+                    else:
+                        # All follow-up slots filled, append to last remark
+                        update_data["sixth_remark"] = f"{lead_info.get('sixth_remark', '')} | {note}".strip()
+                        update_data["sixth_call_date"] = now_ist_iso()
+                        print(f"🔍 [FastAPI] All follow-up slots full, appended to sixth_remark")
         
         # Handle first_remark (for qualification)
         if lead_data.first_remark is not None:
@@ -2077,7 +2132,9 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                 # Trigger background processing for qualified_leads and tradein_master sync
                 try:
                     print(f"🔄 [FastAPI] Triggering background sync for qualified_leads and tradein_master: {uid}")
-                    update_lead_async(uid, {}, user_info)  # Empty update_data since we already updated lead_master
+                    # No need to pass followup_note since it's already processed directly above
+                    worker_result = update_lead_async(uid, {}, user_info)
+                    print(f"🔄 [FastAPI] Background worker result: {worker_result}")
                 except Exception as bg_error:
                     print(f"⚠️ [FastAPI] Background sync failed (lead_master still updated): {bg_error}")
             else:
