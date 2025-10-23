@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
     const period = searchParams.get('period') || '30';
     const startDateParam = searchParams.get('startDate');
     const endDateParam = searchParams.get('endDate');
+    const format = searchParams.get('format') || 'csv';
 
     // Handle date range calculation
     let startDate: Date;
@@ -30,16 +31,13 @@ export async function GET(request: NextRequest) {
       endDate = new Date();
     }
 
-    console.log(`Fetching CRE performance data from ${startDate.toISOString()} to ${new Date().toISOString()}`);
+    console.log(`Exporting CRE performance data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
 
-    // Use the same approach as dynamic-status API - fetch ALL data first
-    console.log('Fetching ALL data from lead_master...')
-    
+    // Fetch data using the same approach as the main API
     let allLeadMaster = []
     let leadMasterError = null
     
     try {
-      // First try: Direct query without ordering
       const { data, error } = await supabase
         .from('lead_master')
         .select('*')
@@ -49,7 +47,7 @@ export async function GET(request: NextRequest) {
         leadMasterError = error
       } else {
         allLeadMaster = data || []
-        console.log(`Direct query - Lead Master count: ${allLeadMaster.length}`)
+        console.log(`Lead Master count: ${allLeadMaster.length}`)
       }
     } catch (err) {
       console.error('Exception fetching lead_master:', err)
@@ -127,7 +125,7 @@ export async function GET(request: NextRequest) {
     
     console.log(`After filtering - Assigned leads with CRE: ${filteredLeads.length}`)
 
-    // Process CRE performance data
+    // Process CRE performance data (same logic as main API)
     const crePerformanceMap: any = {};
 
     filteredLeads.forEach((lead: any) => {
@@ -228,7 +226,7 @@ export async function GET(request: NextRequest) {
       openLeads: acc.openLeads + cre.openLeads,
       retailed: acc.retailed + cre.retailed,
       lost: acc.lost + cre.lost,
-      tatAvg: 0, // Will calculate average TAT separately
+      tatAvg: 0,
       tatUnit: 'd' as 'd' | 'h' | 'm'
     }), {
       creName: 'TOTAL',
@@ -258,20 +256,74 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    console.log(`CRE Performance data processed: ${crePerformance.length} CREs`);
+    // Generate CSV content
+    if (format === 'csv') {
+      const csvHeaders = [
+        'CRE Name',
+        'Assigned',
+        'Qualified Leads',
+        'Untouched',
+        'Open Leads',
+        'Retailed',
+        'Lost',
+        'TAT (Avg)'
+      ];
 
+      const csvRows = crePerformance.map(cre => [
+        cre.creName,
+        cre.assigned,
+        cre.qualifiedLeads,
+        cre.untouched,
+        cre.openLeads,
+        cre.retailed,
+        cre.lost,
+        `${cre.tatAvg.toFixed(1)}${cre.tatUnit}`
+      ]);
+
+      // Add total row
+      csvRows.push([
+        total.creName,
+        total.assigned,
+        total.qualifiedLeads,
+        total.untouched,
+        total.openLeads,
+        total.retailed,
+        total.lost,
+        `${total.tatAvg.toFixed(1)}${total.tatUnit}`
+      ]);
+
+      const csvContent = [
+        csvHeaders.join(','),
+        ...csvRows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ].join('\n');
+
+      // Generate filename with date range
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      const filename = `cre-performance-${startDateStr}-to-${endDateStr}.csv`;
+
+      return new NextResponse(csvContent, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+      });
+    }
+
+    // For other formats, return JSON
     return NextResponse.json({
       crePerformance,
       total,
       dateRange: {
         start: startDate.toISOString().split('T')[0],
-        end: new Date().toISOString().split('T')[0],
+        end: endDate.toISOString().split('T')[0],
         period,
       },
     });
 
   } catch (error) {
-    console.error('Error in CRE performance analytics:', error);
+    console.error('Error in CRE performance export:', error);
     return NextResponse.json({ error: 'Internal server error', details: error }, { status: 500 });
   }
 }
