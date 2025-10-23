@@ -3712,11 +3712,51 @@ class QualifiedLeadAssignment(BaseModel):
 @app.get("/api/qualified-leads")
 async def get_qualified_leads(
     source: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=5000, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
     current_user=Depends(get_current_user)
 ):
-    """Get all qualified leads"""
+    """Get qualified leads with role-based limits and intelligent pagination - ULTRA FAST"""
     try:
-        query = supabase.table('qualified_leads').select('*')
+        # Role-based limit adjustments
+        max_limit = 5000  # Default max limit
+        if current_user.role in ['admin', 'branch_head']:
+            max_limit = 10000  # Admins can fetch more
+        elif current_user.role in ['cre', 'ps']:
+            max_limit = 2000  # Individual users get reasonable limit
+        
+        # Enforce role-based limits
+        effective_limit = min(limit, max_limit)
+        
+        # Create cache key
+        cache_params = {
+            'role': current_user.role,
+            'username': current_user.username,
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'source': source,
+            'limit': effective_limit,
+            'offset': offset
+        }
+        
+        # Try to get from cache first
+        cached_leads = get_cached_leads(cache_params)
+        if cached_leads is not None:
+            return {
+                "leads": cached_leads,
+                "pagination": {
+                    "limit": effective_limit,
+                    "offset": offset,
+                    "has_more": len(cached_leads) == effective_limit
+                }
+            }
+        
+        # If not in cache, fetch from database with optimized query
+        query = supabase.table('qualified_leads').select(
+            'id,lead_uid,customer_name,customer_mobile_number,customer_location,source,sub_source,'
+            'cre_name,lead_category,model_interested,first_remark,variant,buying_plan,'
+            'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
+            'final_status,booking_status,retailed_status,created_at,updated_at'
+        )
 
         # Apply source filtering for walk-in leads
         if source:
@@ -3727,32 +3767,247 @@ async def get_qualified_leads(
                 # Show specific source
                 query = query.eq('source', source)
 
-        response = query.order('created_at', desc=True).execute()
-        return response.data or []
+        # Apply pagination and ordering
+        response = query.order('created_at', desc=True).range(offset, offset + effective_limit - 1).execute()
+        leads = response.data or []
+        
+        # Check if there are more records
+        has_more = len(leads) == effective_limit
+        
+        # Cache the results
+        cache_leads(cache_params, leads, ttl=180)  # 3 minutes cache
+        
+        return {
+            "leads": leads,
+            "pagination": {
+                "limit": effective_limit,
+                "offset": offset,
+                "has_more": has_more
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/cre-team-leader/qualified-leads")
-async def get_cre_team_leader_qualified_leads(current_user=Depends(get_current_user)):
-    """Get qualified leads from qualified_leads table for CRE Team Leader dashboard"""
+async def get_cre_team_leader_qualified_leads(
+    limit: int = Query(100, ge=1, le=2000, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    current_user=Depends(get_current_user)
+):
+    """Get qualified leads from qualified_leads table for CRE Team Leader dashboard - OPTIMIZED"""
     try:
+        # Create cache key
+        cache_params = {
+            'role': current_user.role,
+            'username': current_user.username,
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'endpoint': 'cre-team-leader',
+            'limit': limit,
+            'offset': offset
+        }
+        
+        # Try to get from cache first
+        cached_leads = get_cached_leads(cache_params)
+        if cached_leads is not None:
+            return {
+                "leads": cached_leads,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": len(cached_leads) == limit
+                }
+            }
+        
         # Only show active-qualified leads (exclude Won/Lost/Booked/Retailed)
         # Show leads with NULL final_status or specific pending statuses
         response = (
             supabase
                 .table('qualified_leads')
-                .select('*')
+                .select(
+                    'id,lead_uid,customer_name,customer_mobile_number,customer_location,source,sub_source,'
+                    'cre_name,lead_category,model_interested,first_remark,variant,buying_plan,'
+                    'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
+                    'final_status,booking_status,retailed_status,created_at,updated_at'
+                )
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .order('created_at', desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+        )
+        
+        leads = response.data or []
+        has_more = len(leads) == limit
+        print(f"[GET Qualified Leads] Returning {len(leads)} leads")
+        
+        # Cache the results
+        cache_leads(cache_params, leads, ttl=180)  # 3 minutes cache
+        
+        return {
+            "leads": leads,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/qualified-leads/count")
+async def get_qualified_leads_count(
+    source: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Get total count of qualified leads for pagination info"""
+    try:
+        # Create cache key for count
+        cache_params = {
+            'role': current_user.role,
+            'username': current_user.username,
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'source': source,
+            'type': 'count'
+        }
+        
+        # Try to get from cache first
+        cached_count = get_cached_leads(cache_params)
+        if cached_count is not None:
+            return {"count": cached_count}
+        
+        # Build query for count
+        query = supabase.table('qualified_leads').select('id', count='exact')
+        
+        # Apply source filtering
+        if source:
+            if source == 'walk-in':
+                query = query.in_('source', ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'])
+            else:
+                query = query.eq('source', source)
+        
+        response = query.execute()
+        count = response.count or 0
+        
+        # Cache the count
+        cache_leads(cache_params, count, ttl=300)  # 5 minutes cache for count
+        
+        return {"count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/qualified-leads/cre/{cre_name}")
+async def get_cre_qualified_leads(
+    cre_name: str,
+    limit: int = Query(1000, ge=1, le=5000, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    current_user=Depends(get_current_user)
+):
+    """Get all qualified leads for a specific CRE - allows larger limits for individual CREs"""
+    try:
+        # Only allow CREs to access their own data, or admins/branch heads
+        if current_user.role == 'cre' and current_user.username != cre_name:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Create cache key
+        cache_params = {
+            'role': current_user.role,
+            'username': current_user.username,
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'cre_name': cre_name,
+            'limit': limit,
+            'offset': offset
+        }
+        
+        # Try to get from cache first
+        cached_leads = get_cached_leads(cache_params)
+        if cached_leads is not None:
+            return {
+                "leads": cached_leads,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": len(cached_leads) == limit
+                }
+            }
+        
+        # Fetch leads for specific CRE
+        response = (
+            supabase
+                .table('qualified_leads')
+                .select(
+                    'id,lead_uid,customer_name,customer_mobile_number,customer_location,source,sub_source,'
+                    'cre_name,lead_category,model_interested,first_remark,variant,buying_plan,'
+                    'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
+                    'final_status,booking_status,retailed_status,created_at,updated_at'
+                )
+                .eq('cre_name', cre_name)
+                .order('created_at', desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+        )
+        
+        leads = response.data or []
+        has_more = len(leads) == limit
+        
+        # Cache the results
+        cache_leads(cache_params, leads, ttl=180)  # 3 minutes cache
+        
+        return {
+            "leads": leads,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/qualified-leads/cre/{cre_name}/all")
+async def get_all_cre_qualified_leads(
+    cre_name: str,
+    current_user=Depends(get_current_user)
+):
+    """Get ALL qualified leads for a specific CRE - no pagination limits for complete data access"""
+    try:
+        # Only allow CREs to access their own data, or admins/branch heads
+        if current_user.role == 'cre' and current_user.username != cre_name:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Create cache key
+        cache_params = {
+            'role': current_user.role,
+            'username': current_user.username,
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'cre_name': cre_name,
+            'type': 'all'
+        }
+        
+        # Try to get from cache first
+        cached_leads = get_cached_leads(cache_params)
+        if cached_leads is not None:
+            return {"leads": cached_leads, "count": len(cached_leads)}
+        
+        # Fetch ALL leads for specific CRE (no pagination)
+        response = (
+            supabase
+                .table('qualified_leads')
+                .select(
+                    'id,lead_uid,customer_name,customer_mobile_number,customer_location,source,sub_source,'
+                    'cre_name,lead_category,model_interested,first_remark,variant,buying_plan,'
+                    'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
+                    'final_status,booking_status,retailed_status,created_at,updated_at'
+                )
+                .eq('cre_name', cre_name)
                 .order('created_at', desc=True)
                 .execute()
         )
-        print(f"[GET Qualified Leads] Returning {len(response.data or [])} leads")
-        if response.data:
-            print(f"[GET Qualified Leads] Sample lead: {response.data[0]}")
-            assigned_lead = next((lead for lead in response.data if lead.get('lead_uid') == 'LD000546'), None)
-            if assigned_lead:
-                print(f"[GET Qualified Leads] LD000546 data: {assigned_lead}")
-        return response.data or []
+        
+        leads = response.data or []
+        
+        # Cache the results with longer TTL since this is complete data
+        cache_leads(cache_params, leads, ttl=300)  # 5 minutes cache
+        
+        return {"leads": leads, "count": len(leads)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3775,6 +4030,8 @@ async def assign_branch_to_lead(assignment: dict, current_user=Depends(get_curre
         response = supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
         
         if response.data:
+            # Invalidate cache
+            invalidate_on_lead_change(response.data[0].get('lead_uid'), 'update')
             return {"message": "Branch assigned successfully", "lead_id": lead_id, "branch": branch}
         else:
             raise HTTPException(status_code=404, detail="Lead not found")
