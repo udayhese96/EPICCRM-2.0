@@ -1005,7 +1005,9 @@ export default function PSDashboard() {
       })
 
       if (response.ok) {
-        const data = await response.json()
+        const responseData = await response.json()
+        // Extract leads array from the new API response format
+        const data = responseData.leads || responseData || []
         // Qualified leads loaded
         // Debug logging removed
         

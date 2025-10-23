@@ -160,12 +160,15 @@ export default function CRETeamLeaderDashboard() {
       ])
 
       const [leadsData, gemData, branchesData] = await Promise.all([
-        leadsResponse.ok ? leadsResponse.json() : [],
+        leadsResponse.ok ? leadsResponse.json() : {leads: []},
         gemResponse.ok ? gemResponse.json() : [],
         branchesResponse.ok ? branchesResponse.json() : []
       ])
 
-      const sortedLeads = leadsData.sort((a: any, b: any) => {
+      // Extract leads array from the new API response format
+      const leadsArray = leadsData.leads || leadsData || []
+      
+      const sortedLeads = leadsArray.sort((a: any, b: any) => {
         if (!a.ps_name && b.ps_name) return -1
         if (a.ps_name && !b.ps_name) return 1
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
