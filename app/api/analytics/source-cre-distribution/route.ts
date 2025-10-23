@@ -124,34 +124,30 @@ export async function GET(request: NextRequest) {
       return source;
     };
 
-    // Apply filtering logic (same as dynamic-status API)
+    // Apply filtering logic with proper date range handling
     let filteredLeads
     try {
-      if (period === 'all') {
-        // Show ALL data when period is 'all'
+      if (period === 'all' && !startDateParam && !endDateParam) {
+        // Show ALL data when period is 'all' and no custom date range
         filteredLeads = (allLeadMaster || []).filter((lead: any) => {
           const branchMatch = !branch || lead.branch === branch
           const monthMatch = month === 'all' || !month || (lead.created_at && lead.created_at.startsWith(month))
           const creMatch = !creNameFilter || lead.cre_name === creNameFilter
-        const sourceMatch = !sourceFilter || sourceFilter === 'all' || getSourceWithSubsource(lead) === sourceFilter
-        const dateMatch = !lead.created_at || (() => {
-          const leadDate = new Date(lead.created_at);
-          return leadDate >= startDate && leadDate <= endDate;
-        })()
-        return branchMatch && monthMatch && creMatch && sourceMatch && dateMatch
+          const sourceMatch = !sourceFilter || sourceFilter === 'all' || getSourceWithSubsource(lead) === sourceFilter
+          return branchMatch && monthMatch && creMatch && sourceMatch
         })
       } else {
-        // Apply date filtering for specific periods
+        // Apply date filtering for specific periods or custom date range
         filteredLeads = (allLeadMaster || []).filter((lead: any) => {
           const branchMatch = !branch || lead.branch === branch
           const monthMatch = month === 'all' || !month || (lead.created_at && lead.created_at.startsWith(month))
           const creMatch = !creNameFilter || lead.cre_name === creNameFilter
-        const sourceMatch = !sourceFilter || sourceFilter === 'all' || getSourceWithSubsource(lead) === sourceFilter
-        const dateMatch = !lead.created_at || (() => {
-          const leadDate = new Date(lead.created_at);
-          return leadDate >= startDate && leadDate <= endDate;
-        })()
-        return branchMatch && monthMatch && creMatch && sourceMatch && dateMatch
+          const sourceMatch = !sourceFilter || sourceFilter === 'all' || getSourceWithSubsource(lead) === sourceFilter
+          const dateMatch = !lead.created_at || (() => {
+            const leadDate = new Date(lead.created_at);
+            return leadDate >= startDate && leadDate <= endDate;
+          })()
+          return branchMatch && monthMatch && creMatch && sourceMatch && dateMatch
         })
       }
     } catch (filterError) {

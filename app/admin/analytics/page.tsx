@@ -54,6 +54,14 @@ export default function AdminAnalyticsPage() {
         period: selectedPeriod
       })
 
+      // Add date range parameters if provided
+      if (startDate) {
+        params.append('startDate', startDate)
+      }
+      if (endDate) {
+        params.append('endDate', endDate)
+      }
+
       const response = await fetch(`/api/analytics/cre-performance?${params}`, {
         headers: {
           'Content-Type': 'application/json',
@@ -74,6 +82,76 @@ export default function AdminAnalyticsPage() {
       toast.error('Failed to fetch CRE performance data')
     } finally {
       setIsLoading(false)
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleSearch = () => {
+    fetchData()
+  }
+
+  const handleDownload = async (reportType: 'cre-performance' | 'all-analytics' = 'cre-performance') => {
+    try {
+      setIsRefreshing(true)
+      const params = new URLSearchParams({
+        period: selectedPeriod,
+        format: 'csv'
+      })
+
+      // Add date range parameters if provided
+      if (startDate) {
+        params.append('startDate', startDate)
+      }
+      if (endDate) {
+        params.append('endDate', endDate)
+      }
+
+      const endpoint = reportType === 'all-analytics' 
+        ? `/api/analytics/export-comprehensive?${params}`
+        : `/api/analytics/cre-performance/export?${params}`
+
+      const response = await fetch(endpoint, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        },
+        credentials: 'include'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to download data')
+      }
+
+      // Get the filename from the response headers or create a default one
+      const contentDisposition = response.headers.get('content-disposition')
+      let filename = reportType === 'all-analytics' 
+        ? 'comprehensive-analytics-report.csv'
+        : 'cre-performance-report.csv'
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/)
+        if (filenameMatch) {
+          filename = filenameMatch[1]
+        }
+      }
+
+      // Create and download the file
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+
+      toast.success(`${reportType === 'all-analytics' ? 'Comprehensive analytics' : 'CRE Performance'} report downloaded successfully!`)
+    } catch (error) {
+      console.error('Error downloading report:', error)
+      toast.error('Failed to download report')
+    } finally {
       setIsRefreshing(false)
     }
   }
@@ -151,13 +229,44 @@ export default function AdminAnalyticsPage() {
               </div>
               
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500">
-                  <Download className="h-4 w-4" />
+                <div className="relative">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500"
+                    onClick={() => handleDownload('cre-performance')}
+                    disabled={isRefreshing}
+                    title="Download CRE Performance Report"
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="bg-green-600 border-green-500 text-white hover:bg-green-500"
+                  onClick={() => handleDownload('all-analytics')}
+                  disabled={isRefreshing}
+                  title="Download Complete Analytics Dashboard Report (CRE Performance, Source Distribution, Lead Status)"
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  Analytics Report
                 </Button>
-                <Button variant="outline" size="sm" className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500"
+                  onClick={handleSearch}
+                  disabled={isRefreshing}
+                >
                   <Search className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="sm" className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="bg-orange-600 border-orange-500 text-white hover:bg-orange-500"
+                  onClick={() => window.print()}
+                >
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -261,6 +370,7 @@ export default function AdminAnalyticsPage() {
                 🚀 High Priority: Source-wise CRE Distribution
               </h3>
               <SourceCREDistribution 
+                key={`source-cre-${selectedPeriod}-${startDate}-${endDate}`}
                 period={selectedPeriod}
                 startDate={startDate}
                 endDate={endDate}
@@ -273,7 +383,10 @@ export default function AdminAnalyticsPage() {
                 📊 Latest Call Lead Status Distribution (Source-wise Analytics)
               </h3>
               <LatestCallStatusDistribution 
+                key={`latest-call-${selectedPeriod}-${startDate}-${endDate}`}
                 period={selectedPeriod}
+                startDate={startDate}
+                endDate={endDate}
               />
             </div>
           </div>

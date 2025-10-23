@@ -30,12 +30,16 @@ interface LatestCallStatusDistributionProps {
   period?: string
   branch?: string
   month?: string
+  startDate?: string
+  endDate?: string
 }
 
 export function LatestCallStatusDistribution({ 
   period = '30', 
   branch = null, 
-  month = null 
+  month = null,
+  startDate = null,
+  endDate = null
 }: LatestCallStatusDistributionProps) {
   const [data, setData] = useState<{
     latestCallStatusDistribution: LatestCallStatusData[]
@@ -53,6 +57,8 @@ export function LatestCallStatusDistribution({
         period,
         ...(branch && { branch }),
         ...(month && { month }),
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
         ...(selectedSource !== 'all' && { source: selectedSource })
       })
 
@@ -81,7 +87,7 @@ export function LatestCallStatusDistribution({
 
   useEffect(() => {
     fetchData()
-  }, [period, branch, month, selectedSource])
+  }, [period, branch, month, startDate, endDate, selectedSource])
 
   if (isLoading) {
     return (

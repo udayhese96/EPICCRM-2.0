@@ -10,10 +10,28 @@ export async function GET(request: NextRequest) {
     const branch = searchParams.get('branch') || null;
     const month = searchParams.get('month') || null;
     const sourceFilter = searchParams.get('source') || null;
+    const startDateParam = searchParams.get('startDate');
+    const endDateParam = searchParams.get('endDate');
 
-    const days = period === 'all' ? 3650 : parseInt(period);
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    // Handle date range calculation
+    let startDate: Date;
+    let endDate: Date;
+    
+    if (startDateParam && endDateParam) {
+      // Use custom date range
+      startDate = new Date(startDateParam);
+      endDate = new Date(endDateParam);
+    } else if (period === 'all') {
+      // All time - use a very wide range
+      startDate = new Date('2020-01-01');
+      endDate = new Date();
+    } else {
+      // Use period-based calculation
+      const days = parseInt(period) || 30;
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
 
     console.log(`Fetching latest call lead status data from ${startDate.toISOString()} to ${new Date().toISOString()}`);
 
@@ -89,9 +107,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch leads data' }, { status: 500 });
     }
 
-    // Apply filtering
+    // Apply filtering with proper date range handling
     let filteredLeads
-    if (period === 'all') {
+    if (period === 'all' && !startDateParam && !endDateParam) {
       filteredLeads = (allLeadMaster || []).filter((lead: any) => {
         const branchMatch = !branch || lead.branch === branch
         const monthMatch = month === 'all' || !month || (lead.created_at && lead.created_at.startsWith(month))
@@ -103,7 +121,10 @@ export async function GET(request: NextRequest) {
         const branchMatch = !branch || lead.branch === branch
         const monthMatch = month === 'all' || !month || (lead.created_at && lead.created_at.startsWith(month))
         const sourceMatch = !sourceFilter || sourceFilter === 'all' || getSourceWithSubsource(lead) === sourceFilter
-        const dateMatch = !lead.created_at || new Date(lead.created_at) >= startDate
+        const dateMatch = !lead.created_at || (() => {
+          const leadDate = new Date(lead.created_at);
+          return leadDate >= startDate && leadDate <= endDate;
+        })()
         return branchMatch && monthMatch && sourceMatch && dateMatch
       })
     }

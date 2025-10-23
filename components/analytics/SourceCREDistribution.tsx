@@ -92,7 +92,7 @@ export function SourceCREDistribution({
 
   useEffect(() => {
     fetchData()
-  }, [period, branch, month, selectedSource])
+  }, [period, branch, month, startDate, endDate, selectedSource])
 
   if (isLoading) {
     return (
