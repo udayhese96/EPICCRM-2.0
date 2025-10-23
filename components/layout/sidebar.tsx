@@ -78,6 +78,11 @@ const getNavigationForRole = (role: string) => {
           icon: Building2,
         },
         {
+          name: "Analytics",
+          href: "/admin/analytics",
+          icon: BarChart3,
+        },
+        {
           name: "Reports",
           href: "/reports",
           icon: BarChart3,
@@ -102,7 +107,7 @@ const getNavigationForRole = (role: string) => {
         },
         {
           name: "Analytics",
-          href: "/analytics",
+          href: "/admin/analytics",
           icon: BarChart3,
         },
       ]
@@ -120,7 +125,7 @@ const getNavigationForRole = (role: string) => {
         },
         {
           name: "Analytics",
-          href: "/analytics",
+          href: "/admin/analytics",
           icon: BarChart3,
         },
       ]

@@ -94,3 +94,4 @@ export function FunnelChart({ title, stages, className }: FunnelChartProps) {
   )
 }
 
+
