@@ -38,7 +38,7 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
     const roleSpecificItems = {
       admin: [
         { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
-        { icon: BarChart3, label: 'Analytics', href: '/analytics' },
+        { icon: BarChart3, label: 'Analytics', href: '/admin/analytics' },
         { icon: Settings, label: 'Admin', href: '/admin' },
       ],
       cre: [
@@ -46,7 +46,7 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       ],
       ps: [
         { icon: Home, label: 'PS Dashboard', href: '/ps/dashboard' },
-        { icon: BarChart3, label: 'Analytics', href: '/ps/analytics' },
+        { icon: BarChart3, label: 'Analytics', href: '/admin/analytics' },
       ],
       cre_team_leader: [
         { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },

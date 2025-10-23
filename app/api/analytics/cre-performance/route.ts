@@ -1,246 +1,256 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get('period') || '30';
+
+    const days = period === 'all' ? 3650 : parseInt(period); // 10 years for 'all'
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    console.log(`Fetching CRE performance data from ${startDate.toISOString()} to ${new Date().toISOString()}`);
+
+    // Use the same approach as dynamic-status API - fetch ALL data first
+    console.log('Fetching ALL data from lead_master...')
     
-    // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { searchParams } = new URL(request.url)
-    const period = searchParams.get('period') || '30'
-    const branch = searchParams.get('branch') || null
-    const creName = searchParams.get('cre_name') || null
-
-    const days = parseInt(period)
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - days)
-
-    // Build query
-    let leadQuery = supabase
-      .from('lead_master')
-      .select(`
-        *,
-        qualified_leads(*)
-      `)
-      .gte('created_at', startDate.toISOString())
-
-    if (branch) {
-      leadQuery = leadQuery.eq('branch', branch)
-    }
-
-    if (creName) {
-      leadQuery = leadQuery.eq('cre_name', creName)
-    }
-
-    const { data: leads, error: leadsError } = await leadQuery
-
-    if (leadsError) {
-      console.error('Error fetching leads:', leadsError)
-      return NextResponse.json({ error: 'Failed to fetch leads data' }, { status: 500 })
-    }
-
-    // CRE Performance Overview
-    const creStats = leads.reduce((acc: any, lead) => {
-      const creName = lead.cre_name || 'Unknown'
+    let allLeadMaster = []
+    let leadMasterError = null
+    
+    try {
+      // First try: Direct query without ordering
+      const { data, error } = await supabase
+        .from('lead_master')
+        .select('*')
       
-      if (!acc[creName]) {
-        acc[creName] = {
-          total_leads_assigned: 0,
-          leads_contacted: 0,
-          qualified_leads: 0,
-          booked_leads: 0,
-          retailed_leads: 0,
-          lost_leads: 0,
-          active_leads: 0,
-          branch: lead.branch,
-          response_times: [],
-          touchpoints: [],
-          test_drives: 0,
-          test_drives_converted: 0
-        }
+      if (error) {
+        console.error('Error fetching lead_master:', error)
+        leadMasterError = error
+      } else {
+        allLeadMaster = data || []
+        console.log(`Direct query - Lead Master count: ${allLeadMaster.length}`)
       }
-
-      acc[creName].total_leads_assigned++
-      
-      if (lead.first_call_date) {
-        acc[creName].leads_contacted++
+    } catch (err) {
+      console.error('Exception fetching lead_master:', err)
+      leadMasterError = err
+    }
+    
+    // If still empty, try with direct Supabase client
+    if (allLeadMaster.length === 0) {
+      try {
+        const directSupabase = createSupabaseClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
         
-        // Calculate response time
-        if (lead.cre_assigned_at && lead.first_call_date) {
-          const responseTime = (new Date(lead.first_call_date).getTime() - new Date(lead.cre_assigned_at).getTime()) / (1000 * 60 * 60)
-          acc[creName].response_times.push(responseTime)
+        const { data, error } = await directSupabase
+          .from('lead_master')
+          .select('*')
+        
+        if (!error && data) {
+          allLeadMaster = data
+          console.log(`Direct client query - Lead Master count: ${allLeadMaster.length}`)
+        } else {
+          console.error('Direct client error:', error)
+        }
+      } catch (err) {
+        console.error('Exception with direct client:', err)
+      }
+    }
+    
+    // If still empty, try with service role key
+    if (allLeadMaster.length === 0) {
+      try {
+        const serviceSupabase = createSupabaseClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        )
+        
+        const { data, error } = await serviceSupabase
+          .from('lead_master')
+          .select('*')
+        
+        if (!error && data) {
+          allLeadMaster = data
+          console.log(`Service role query - Lead Master count: ${allLeadMaster.length}`)
+        } else {
+          console.error('Service role error:', error)
+        }
+      } catch (err) {
+        console.error('Exception with service role:', err)
+      }
+    }
+
+    if (leadMasterError) {
+      console.error('Error fetching leads:', leadMasterError);
+      return NextResponse.json({ error: 'Failed to fetch leads data' }, { status: 500 });
+    }
+
+    // Apply filtering logic (same as dynamic-status API)
+    let filteredLeads
+    if (period === 'all') {
+      // Show ALL data when period is 'all'
+      filteredLeads = (allLeadMaster || []).filter((lead: any) => {
+        return lead.assigned === 'Yes' && lead.cre_name; // Only assigned leads with CRE
+      })
+    } else {
+      // Apply date filtering for specific periods
+      filteredLeads = (allLeadMaster || []).filter((lead: any) => {
+        const dateMatch = !lead.created_at || new Date(lead.created_at) >= startDate
+        return lead.assigned === 'Yes' && lead.cre_name && dateMatch
+      })
+    }
+    
+    console.log(`After filtering - Assigned leads with CRE: ${filteredLeads.length}`)
+
+    // Process CRE performance data
+    const crePerformanceMap: any = {};
+
+    filteredLeads.forEach((lead: any) => {
+      const creName = lead.cre_name || 'Unassigned';
+      
+      if (!crePerformanceMap[creName]) {
+        crePerformanceMap[creName] = {
+          creName,
+          assigned: 0,
+          qualifiedLeads: 0,
+          untouched: 0,
+          openLeads: 0,
+          retailed: 0,
+          lost: 0,
+          tatValues: []
+        };
+      }
+
+      crePerformanceMap[creName].assigned++;
+
+      // Qualified Leads: leads where lead_status contains "Qualified" or final_status is "Qualified"
+      const isQualified = lead.lead_status?.toLowerCase().includes('qualified') || 
+                         lead.final_status?.toLowerCase() === 'qualified';
+      if (isQualified) {
+        crePerformanceMap[creName].qualifiedLeads++;
+      }
+
+      // Untouched: leads where first_call_date is empty
+      if (!lead.first_call_date) {
+        crePerformanceMap[creName].untouched++;
+      }
+
+      // Open leads: leads where final_status is "Pending"
+      if (lead.final_status?.toLowerCase() === 'pending') {
+        crePerformanceMap[creName].openLeads++;
+      }
+
+      // Retailed: leads with final_status indicating success
+      const isRetailed = lead.final_status?.toLowerCase().includes('won') || 
+                        lead.final_status?.toLowerCase().includes('retailed');
+      if (isRetailed) {
+        crePerformanceMap[creName].retailed++;
+      }
+
+      // Lost: leads with final_status indicating loss
+      const isLost = lead.final_status?.toLowerCase().includes('lost');
+      if (isLost) {
+        crePerformanceMap[creName].lost++;
+      }
+
+      // TAT calculation: first_call_date - cre_assigned_at
+      if (lead.first_call_date && lead.cre_assigned_at) {
+        const firstCallTime = new Date(lead.first_call_date);
+        const assignedTime = new Date(lead.cre_assigned_at);
+        const tatHours = (firstCallTime.getTime() - assignedTime.getTime()) / (1000 * 60 * 60);
+        if (tatHours > 0) {
+          crePerformanceMap[creName].tatValues.push(tatHours);
         }
       }
-      
-      if (lead.final_status === 'QUALIFIED') {
-        acc[creName].qualified_leads++
-      } else if (lead.final_status === 'LOST') {
-        acc[creName].lost_leads++
-      } else if (['PENDING', 'FOLLOW_UP'].includes(lead.lead_status || '')) {
-        acc[creName].active_leads++
+    });
+
+    // Convert to array format and calculate TAT averages
+    const crePerformance = Object.values(crePerformanceMap).map((cre: any) => {
+      const avgTat = cre.tatValues.length > 0 
+        ? cre.tatValues.reduce((sum: number, tat: number) => sum + tat, 0) / cre.tatValues.length
+        : 0;
+
+      let tatUnit: 'd' | 'h' | 'm' = 'h';
+      let tatValue = avgTat;
+
+      if (avgTat >= 24) {
+        tatUnit = 'd';
+        tatValue = avgTat / 24;
+      } else if (avgTat < 1) {
+        tatUnit = 'm';
+        tatValue = avgTat * 60;
       }
-
-      if (lead.qualified_leads?.some((ql: any) => ql.booking_status === 'APPROVED')) {
-        acc[creName].booked_leads++
-      }
-
-      if (lead.qualified_leads?.some((ql: any) => ql.retailed_status === 'APPROVED')) {
-        acc[creName].retailed_leads++
-      }
-
-      // Calculate touchpoints
-      let touchpoints = 0
-      if (lead.first_call_date) touchpoints++
-      if (lead.second_call_date) touchpoints++
-      if (lead.third_call_date) touchpoints++
-      if (lead.fourth_call_date) touchpoints++
-      if (lead.fifth_call_date) touchpoints++
-      if (lead.sixth_call_date) touchpoints++
-      acc[creName].touchpoints.push(touchpoints)
-
-      // Test drive metrics
-      if (lead.test_drive_type) {
-        acc[creName].test_drives++
-        if (lead.final_status === 'QUALIFIED') {
-          acc[creName].test_drives_converted++
-        }
-      }
-
-      return acc
-    }, {})
-
-    const crePerformance = Object.entries(creStats).map(([creName, stats]: [string, any]) => {
-      const contactRate = stats.total_leads_assigned > 0 
-        ? (stats.leads_contacted / stats.total_leads_assigned) * 100 
-        : 0
-      
-      const qualificationRate = stats.total_leads_assigned > 0 
-        ? (stats.qualified_leads / stats.total_leads_assigned) * 100 
-        : 0
-      
-      const bookingConversionRate = stats.qualified_leads > 0 
-        ? (stats.booked_leads / stats.qualified_leads) * 100 
-        : 0
-      
-      const retailConversionRate = stats.booked_leads > 0 
-        ? (stats.retailed_leads / stats.booked_leads) * 100 
-        : 0
-      
-      const overallConversionRate = stats.total_leads_assigned > 0 
-        ? (stats.retailed_leads / stats.total_leads_assigned) * 100 
-        : 0
-
-      const avgResponseTime = stats.response_times.length > 0 
-        ? stats.response_times.reduce((sum: number, time: number) => sum + time, 0) / stats.response_times.length 
-        : 0
-
-      const avgTouchpoints = stats.touchpoints.length > 0 
-        ? stats.touchpoints.reduce((sum: number, touches: number) => sum + touches, 0) / stats.touchpoints.length 
-        : 0
-
-      const testDriveConversionRate = stats.test_drives > 0 
-        ? (stats.test_drives_converted / stats.test_drives) * 100 
-        : 0
-
-      const performanceScore = Math.round(
-        ((stats.qualified_leads * 5 + stats.booked_leads * 10 + stats.retailed_leads * 20) / 
-        Math.max(stats.total_leads_assigned, 1)) * 100
-      ) / 100
 
       return {
-        cre_name: creName,
-        branch: stats.branch,
-        total_leads_assigned: stats.total_leads_assigned,
-        leads_contacted: stats.leads_contacted,
-        qualified_leads: stats.qualified_leads,
-        booked_leads: stats.booked_leads,
-        retailed_leads: stats.retailed_leads,
-        lost_leads: stats.lost_leads,
-        active_leads: stats.active_leads,
-        contact_rate: Math.round(contactRate * 100) / 100,
-        qualification_rate: Math.round(qualificationRate * 100) / 100,
-        booking_conversion_rate: Math.round(bookingConversionRate * 100) / 100,
-        retail_conversion_rate: Math.round(retailConversionRate * 100) / 100,
-        overall_conversion_rate: Math.round(overallConversionRate * 100) / 100,
-        avg_response_time_hours: Math.round(avgResponseTime * 100) / 100,
-        avg_touchpoints: Math.round(avgTouchpoints * 100) / 100,
-        test_drives_conducted: stats.test_drives,
-        test_drive_conversion_rate: Math.round(testDriveConversionRate * 100) / 100,
-        cre_performance_score: performanceScore
+        creName: cre.creName,
+        assigned: cre.assigned,
+        qualifiedLeads: cre.qualifiedLeads,
+        untouched: cre.untouched,
+        openLeads: cre.openLeads,
+        retailed: cre.retailed,
+        lost: cre.lost,
+        tatAvg: tatValue,
+        tatUnit
+      };
+    }).sort((a: any, b: any) => b.assigned - a.assigned);
+
+    // Calculate totals
+    const total = crePerformance.reduce((acc: any, cre: any) => ({
+      creName: 'TOTAL',
+      assigned: acc.assigned + cre.assigned,
+      qualifiedLeads: acc.qualifiedLeads + cre.qualifiedLeads,
+      untouched: acc.untouched + cre.untouched,
+      openLeads: acc.openLeads + cre.openLeads,
+      retailed: acc.retailed + cre.retailed,
+      lost: acc.lost + cre.lost,
+      tatAvg: 0, // Will calculate average TAT separately
+      tatUnit: 'd' as 'd' | 'h' | 'm'
+    }), {
+      creName: 'TOTAL',
+      assigned: 0,
+      qualifiedLeads: 0,
+      untouched: 0,
+      openLeads: 0,
+      retailed: 0,
+      lost: 0,
+      tatAvg: 0,
+      tatUnit: 'd' as 'd' | 'h' | 'm'
+    });
+
+    // Calculate average TAT for total
+    const allTatValues = Object.values(crePerformanceMap).flatMap((cre: any) => cre.tatValues);
+    if (allTatValues.length > 0) {
+      const avgTat = allTatValues.reduce((sum: number, tat: number) => sum + tat, 0) / allTatValues.length;
+      if (avgTat >= 24) {
+        total.tatUnit = 'd';
+        total.tatAvg = avgTat / 24;
+      } else if (avgTat < 1) {
+        total.tatUnit = 'm';
+        total.tatAvg = avgTat * 60;
+      } else {
+        total.tatUnit = 'h';
+        total.tatAvg = avgTat;
       }
-    }).sort((a, b) => b.cre_performance_score - a.cre_performance_score)
+    }
 
-    // Source-wise performance
-    const sourceStats = leads.reduce((acc: any, lead) => {
-      const source = lead.source || 'Unknown'
-      const creName = lead.cre_name || 'Unknown'
-      
-      if (!acc[creName]) acc[creName] = {}
-      if (!acc[creName][source]) {
-        acc[creName][source] = {
-          leads_received: 0,
-          qualified: 0,
-          lost: 0,
-          response_times: [],
-          closure_days: []
-        }
-      }
-
-      acc[creName][source].leads_received++
-      
-      if (lead.final_status === 'QUALIFIED') {
-        acc[creName][source].qualified++
-      } else if (lead.final_status === 'LOST') {
-        acc[creName][source].lost++
-      }
-
-      // Response time
-      if (lead.cre_assigned_at && lead.first_call_date) {
-        const responseTime = (new Date(lead.first_call_date).getTime() - new Date(lead.cre_assigned_at).getTime()) / (1000 * 60 * 60)
-        acc[creName][source].response_times.push(responseTime)
-      }
-
-      // Closure time
-      if (lead.won_timestamp && lead.cre_assigned_at) {
-        const closureDays = (new Date(lead.won_timestamp).getTime() - new Date(lead.cre_assigned_at).getTime()) / (1000 * 60 * 60 * 24)
-        acc[creName][source].closure_days.push(closureDays)
-      }
-
-      return acc
-    }, {})
-
-    const sourcePerformance = Object.entries(sourceStats).map(([creName, sources]: [string, any]) => {
-      return Object.entries(sources).map(([source, stats]: [string, any]) => ({
-        cre_name: creName,
-        source,
-        leads_received: stats.leads_received,
-        qualified: stats.qualified,
-        lost: stats.lost,
-        conversion_rate: stats.leads_received > 0 
-          ? Math.round((stats.qualified / stats.leads_received) * 10000) / 100 
-          : 0,
-        avg_response_hours: stats.response_times.length > 0 
-          ? Math.round((stats.response_times.reduce((sum: number, time: number) => sum + time, 0) / stats.response_times.length) * 100) / 100 
-          : 0,
-        avg_closure_days: stats.closure_days.length > 0 
-          ? Math.round((stats.closure_days.reduce((sum: number, days: number) => sum + days, 0) / stats.closure_days.length) * 100) / 100 
-          : 0
-      }))
-    }).flat().sort((a, b) => b.conversion_rate - a.conversion_rate)
+    console.log(`CRE Performance data processed: ${crePerformance.length} CREs`);
 
     return NextResponse.json({
       crePerformance,
-      sourcePerformance
-    })
+      total,
+      dateRange: {
+        start: startDate.toISOString().split('T')[0],
+        end: new Date().toISOString().split('T')[0],
+        period,
+      },
+    });
 
   } catch (error) {
-    console.error('Error in CRE performance analytics:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('Error in CRE performance analytics:', error);
+    return NextResponse.json({ error: 'Internal server error', details: error }, { status: 500 });
   }
 }
-
