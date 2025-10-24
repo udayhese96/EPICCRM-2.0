@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { RoleGuard } from '@/components/auth/role-guard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -38,7 +38,8 @@ import {
   PieChart,
   Filter,
   RefreshCw,
-  Info
+  Info,
+  Pencil
 } from 'lucide-react'
 import Link from 'next/link'
 import { LeadSourceChart } from '@/components/reports/lead-source-chart'
@@ -144,6 +145,19 @@ interface FollowupSummaryData {
   F7: { CRE: number; WALK_IN: number }
 }
 
+// Tab-specific data cache interface
+interface TabDataCache {
+  [tabId: string]: {
+    data: any
+    lastFetched: number
+    filters: {
+      dateRange: string
+      selectedPS: string
+    }
+    isLoading: boolean
+  }
+}
+
 export default function TeamLeaderDashboard() {
   const [assignedPS, setAssignedPS] = useState<PSUser[]>([])
   const [teamPerformance, setTeamPerformance] = useState<TeamPerformanceData | null>(null)
@@ -152,6 +166,12 @@ export default function TeamLeaderDashboard() {
   const [dateRange, setDateRange] = useState<string>('30')
   const [isLoading, setIsLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState<string>('analytics')
+  
+  // Tab-specific data cache
+  const [tabDataCache, setTabDataCache] = useState<TabDataCache>({})
   
   // Modal states
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
@@ -175,15 +195,11 @@ export default function TeamLeaderDashboard() {
   // Read current user id (sales TL) from localStorage once on mount
   useEffect(() => {
     try {
-      console.log('[TL-Dashboard] Checking localStorage for user...')
       const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
-      console.log('[TL-Dashboard] supabase_user raw:', supabaseUserRaw)
       
       if (supabaseUserRaw) {
         const u = JSON.parse(supabaseUserRaw)
-        console.log('[TL-Dashboard] Parsed supabase user:', u)
         if (u?.id) {
-          console.log('[TL-Dashboard] Loaded supabase user:', u)
           setCurrentUserId(u.id as string)
         } else {
           console.warn('[TL-Dashboard] supabase_user found but no id field:', u)
@@ -191,12 +207,9 @@ export default function TeamLeaderDashboard() {
         }
       } else {
         const legacyUserRaw = typeof window !== 'undefined' ? localStorage.getItem('user') : null
-        console.log('[TL-Dashboard] legacy user raw:', legacyUserRaw)
         if (legacyUserRaw) {
           const u = JSON.parse(legacyUserRaw)
-          console.log('[TL-Dashboard] Parsed legacy user:', u)
           if (u?.id) {
-            console.log('[TL-Dashboard] Loaded legacy user:', u)
             setCurrentUserId(u.id as string)
           } else {
             console.warn('[TL-Dashboard] legacy user found but no id field:', u)
@@ -223,7 +236,6 @@ export default function TeamLeaderDashboard() {
       setIsLoading(true)
       try {
         // Fetch PS users filtered by team_leader_id
-        console.log('[TL-Dashboard] Fetching PS users for TL:', currentUserId)
         const resp = await fetch(`/api/users?role=ps&_=${Date.now()}`, { 
           cache: 'no-store' as any 
         })
@@ -235,8 +247,6 @@ export default function TeamLeaderDashboard() {
         
         const data = await resp.json()
         const users: PSUser[] = data?.users || []
-        console.log('[TL-Dashboard] PS assigned to current TL:', users.length, users)
-        console.log('[TL-Dashboard] Full API response:', data)
         setAssignedPS(users)
 
         if (users.length === 0) {
@@ -322,7 +332,171 @@ export default function TeamLeaderDashboard() {
     return <AlertCircle className="h-4 w-4" />
   }
 
-  // Analytics fetch functions
+  // Tab-specific data fetching functions
+  const fetchTabData = useCallback(async (tabId: string, forceRefresh = false) => {
+    if (!currentUserId) return
+
+    const currentFilters = { dateRange, selectedPS }
+    const cachedData = tabDataCache[tabId]
+    
+    // Check if we need to fetch data
+    const shouldFetch = forceRefresh || 
+      !cachedData || 
+      cachedData.filters.dateRange !== dateRange || 
+      cachedData.filters.selectedPS !== selectedPS ||
+      (Date.now() - cachedData.lastFetched) > 300000 // 5 minutes cache
+
+    if (!shouldFetch) return cachedData.data
+
+    // Set loading state for this tab
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoading: true,
+        filters: currentFilters
+      }
+    }))
+
+    try {
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData()
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData()
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData()
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData()
+          break
+        case 'booked':
+          data = await fetchBookedData()
+          break
+        case 'retailed':
+          data = await fetchRetailedData()
+          break
+        case 'export-leads':
+          data = await fetchExportLeadsData()
+          break
+        default:
+          return null
+      }
+
+      // Update cache
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          data,
+          lastFetched: Date.now(),
+          filters: currentFilters,
+          isLoading: false
+        }
+      }))
+
+      return data
+    } catch (error) {
+      console.error(`Error fetching ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoading: false
+        }
+      }))
+      return null
+    }
+  }, [currentUserId, dateRange, selectedPS])
+
+  // Individual tab data fetchers
+  const fetchFreshLeadsData = useCallback(async () => {
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateRange,
+      limit: '50',
+      offset: '0'
+    })
+    
+    const response = await fetch(`/api/team-leader/fresh-leads?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data.leads || []
+    }
+    return []
+  }, [currentUserId, selectedPS, dateRange])
+
+  const fetchTodaysFollowupData = useCallback(async () => {
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateRange,
+      limit: '50',
+      offset: '0'
+    })
+    
+    const response = await fetch(`/api/team-leader/todays-followup?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data.leads || []
+    }
+    return []
+  }, [currentUserId, selectedPS, dateRange])
+
+  const fetchOpenLeadsData = useCallback(async () => {
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateRange,
+      limit: '50',
+      offset: '0'
+    })
+    
+    const response = await fetch(`/api/team-leader/open-leads?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data.leads || []
+    }
+    return []
+  }, [currentUserId, selectedPS, dateRange])
+
+  const fetchWaitingApprovalData = async () => {
+    // TODO: Implement waiting approval API
+    return []
+  }
+
+  const fetchBookedData = async () => {
+    // TODO: Implement booked leads API
+    return []
+  }
+
+  const fetchRetailedData = async () => {
+    // TODO: Implement retailed leads API
+    return []
+  }
+
+  const fetchExportLeadsData = async () => {
+    // TODO: Implement export leads API
+    return []
+  }
+
+  // Analytics fetch functions (independent of tab filters)
   const fetchAnalyticsData = async () => {
     if (!currentUserId) return
     
@@ -366,6 +540,1037 @@ export default function TeamLeaderDashboard() {
     setAnalyticsFromDate('')
     setAnalyticsToDate('')
     setAnalyticsMode('all')
+  }
+
+  // Tab switching with lazy loading
+  const handleTabChange = async (tabId: string) => {
+    setActiveTab(tabId)
+    
+    // Only fetch data for non-analytics tabs
+    if (tabId !== 'analytics') {
+      await fetchTabData(tabId)
+    }
+  }
+
+  // Get current tab data
+  const getCurrentTabData = (tabId: string) => {
+    return tabDataCache[tabId]?.data || []
+  }
+
+  // Get current tab loading state
+  const getCurrentTabLoading = (tabId: string) => {
+    return tabDataCache[tabId]?.isLoading || false
+  }
+
+  // Effect to refetch data when filters change for active tab
+  useEffect(() => {
+    if (activeTab !== 'analytics' && currentUserId) {
+      fetchTabData(activeTab, true) // Force refresh when filters change
+    }
+  }, [activeTab, dateRange, selectedPS, currentUserId])
+
+  // Tab configuration
+  const tabs = [
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+    { id: 'fresh-leads', label: 'Fresh Leads', icon: Target },
+    { id: 'todays-followup', label: "Today's Follow Up", icon: Calendar },
+    { id: 'open-leads', label: 'Open Leads', icon: Eye },
+    { id: 'waiting-approval', label: 'Waiting for Approval', icon: Clock },
+    { id: 'booked', label: 'Booked', icon: CheckCircle2 },
+    { id: 'retailed', label: 'Retailed', icon: Award },
+    { id: 'export-leads', label: 'Export Leads', icon: ArrowUpRight }
+  ]
+
+  // Placeholder component for empty tabs
+  const EmptyStateCard = ({ icon: Icon, title, description }: { icon: any, title: string, description: string }) => (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center space-y-4 max-w-md mx-auto">
+        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+          <Icon className="h-8 w-8 text-gray-400" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-600 mb-2">{title}</h3>
+          <p className="text-gray-500">{description}</p>
+        </div>
+      </div>
+    </div>
+  )
+
+  // Fresh Leads Tab Component
+  const FreshLeadsTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const freshLeads = getCurrentTabData('fresh-leads')
+    const isLoading = getCurrentTabLoading('fresh-leads')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return freshLeads
+      const searchLower = searchTerm.toLowerCase()
+      return freshLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [freshLeads, searchTerm])
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('new') || statusLower.includes('fresh')) return 'bg-purple-100 text-purple-800 border-purple-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('new') || statusLower.includes('fresh')) return <Target className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading fresh leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search by name, mobile, or UID..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Fresh Leads Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Target className="h-5 w-5 mr-2 text-orange-600" />
+                  Fresh Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Newly assigned leads requiring immediate attention
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Target className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Fresh Leads</h3>
+                    <p className="text-gray-500">No fresh leads for the selected date/PS.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.ps_assigned_at || lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </td>
+
+                                {/* ICROP ID */}
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  {lead.icrop_id ? (
+                                    <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                      {lead.icrop_id}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-sm text-gray-400">-</span>
+                                  )}
+                                </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                                {lead.source && (
+                                  <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                    <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                  </div>
+                                )}
+                                {lead.sub_source && (
+                                  <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                    <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                  </div>
+                                )}
+                                <div className="text-xs text-gray-500">
+                                  Assigned: {new Date(lead.ps_assigned_at || lead.created_at).toLocaleString('en-IN')}
+                                </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status and ICROP */}
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Status</div>
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+                                <div className="space-y-1">
+                                  <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                                  {lead.icrop_id ? (
+                                    <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                      {lead.icrop_id}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-sm text-gray-400">-</span>
+                                  )}
+                                </div>
+                        </div>
+
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Today's Follow-Up Tab Component
+  const TodaysFollowupTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const todaysFollowup = getCurrentTabData('todays-followup')
+    const isLoading = getCurrentTabLoading('todays-followup')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return todaysFollowup
+      const searchLower = searchTerm.toLowerCase()
+      return todaysFollowup.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [todaysFollowup, searchTerm])
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading today's follow-up...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Today's Follow-Up Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Calendar className="h-5 w-5 mr-2 text-orange-600" />
+                  Today's Follow-Up
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Follow-up leads scheduled for today or overdue
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Follow-ups
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Calendar className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Follow-ups for Today</h3>
+                    <p className="text-gray-500">No follow-up data available for today.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                              {lead.awaiting_cre_approval && (
+                                <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                  Awaiting CRE Approval
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number || 1}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                          {lead.source && (
+                            <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                              <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                            </div>
+                          )}
+                          {lead.sub_source && (
+                            <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                              <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(lead.created_at).toLocaleString('en-IN')}
+                          </div>
+                        </div>
+
+                        {/* Next Call/Overdue */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Next Call</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            Call #{lead.next_call_number || 1}
+                          </div>
+                          {lead.follow_up_date && (
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                            </div>
+                          )}
+                          {lead.is_overdue && (
+                            <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                              Overdue: {lead.overdue_days} days
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Status</div>
+                          <div className="space-y-1">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                            {lead.awaiting_cre_approval && (
+                              <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                Awaiting CRE Approval
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ICROP ID */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                          {lead.icrop_id ? (
+                            <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                              {lead.icrop_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Open Leads Tab Component
+  const OpenLeadsTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const openLeads = getCurrentTabData('open-leads')
+    const isLoading = getCurrentTabLoading('open-leads')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return openLeads
+      const searchLower = searchTerm.toLowerCase()
+      return openLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [openLeads, searchTerm])
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      if (statusLower.includes('rnr')) return 'bg-gray-100 text-gray-800 border-gray-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      if (statusLower.includes('rnr')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading open leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Open Leads Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Eye className="h-5 w-5 mr-2 text-orange-600" />
+                  Open Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  All pending leads assigned to your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Eye className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Open Leads</h3>
+                    <p className="text-gray-500">No pending leads for the selected date/PS.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                              {lead.awaiting_cre_approval && (
+                                <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                  Awaiting CRE Approval
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number || 1}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                          {lead.source && (
+                            <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                              <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                            </div>
+                          )}
+                          {lead.sub_source && (
+                            <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                              <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(lead.created_at).toLocaleString('en-IN')}
+                          </div>
+                        </div>
+
+                        {/* Next Call */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Next Call</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            Call #{lead.next_call_number || 1}
+                          </div>
+                          {lead.follow_up_date && (
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Status</div>
+                          <div className="space-y-1">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                            {lead.awaiting_cre_approval && (
+                              <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                Awaiting CRE Approval
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ICROP ID */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                          {lead.icrop_id ? (
+                            <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                              {lead.icrop_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   if (isLoading) {
@@ -455,6 +1660,38 @@ export default function TeamLeaderDashboard() {
             </div>
           </div>
 
+          {/* Tab Navigation */}
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
+            <div className="px-6 py-4">
+              <div className="flex space-x-1 overflow-x-auto scrollbar-hide">
+                {tabs.map((tab) => {
+                  const Icon = tab.icon
+                  const isActive = activeTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => handleTabChange(tab.id)}
+                      className={`
+                        flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-200
+                        ${isActive 
+                          ? 'bg-blue-500 text-white shadow-md' 
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        }
+                      `}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{tab.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Tab Content */}
+          <div className="space-y-6">
+            {activeTab === 'analytics' && (
+              <>
           {/* Key Performance Indicators */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <Card className="border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow">
@@ -497,7 +1734,6 @@ export default function TeamLeaderDashboard() {
                 </p>
               </CardContent>
             </Card>
-
           </div>
 
           {/* Team Performance Breakdown */}
@@ -858,7 +2094,6 @@ export default function TeamLeaderDashboard() {
               </ScrollArea>
             </CardContent>
           </Card>
-        </div>
 
         {/* Analytics Dashboard Section */}
         <div className="space-y-6">
@@ -1260,6 +2495,110 @@ export default function TeamLeaderDashboard() {
               </Tabs>
             </CardContent>
           </Card>
+                </div>
+              </>
+            )}
+
+            {/* Fresh Leads Tab Content */}
+            {activeTab === 'fresh-leads' && (
+              <FreshLeadsTab />
+            )}
+
+            {/* Other Tab Content */}
+            {activeTab === 'todays-followup' && (
+              getCurrentTabLoading('todays-followup') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading today's follow-up...</p>
+                  </div>
+                </div>
+              ) : (
+                <TodaysFollowupTab />
+              )
+            )}
+
+            {activeTab === 'open-leads' && (
+              getCurrentTabLoading('open-leads') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading open leads...</p>
+                  </div>
+                </div>
+              ) : (
+                <OpenLeadsTab />
+              )
+            )}
+
+            {activeTab === 'waiting-approval' && (
+              getCurrentTabLoading('waiting-approval') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading waiting approval...</p>
+                  </div>
+                </div>
+              ) : (
+                <EmptyStateCard 
+                  icon={Clock} 
+                  title="Waiting for Approval" 
+                  description="No leads waiting for approval at the moment." 
+                />
+              )
+            )}
+
+            {activeTab === 'booked' && (
+              getCurrentTabLoading('booked') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading booked leads...</p>
+                  </div>
+                </div>
+              ) : (
+                <EmptyStateCard 
+                  icon={CheckCircle2} 
+                  title="Booked" 
+                  description="No booked leads data available at the moment." 
+                />
+              )
+            )}
+
+            {activeTab === 'retailed' && (
+              getCurrentTabLoading('retailed') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading retailed leads...</p>
+                  </div>
+                </div>
+              ) : (
+                <EmptyStateCard 
+                  icon={Award} 
+                  title="Retailed" 
+                  description="No retailed leads data available at the moment." 
+                />
+              )
+            )}
+
+            {activeTab === 'export-leads' && (
+              getCurrentTabLoading('export-leads') ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+                    <p className="text-lg text-gray-600">Loading export data...</p>
+                  </div>
+                </div>
+              ) : (
+                <EmptyStateCard 
+                  icon={ArrowUpRight} 
+                  title="Export Leads" 
+                  description="No export functionality available at the moment." 
+                />
+              )
+            )}
+          </div>
         </div>
 
         {/* Lead Detail Modal */}

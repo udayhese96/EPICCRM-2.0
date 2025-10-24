@@ -2953,6 +2953,475 @@ async def get_followup_summary(
         print(f"[TL Analytics] Error fetching follow-up summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/team-leader/fresh-leads")
+async def get_fresh_leads(
+    team_leader_id: str,
+    search: Optional[str] = None,
+    ps_member: Optional[str] = None,
+    date_range: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user=Depends(get_current_user)
+):
+    """Get fresh leads for Team Leaders - leads assigned to PS members under this team leader"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Verify the team leader ID matches the current user
+        if current_user.role == 'team_leader' and current_user.id != team_leader_id:
+            raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's leads.")
+        
+        
+        # Build the query to get fresh leads
+        # Fresh leads are those assigned to PS members under this team leader
+        # with status 'Fresh' or 'New' (newly assigned, not yet worked)
+        
+        # First, get all PS members under this team leader
+        ps_members_response = supabase.table('users').select('id, full_name, branch').eq('role', 'ps').eq('is_active', True).eq('team_leader_id', team_leader_id).execute()
+        
+        if not ps_members_response.data:
+            return {"leads": [], "total": 0, "message": "No PS members found under this team leader"}
+        
+        ps_member_ids = [ps['id'] for ps in ps_members_response.data]
+        ps_member_names = {ps['id']: ps['full_name'] for ps in ps_members_response.data}
+        ps_member_branches = {ps['id']: ps['branch'] for ps in ps_members_response.data}
+        
+        
+        # Query fresh leads from ps_followup_master table
+        # Fresh leads: lead_status = 'Pending' AND final_status = 'Pending'
+        query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('lead_status', 'Pending').eq('final_status', 'Pending')
+        
+        # Apply date range filter based on ps_assigned_at
+        if date_range and date_range != 'all':
+            from datetime import datetime, timedelta
+            try:
+                days = int(date_range)
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=days)
+                
+                # Convert to ISO format for Supabase
+                start_iso = start_date.isoformat()
+                end_iso = end_date.isoformat()
+                
+                query = query.gte('ps_assigned_at', start_iso).lte('ps_assigned_at', end_iso)
+            except ValueError:
+                pass
+        
+        # Execute query
+        response = query.execute()
+        all_leads = response.data or []
+        
+        # Apply search filter if provided
+        if search:
+            search_term = search.lower()
+            all_leads = [lead for lead in all_leads if 
+                        (lead.get('customer_name', '').lower().find(search_term) != -1) or
+                        (lead.get('customer_mobile_number', '').find(search_term) != -1) or
+                        (lead.get('lead_uid', '').lower().find(search_term) != -1)]
+        
+        # Apply PS member filter if provided
+        if ps_member and ps_member != 'all':
+            all_leads = [lead for lead in all_leads if str(lead.get('ps_id')) == str(ps_member)]
+        
+        # Deduplicate leads by lead_uid (most important) and customer_mobile_number
+        try:
+            seen_uids = set()
+            seen_mobiles = set()
+            deduplicated_leads = []
+            
+            for lead in all_leads:
+                lead_uid = lead.get('lead_uid')
+                mobile = lead.get('customer_mobile_number')
+                
+                # Primary deduplication by lead_uid
+                if lead_uid and lead_uid in seen_uids:
+                    continue
+                    
+                # Secondary deduplication by mobile number (if no lead_uid)
+                if not lead_uid and mobile and mobile in seen_mobiles:
+                    continue
+                
+                # Add to seen sets
+                if lead_uid:
+                    seen_uids.add(lead_uid)
+                if mobile:
+                    seen_mobiles.add(mobile)
+                    
+                deduplicated_leads.append(lead)
+        except Exception as dedup_error:
+            deduplicated_leads = all_leads  # Fallback to original list
+        
+        # Sort by ps_assigned_at desc and apply pagination
+        deduplicated_leads.sort(key=lambda x: x.get('ps_assigned_at', x.get('created_at', '')), reverse=True)
+        leads = deduplicated_leads[offset:offset + limit]
+        
+        # Enrich leads with PS member names and other details
+        enriched_leads = []
+        for lead in leads:
+            ps_id = lead.get('ps_id')
+            ps_name = ps_member_names.get(ps_id, 'Unknown')
+            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            
+            # Get additional details from qualified_leads if available
+            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
+            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            
+            enriched_lead = {
+                **lead,
+                'ps_name': ps_name,
+                'ps_branch': ps_branch,
+                'icrop_id': qualified_data.get('icrop_id'),
+                'make': '',  # qualified_leads doesn't have make column
+                'model': qualified_data.get('model_interested', ''),  # Use model_interested instead of model
+                'variant': qualified_data.get('variant')
+            }
+            
+            enriched_leads.append(enriched_lead)
+        
+        # Get total count for pagination (use deduplicated leads)
+        total_count = len(deduplicated_leads)
+        
+        return {
+            "leads": enriched_leads,
+            "total": total_count,
+            "ps_members": ps_members_response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/team-leader/todays-followup")
+async def get_todays_followup(
+    team_leader_id: str,
+    search: Optional[str] = None,
+    ps_member: Optional[str] = None,
+    date_range: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user=Depends(get_current_user)
+):
+    """Get today's follow-up leads for Team Leaders - leads with follow_up_date = today or overdue"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Verify the team leader ID matches the current user
+        if current_user.role == 'team_leader' and current_user.id != team_leader_id:
+            raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's leads.")
+        
+        # Get all PS members under this team leader
+        ps_members_response = supabase.table('users').select('id, full_name, branch').eq('role', 'ps').eq('is_active', True).eq('team_leader_id', team_leader_id).execute()
+        
+        if not ps_members_response.data:
+            return {"leads": [], "total": 0, "message": "No PS members found under this team leader"}
+        
+        ps_member_ids = [ps['id'] for ps in ps_members_response.data]
+        ps_member_names = {ps['id']: ps['full_name'] for ps in ps_members_response.data}
+        ps_member_branches = {ps['id']: ps['branch'] for ps in ps_members_response.data}
+        
+        # Query today's follow-up leads from ps_followup_master table
+        # Today's follow-up: follow_up_date = today OR follow_up_date < today (overdue)
+        from datetime import datetime, timedelta
+        
+        # Get today's date
+        today = datetime.now().date()
+        today_str = today.isoformat()
+        
+        # Apply date range filter if provided
+        if date_range and date_range != 'all':
+            try:
+                days = int(date_range)
+                if days > 0:
+                    start_date = today - timedelta(days=days)
+                    start_date_str = start_date.isoformat()
+                    query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).gte('follow_up_date', start_date_str).lte('follow_up_date', today_str)
+                else:
+                    query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str)
+            except ValueError:
+                query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str)
+        else:
+            # Default: show today and overdue follow-ups
+            query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str)
+        
+        # Execute query
+        response = query.execute()
+        all_leads = response.data or []
+        
+        # Filter out leads with final_status = 'Won' or 'Lost'
+        all_leads = [lead for lead in all_leads if lead.get('final_status', '').lower() not in ['won', 'lost']]
+        
+        # Filter out leads that are awaiting CRE approval
+        all_leads = [lead for lead in all_leads if not (lead.get('lost_requested_by') and not lead.get('lost_approved_by'))]
+        
+        # Apply search filter if provided
+        if search:
+            search_term = search.lower()
+            all_leads = [lead for lead in all_leads if 
+                        (lead.get('customer_name', '').lower().find(search_term) != -1) or
+                        (lead.get('customer_mobile_number', '').find(search_term) != -1) or
+                        (lead.get('lead_uid', '').lower().find(search_term) != -1)]
+        
+        # Apply PS member filter if provided
+        if ps_member and ps_member != 'all':
+            all_leads = [lead for lead in all_leads if str(lead.get('ps_id')) == str(ps_member)]
+        
+        # Deduplicate leads by lead_uid (most important) and customer_mobile_number
+        try:
+            seen_uids = set()
+            seen_mobiles = set()
+            deduplicated_leads = []
+            
+            for lead in all_leads:
+                lead_uid = lead.get('lead_uid')
+                mobile = lead.get('customer_mobile_number')
+                
+                # Primary deduplication by lead_uid
+                if lead_uid and lead_uid in seen_uids:
+                    continue
+                    
+                # Secondary deduplication by mobile number (if no lead_uid)
+                if not lead_uid and mobile and mobile in seen_mobiles:
+                    continue
+                
+                # Add to seen sets
+                if lead_uid:
+                    seen_uids.add(lead_uid)
+                if mobile:
+                    seen_mobiles.add(mobile)
+                    
+                deduplicated_leads.append(lead)
+        except Exception as dedup_error:
+            deduplicated_leads = all_leads  # Fallback to original list
+        
+        # Sort by follow_up_date ascending with overdue first
+        def sort_key(lead):
+            follow_up_date = lead.get('follow_up_date', '')
+            if follow_up_date:
+                try:
+                    follow_date = datetime.fromisoformat(follow_up_date.replace('Z', '+00:00')).date()
+                    # Overdue leads (past dates) come first, then today's leads
+                    if follow_date < today:
+                        return (0, follow_date)  # Overdue first
+                    elif follow_date == today:
+                        return (1, follow_date)  # Today's leads second
+                    else:
+                        return (2, follow_date)  # Future leads last
+                except:
+                    return (3, '')  # Invalid dates last
+            return (3, '')
+        
+        deduplicated_leads.sort(key=sort_key)
+        leads = deduplicated_leads[offset:offset + limit]
+        
+        # Enrich leads with PS member names and other details
+        enriched_leads = []
+        for lead in leads:
+            ps_id = lead.get('ps_id')
+            ps_name = ps_member_names.get(ps_id, 'Unknown')
+            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            
+            # Get additional details from qualified_leads if available
+            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
+            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            
+            # Calculate next call number and overdue status
+            follow_up_date = lead.get('follow_up_date')
+            next_call_number = 1
+            is_overdue = False
+            overdue_days = 0
+            
+            if follow_up_date:
+                try:
+                    follow_date = datetime.fromisoformat(follow_up_date.replace('Z', '+00:00')).date()
+                    if follow_date < today:
+                        is_overdue = True
+                        overdue_days = (today - follow_date).days
+                except:
+                    pass
+            
+            # Determine next call number based on existing call remarks
+            call_fields = [
+                'first_call_remark', 'second_call_remark', 'third_call_remark',
+                'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark'
+            ]
+            
+            for i, field in enumerate(call_fields):
+                if lead.get(field):
+                    next_call_number = i + 2  # Next call number
+            
+            enriched_lead = {
+                **lead,
+                'ps_name': ps_name,
+                'ps_branch': ps_branch,
+                'icrop_id': qualified_data.get('icrop_id'),
+                'make': '',
+                'model': qualified_data.get('model_interested', ''),
+                'variant': qualified_data.get('variant'),
+                'next_call_number': next_call_number,
+                'is_overdue': is_overdue,
+                'overdue_days': overdue_days,
+                'awaiting_cre_approval': bool(lead.get('lost_requested_by') and not lead.get('lost_approved_by'))
+            }
+            enriched_leads.append(enriched_lead)
+        
+        # Get total count for pagination (use deduplicated leads)
+        total_count = len(deduplicated_leads)
+        
+        return {
+            "leads": enriched_leads,
+            "total": total_count,
+            "ps_members": ps_members_response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/team-leader/open-leads")
+async def get_open_leads(
+    team_leader_id: str,
+    search: Optional[str] = None,
+    ps_member: Optional[str] = None,
+    date_range: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user=Depends(get_current_user)
+):
+    """Get open leads for Team Leaders - leads with final_status = 'Pending'"""
+    try:
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Verify the team leader ID matches the current user
+        if current_user.role == 'team_leader' and current_user.id != team_leader_id:
+            raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's leads.")
+        
+        # Get all PS members under this team leader
+        ps_members_response = supabase.table('users').select('id, full_name, branch').eq('role', 'ps').eq('is_active', True).eq('team_leader_id', team_leader_id).execute()
+        
+        if not ps_members_response.data:
+            return {"leads": [], "total": 0, "message": "No PS members found under this team leader"}
+        
+        ps_member_ids = [ps['id'] for ps in ps_members_response.data]
+        ps_member_names = {ps['id']: ps['full_name'] for ps in ps_members_response.data}
+        ps_member_branches = {ps['id']: ps['branch'] for ps in ps_members_response.data}
+        
+        # Query open leads from ps_followup_master table with final_status = 'Pending'
+        query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Pending')
+        
+        # Apply date range filter if provided
+        if date_range and date_range != 'all':
+            from datetime import datetime, timedelta
+            try:
+                days = int(date_range)
+                if days > 0:
+                    today = datetime.now().date()
+                    start_date = today - timedelta(days=days)
+                    start_date_str = start_date.isoformat()
+                    query = query.gte('created_at', start_date_str)
+            except ValueError:
+                pass
+        
+        # Execute query
+        response = query.execute()
+        all_leads = response.data or []
+        
+        # Apply search filter if provided
+        if search:
+            search_term = search.lower()
+            all_leads = [lead for lead in all_leads if 
+                        (lead.get('customer_name', '').lower().find(search_term) != -1) or
+                        (lead.get('customer_mobile_number', '').find(search_term) != -1) or
+                        (lead.get('lead_uid', '').lower().find(search_term) != -1)]
+        
+        # Apply PS member filter if provided
+        if ps_member and ps_member != 'all':
+            all_leads = [lead for lead in all_leads if str(lead.get('ps_id')) == str(ps_member)]
+        
+        # Deduplicate leads by lead_uid (most important) and customer_mobile_number
+        try:
+            seen_uids = set()
+            seen_mobiles = set()
+            deduplicated_leads = []
+            
+            for lead in all_leads:
+                lead_uid = lead.get('lead_uid')
+                mobile = lead.get('customer_mobile_number')
+                
+                # Primary deduplication by lead_uid
+                if lead_uid and lead_uid in seen_uids:
+                    continue
+                    
+                # Secondary deduplication by mobile number (if no lead_uid)
+                if not lead_uid and mobile and mobile in seen_mobiles:
+                    continue
+                
+                # Add to seen sets
+                if lead_uid:
+                    seen_uids.add(lead_uid)
+                if mobile:
+                    seen_mobiles.add(mobile)
+                    
+                deduplicated_leads.append(lead)
+        except Exception as dedup_error:
+            deduplicated_leads = all_leads  # Fallback to original list
+        
+        # Sort by created_at descending (newest first)
+        deduplicated_leads.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        leads = deduplicated_leads[offset:offset + limit]
+        
+        # Enrich leads with PS member names and other details
+        enriched_leads = []
+        for lead in leads:
+            ps_id = lead.get('ps_id')
+            ps_name = ps_member_names.get(ps_id, 'Unknown')
+            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            
+            # Get additional details from qualified_leads if available
+            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
+            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            
+            # Calculate next call number
+            next_call_number = 1
+            
+            # Determine next call number based on existing call remarks
+            call_fields = [
+                'first_call_remark', 'second_call_remark', 'third_call_remark',
+                'fourth_call_remark', 'fifth_call_remark', 'sixth_call_remark', 'seventh_call_remark'
+            ]
+            
+            for i, field in enumerate(call_fields):
+                if lead.get(field):
+                    next_call_number = i + 2  # Next call number
+            
+            enriched_lead = {
+                **lead,
+                'ps_name': ps_name,
+                'ps_branch': ps_branch,
+                'icrop_id': qualified_data.get('icrop_id'),
+                'make': '',
+                'model': qualified_data.get('model_interested', ''),
+                'variant': qualified_data.get('variant'),
+                'next_call_number': next_call_number,
+                'awaiting_cre_approval': bool(lead.get('lost_requested_by') and not lead.get('lost_approved_by'))
+            }
+            enriched_leads.append(enriched_lead)
+        
+        # Get total count for pagination (use deduplicated leads)
+        total_count = len(deduplicated_leads)
+        
+        return {
+            "leads": enriched_leads,
+            "total": total_count,
+            "ps_members": ps_members_response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/debug/cre-call-history")
 async def debug_cre_call_history():
     """Debug endpoint to check CRE call history data"""
