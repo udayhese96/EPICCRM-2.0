@@ -118,6 +118,19 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         return
       }
 
+      // Try Sales Manager users
+      let { data: smUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .eq('role', 'sales_manager')
+        .single()
+
+      if (smUser) {
+        setUser({ ...smUser, role: 'sales_manager' })
+        return
+      }
+
       // If no user found, redirect to login
       router.push("/auth/login")
     } catch (error) {

@@ -1,401 +1,329 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { RefreshCw, Users, TrendingUp, DollarSign, AlertTriangle, Clock, CheckCircle, XCircle } from 'lucide-react'
-import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { 
+  BarChart3, 
+  TrendingUp, 
+  Users, 
+  Calendar,
+  RefreshCw,
+  Download,
+  Filter
+} from 'lucide-react'
 
-// Import analytics components
-import { KPICard } from '@/components/analytics/KPICard'
-import { TrendChart } from '@/components/analytics/TrendChart'
-import { LeaderboardTable } from '@/components/analytics/LeaderboardTable'
-import { AlertCard } from '@/components/analytics/AlertCard'
-
-interface SalesManagerAnalyticsData {
-  approvalMetrics: {
-    totalRequests: number
-    pendingRequests: number
-    approvedRequests: number
-    rejectedRequests: number
-    approvalRate: number
-    avgApprovalTime: number
-  }
-  bookingStats: {
-    pending: number
-    approved: number
-    rejected: number
-    total: number
-  }
-  retailStats: {
-    pending: number
-    approved: number
-    rejected: number
-    total: number
-  }
-  salesMetrics: {
-    totalLeads: number
-    qualifiedLeads: number
-    bookedLeads: number
-    retailedLeads: number
-    qualificationRate: number
-    bookingRate: number
-    retailRate: number
-    projectedRevenue: number
-  }
-  crePerformance: Array<{
-    creName: string
-    total: number
-    qualified: number
-    booked: number
-    retailed: number
-    qualificationRate: number
-    bookingRate: number
-    retailRate: number
-  }>
-  dailyTrends: Array<{
-    date: string
-    requests: number
-    approved: number
-    rejected: number
-  }>
+interface AnalyticsData {
+  id: string
+  metric: string
+  value: number
+  change: number
+  period: string
+  category: string
 }
 
-export default function SalesManagerAnalyticsDashboard() {
-  const [data, setData] = useState<SalesManagerAnalyticsData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [selectedPeriod, setSelectedPeriod] = useState('30')
+const SalesManagerAnalytics = () => {
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData[]>([])
+  const [loading, setLoading] = useState(true)
   const [userBranch, setUserBranch] = useState<string | null>(null)
 
   // Get user's branch from localStorage on mount
-  useEffect(() => {
+  React.useEffect(() => {
     const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
     const parsed = session ? JSON.parse(session) : null
     const branch = parsed?.branch || null
     setUserBranch(branch)
+    console.log('🏢 [Sales Manager Analytics] User branch:', branch)
   }, [])
 
-  const fetchData = async () => {
+  // Load analytics data
+  const loadAnalyticsData = async () => {
     try {
-      setIsLoading(true)
-      const params = new URLSearchParams({
-        period: selectedPeriod,
-        ...(userBranch && { branch: userBranch })
-      })
+      setLoading(true)
+      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
+      const parsed = session ? JSON.parse(session) : null
+      const token = parsed?.access_token || ''
+      const branch = parsed?.branch || ''
 
-      const response = await fetch(`/api/analytics/dynamic-status?${params}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        },
-        credentials: 'include'
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to fetch sales manager analytics')
+      if (!branch) {
+        console.warn('⚠️ Sales Manager has no branch assigned!')
+        setLoading(false)
+        return
       }
 
-      const analyticsData = await response.json()
-      setData(analyticsData)
+      // For now, we'll use mock data. Later this will be replaced with actual API call
+      const mockData: AnalyticsData[] = [
+        {
+          id: '1',
+          metric: 'Total Leads Generated',
+          value: 1250,
+          change: 12.5,
+          period: 'This Month',
+          category: 'Leads'
+        },
+        {
+          id: '2',
+          metric: 'Conversion Rate',
+          value: 18.5,
+          change: 2.3,
+          period: 'This Month',
+          category: 'Performance'
+        },
+        {
+          id: '3',
+          metric: 'Team Performance Score',
+          value: 87.2,
+          change: -1.2,
+          period: 'This Month',
+          category: 'Performance'
+        },
+        {
+          id: '4',
+          metric: 'Approved Bookings',
+          value: 156,
+          change: 8.7,
+          period: 'This Month',
+          category: 'Bookings'
+        },
+        {
+          id: '5',
+          metric: 'Retail Sales',
+          value: 89,
+          change: 15.3,
+          period: 'This Month',
+          category: 'Sales'
+        },
+        {
+          id: '6',
+          metric: 'Pending Approvals',
+          value: 23,
+          change: -5.2,
+          period: 'Current',
+          category: 'Approvals'
+        }
+      ]
+
+      setAnalyticsData(mockData)
+      console.log(`✅ [Sales Manager Analytics] Loaded ${mockData.length} analytics metrics for branch: ${branch}`)
     } catch (error) {
-      console.error('Error fetching sales manager analytics:', error)
-      toast.error('Failed to fetch sales manager analytics data')
+      console.error('❌ Error loading analytics data:', error)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
   useEffect(() => {
-    if (userBranch) {
-      fetchData()
+    loadAnalyticsData()
+  }, [])
+
+  const formatValue = (value: number, metric: string) => {
+    if (metric.includes('Rate') || metric.includes('Score')) {
+      return `${value}%`
     }
-  }, [userBranch, selectedPeriod])
-
-  const refreshData = () => {
-    fetchData()
+    return value.toLocaleString()
   }
 
-  const handleAlertAction = (alert: any) => {
-    toast.info(`Action triggered for: ${alert.type}`)
+  const getChangeColor = (change: number) => {
+    if (change > 0) return 'text-green-600'
+    if (change < 0) return 'text-red-600'
+    return 'text-gray-600'
   }
 
-  if (isLoading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading sales manager analytics...</p>
-          </div>
-        </div>
-      </DashboardLayout>
-    )
+  const getChangeIcon = (change: number) => {
+    if (change > 0) return <TrendingUp className="w-4 h-4" />
+    if (change < 0) return <TrendingUp className="w-4 h-4 rotate-180" />
+    return null
   }
 
-  if (!data) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <AlertTriangle className="h-8 w-8 mx-auto mb-4 text-red-500" />
-            <p className="text-gray-600">Failed to load sales manager analytics</p>
-            <Button onClick={fetchData} className="mt-4">
-              Try Again
-            </Button>
-          </div>
-        </div>
-      </DashboardLayout>
-    )
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'Leads':
+        return 'bg-blue-100 text-blue-800'
+      case 'Performance':
+        return 'bg-green-100 text-green-800'
+      case 'Bookings':
+        return 'bg-purple-100 text-purple-800'
+      case 'Sales':
+        return 'bg-orange-100 text-orange-800'
+      case 'Approvals':
+        return 'bg-yellow-100 text-yellow-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
   }
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Sales Manager Analytics</h1>
-            <p className="text-gray-600 mt-2">
-              Sales oversight and approval management
-              {userBranch && (
-                <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded-full">
-                  {userBranch}
-                </span>
-              )}
-            </p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Period:</label>
-              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">Last 7 days</SelectItem>
-                  <SelectItem value="30">Last 30 days</SelectItem>
-                  <SelectItem value="90">Last 90 days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button onClick={refreshData} variant="outline" size="sm">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </div>
-
-        {/* Approval Metrics KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <KPICard
-            title="Pending Requests"
-            value={data.approvalMetrics.pendingRequests}
-            icon={Clock}
-            color="yellow"
-            subtitle="Awaiting your approval"
-          />
-          
-          <KPICard
-            title="Approved Requests"
-            value={data.approvalMetrics.approvedRequests}
-            icon={CheckCircle}
-            color="green"
-            subtitle="Successfully approved"
-          />
-          
-          <KPICard
-            title="Approval Rate"
-            value={`${data.approvalMetrics.approvalRate.toFixed(1)}%`}
-            icon={TrendingUp}
-            color="blue"
-            subtitle="Overall approval rate"
-          />
-          
-          <KPICard
-            title="Avg Approval Time"
-            value={`${data.approvalMetrics.avgApprovalTime.toFixed(1)}h`}
-            icon={Clock}
-            color="purple"
-            subtitle="Average processing time"
-          />
-        </div>
-
-        {/* Sales Performance KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <KPICard
-            title="Total Leads"
-            value={data.salesMetrics.totalLeads}
-            icon={Users}
-            color="blue"
-            subtitle="All leads in branch"
-          />
-          
-          <KPICard
-            title="Qualified Leads"
-            value={data.salesMetrics.qualifiedLeads}
-            icon={CheckCircle}
-            color="green"
-            subtitle={`${data.salesMetrics.qualificationRate.toFixed(1)}% qualification rate`}
-          />
-          
-          <KPICard
-            title="Retailed Units"
-            value={data.salesMetrics.retailedLeads}
-            icon={Award}
-            color="purple"
-            subtitle={`${data.salesMetrics.retailRate.toFixed(1)}% retail rate`}
-          />
-          
-          <KPICard
-            title="Projected Revenue"
-            value={`₹${(data.salesMetrics.projectedRevenue / 100000).toFixed(1)}L`}
-            icon={DollarSign}
-            color="green"
-            subtitle="Revenue potential"
-          />
-        </div>
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Approval Trends */}
-          <TrendChart
-            title="Daily Approval Trends"
-            data={data.dailyTrends}
-            lines={[
-              { dataKey: 'requests', name: 'Total Requests', color: '#3B82F6' },
-              { dataKey: 'approved', name: 'Approved', color: '#10B981' },
-              { dataKey: 'rejected', name: 'Rejected', color: '#EF4444' }
-            ]}
-            height={300}
-          />
-
-          {/* Booking vs Retail Stats */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold text-gray-900">
-                Booking vs Retail Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                {/* Booking Stats */}
-                <div className="space-y-3">
-                  <h4 className="font-semibold text-blue-600">📋 Booking Requests</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Pending:</span>
-                      <Badge className="bg-yellow-100 text-yellow-800">
-                        {data.bookingStats.pending}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Approved:</span>
-                      <Badge className="bg-green-100 text-green-800">
-                        {data.bookingStats.approved}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Rejected:</span>
-                      <Badge className="bg-red-100 text-red-800">
-                        {data.bookingStats.rejected}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between font-semibold">
-                      <span className="text-sm">Total:</span>
-                      <span>{data.bookingStats.total}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Retail Stats */}
-                <div className="space-y-3">
-                  <h4 className="font-semibold text-purple-600">🚗 Retail Requests</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Pending:</span>
-                      <Badge className="bg-yellow-100 text-yellow-800">
-                        {data.retailStats.pending}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Approved:</span>
-                      <Badge className="bg-green-100 text-green-800">
-                        {data.retailStats.approved}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Rejected:</span>
-                      <Badge className="bg-red-100 text-red-800">
-                        {data.retailStats.rejected}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between font-semibold">
-                      <span className="text-sm">Total:</span>
-                      <span>{data.retailStats.total}</span>
-                    </div>
-                  </div>
-                </div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-4xl font-bold text-gray-800">Sales Manager Analytics</h1>
+                {userBranch && (
+                  <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 text-sm font-semibold">
+                    📍 {userBranch}
+                  </Badge>
+                )}
               </div>
+              <p className="text-gray-600 text-lg">
+                Comprehensive analytics and performance metrics for {userBranch ? `${userBranch} branch` : 'your branch'}
+              </p>
+            </div>
+            <div className="flex gap-2 mt-4 md:mt-0">
+              <Button 
+                onClick={loadAnalyticsData}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105 flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh Data
+              </Button>
+              <Button 
+                variant="outline"
+                className="px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition-all duration-300 flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </Button>
+            </div>
+          </div>
+
+          {/* Analytics Table */}
+          <Card className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+              <CardTitle className="text-xl font-semibold flex items-center gap-2">
+                <BarChart3 className="w-6 h-6" />
+                Performance Analytics
+              </CardTitle>
+              <CardDescription className="text-blue-100">
+                Key performance indicators and metrics for sales team management
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="p-8 text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-2 text-gray-600">Loading analytics data...</p>
+                </div>
+              ) : analyticsData.length === 0 ? (
+                <div className="p-8 text-center">
+                  <BarChart3 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    No Analytics Data
+                  </h3>
+                  <p className="text-gray-600">
+                    No analytics data available at the moment.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left p-4 font-semibold text-gray-700">Metric</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Value</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Change</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Period</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Category</th>
+                        <th className="text-left p-4 font-semibold text-gray-700">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analyticsData.map((item) => (
+                        <tr key={item.id} className="border-b hover:bg-gray-50 transition-colors">
+                          <td className="p-4">
+                            <div className="font-semibold text-gray-800">{item.metric}</div>
+                          </td>
+                          <td className="p-4">
+                            <div className="text-2xl font-bold text-gray-900">
+                              {formatValue(item.value, item.metric)}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className={`flex items-center gap-1 ${getChangeColor(item.change)}`}>
+                              {getChangeIcon(item.change)}
+                              <span className="font-semibold">
+                                {item.change > 0 ? '+' : ''}{item.change}%
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="text-sm text-gray-600">{item.period}</div>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={getCategoryColor(item.category)}>
+                              {item.category}
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-blue-600 hover:text-blue-700"
+                              >
+                                <BarChart3 className="w-3 h-3 mr-1" />
+                                Details
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* Additional Analytics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+            <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-l-4 border-l-blue-500">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-blue-800 flex items-center gap-2">
+                  <Users className="w-5 h-5" />
+                  Team Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-blue-700">12</div>
+                <p className="text-sm text-blue-600">Active team members</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-l-4 border-l-green-500">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-green-800 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  Growth Rate
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-green-700">+15.3%</div>
+                <p className="text-sm text-green-600">This month vs last month</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-purple-50 to-violet-50 border-l-4 border-l-purple-500">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-purple-800 flex items-center gap-2">
+                  <Calendar className="w-5 h-5" />
+                  This Week
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-purple-700">45</div>
+                <p className="text-sm text-purple-600">New leads generated</p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-
-        {/* CRE Performance */}
-        <LeaderboardTable
-          title="CRE Performance in Branch"
-          entries={data.crePerformance.map(cre => ({
-            name: cre.creName,
-            metrics: {
-              total: cre.total,
-              qualified: cre.qualified,
-              booked: cre.booked,
-              retailed: cre.retailed
-            },
-            score: cre.retailRate
-          }))}
-          metricLabels={{
-            total: 'Total',
-            qualified: 'Qualified',
-            booked: 'Booked',
-            retailed: 'Retailed'
-          }}
-          maxEntries={10}
-        />
-
-        {/* Critical Alerts */}
-        <AlertCard
-          title="Critical Alerts & Action Items"
-          alerts={[
-            {
-              type: 'Pending Approvals',
-              count: data.approvalMetrics.pendingRequests,
-              priority: data.approvalMetrics.pendingRequests > 10 ? 'high' : 'medium',
-              description: 'Requests awaiting your approval',
-              action: 'Review Now'
-            },
-            {
-              type: 'Low Approval Rate',
-              count: data.approvalMetrics.approvalRate < 80 ? 1 : 0,
-              priority: data.approvalMetrics.approvalRate < 80 ? 'high' : 'low',
-              description: 'Approval rate below 80%',
-              action: data.approvalMetrics.approvalRate < 80 ? 'Investigate' : undefined
-            },
-            {
-              type: 'Slow Processing',
-              count: data.approvalMetrics.avgApprovalTime > 24 ? 1 : 0,
-              priority: data.approvalMetrics.avgApprovalTime > 24 ? 'medium' : 'low',
-              description: 'Average approval time over 24 hours',
-              action: data.approvalMetrics.avgApprovalTime > 24 ? 'Optimize' : undefined
-            }
-          ]}
-          onAction={handleAlertAction}
-        />
       </div>
     </DashboardLayout>
   )
 }
+
+export default SalesManagerAnalytics

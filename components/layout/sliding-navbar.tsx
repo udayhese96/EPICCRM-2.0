@@ -61,6 +61,10 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       receptionist: [
         { icon: Home, label: 'Dashboard', href: '/receptionist/dashboard' },
       ],
+      sales_manager: [
+        { icon: Home, label: 'Sales Manager Dashboard', href: '/sales-manager/dashboard' },
+        { icon: BarChart3, label: 'Analytics', href: '/sales-manager/analytics' },
+      ],
       cre_team_leader: [
         { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },
         { icon: Users, label: 'Teams', href: '/teams' },
