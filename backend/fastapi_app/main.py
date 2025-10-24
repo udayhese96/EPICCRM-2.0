@@ -101,7 +101,7 @@ except Exception as e:
         return Client()
 import os
 from decouple import config
-from .auth import get_current_user, admin_required, admin_or_branch_head, can_manage_leads
+from .auth import get_current_user, admin_required, admin_or_branch_head, can_manage_leads, CurrentUser
 from datetime import datetime, timezone, timedelta
 try:
     from zoneinfo import ZoneInfo
@@ -6525,6 +6525,755 @@ async def test_all_whatsapp_leads():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def require_sales_manager_or_admin():
+    """Dependency to require sales_manager or admin role"""
+    def role_checker(current_user: CurrentUser = Depends(get_current_user)):
+        if current_user.role not in ['sales_manager', 'admin']:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied. Only sales managers and admins can access analytics."
+            )
+        return current_user
+    return role_checker
+
+@app.get("/analytics/sales-manager/ps-performance")
+async def get_ps_performance_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get PS performance analytics for a specific branch.
+    This endpoint processes the data server-side for better performance and scalability.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate branch parameter
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Get all PS followup data for the branch
+        ps_data = supabase.table("ps_followup_master").select(
+            "ps_name, first_call_date, final_status, created_at"
+        ).eq("ps_branch", branch).execute()
+        
+        if not ps_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": [],
+                "message": f"No data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+        
+        # Process the data server-side
+        processed_data = process_ps_performance_data(ps_data.data)
+        
+        # Extract KPI cards data from TOTAL row
+        kpi_cards = extract_kpi_cards_data(processed_data)
+        
+        # Extract PS rankings data
+        ps_rankings = extract_ps_rankings_data(processed_data)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "data": processed_data,
+            "kpi_cards": kpi_cards,
+            "ps_rankings": ps_rankings,
+            "total_records": len(ps_data.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+                
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"Error in PS performance analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch PS performance data: {str(e)}"
+        )
+
+def process_ps_performance_data(raw_data):
+    """Process PS performance data server-side for better performance"""
+    ps_map = {}
+    
+    for row in raw_data:
+        ps_name = row['ps_name']
+        if ps_name not in ps_map:
+            ps_map[ps_name] = {
+                'ps_name': ps_name,
+                'lead_count': 0,
+                'unattended': 0,
+                'open_leads': 0,
+                'lost_leads': 0,
+                'approval_pending': 0,
+                'booked': 0,
+                'retailed': 0
+            }
+        
+        ps_data = ps_map[ps_name]
+        ps_data['lead_count'] += 1
+        
+        if not row['first_call_date']:
+            ps_data['unattended'] += 1
+        elif row['final_status'] == 'Lost':
+            ps_data['lost_leads'] += 1
+        elif row['final_status'] == 'Waiting for Approval':
+            ps_data['approval_pending'] += 1
+        elif row['final_status'] == 'Booked':
+            ps_data['booked'] += 1
+        elif row['final_status'] == 'Won':
+            ps_data['retailed'] += 1
+        
+        if (row['first_call_date'] and 
+            row['final_status'] in ['Waiting for Approval', 'Pending']):
+            ps_data['open_leads'] += 1
+    
+    # Convert to list and add totals
+    ps_list = list(ps_map.values())
+    
+    # Calculate totals
+    totals = {
+        'ps_name': 'TOTAL',
+        'lead_count': sum(ps['lead_count'] for ps in ps_list),
+        'unattended': sum(ps['unattended'] for ps in ps_list),
+        'open_leads': sum(ps['open_leads'] for ps in ps_list),
+        'lost_leads': sum(ps['lost_leads'] for ps in ps_list),
+        'approval_pending': sum(ps['approval_pending'] for ps in ps_list),
+        'booked': sum(ps['booked'] for ps in ps_list),
+        'retailed': sum(ps['retailed'] for ps in ps_list)
+    }
+    
+    return ps_list + [totals]
+
+def extract_kpi_cards_data(processed_data):
+    """Extract KPI cards data from the TOTAL row of PS performance data"""
+    try:
+        # Find the TOTAL row
+        total_row = None
+        for row in processed_data:
+            if row.get('ps_name') == 'TOTAL':
+                total_row = row
+                break
+        
+        if not total_row:
+            # Return empty KPI cards if no TOTAL row found
+            return {
+                "total_leads": {"value": 0, "label": "Total Leads"},
+                "untouched": {"value": 0, "percentage": 0.0, "label": "Untouched"},
+                "open_leads": {"value": 0, "percentage": 0.0, "label": "Open Leads"},
+                "lost_leads": {"value": 0, "percentage": 0.0, "label": "Lost Leads"},
+                "won_leads": {"value": 0, "percentage": 0.0, "label": "Won Leads"}
+            }
+        
+        # Extract values from TOTAL row
+        total_leads = total_row.get('lead_count', 0)
+        unattended = total_row.get('unattended', 0)
+        open_leads = total_row.get('open_leads', 0)
+        lost_leads = total_row.get('lost_leads', 0)
+        retailed = total_row.get('retailed', 0)
+        
+        # Calculate percentages (handle division by zero)
+        def safe_percentage(numerator, denominator):
+            if denominator == 0:
+                return 0.0
+            return round((numerator / denominator) * 100, 2)
+        
+        return {
+            "total_leads": {
+                "value": total_leads,
+                "label": "Total Leads"
+            },
+            "untouched": {
+                "value": unattended,
+                "percentage": safe_percentage(unattended, total_leads),
+                "label": "Untouched"
+            },
+            "open_leads": {
+                "value": open_leads,
+                "percentage": safe_percentage(open_leads, total_leads),
+                "label": "Open Leads"
+            },
+            "lost_leads": {
+                "value": lost_leads,
+                "percentage": safe_percentage(lost_leads, total_leads),
+                "label": "Lost Leads"
+            },
+            "won_leads": {
+                "value": retailed,
+                "percentage": safe_percentage(retailed, total_leads),
+                "label": "Won Leads"
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error extracting KPI cards data: {str(e)}")
+        # Return empty KPI cards on error
+        return {
+            "total_leads": {"value": 0, "label": "Total Leads"},
+            "untouched": {"value": 0, "percentage": 0.0, "label": "Untouched"},
+            "open_leads": {"value": 0, "percentage": 0.0, "label": "Open Leads"},
+            "lost_leads": {"value": 0, "percentage": 0.0, "label": "Lost Leads"},
+            "won_leads": {"value": 0, "percentage": 0.0, "label": "Won Leads"}
+        }
+
+def extract_ps_rankings_data(processed_data):
+    """Extract PS rankings data based on Won leads (Retailed) and Booked leads as tiebreaker"""
+    try:
+        # Filter out the TOTAL row and get only PS data
+        ps_data = [row for row in processed_data if row.get('ps_name') != 'TOTAL']
+        
+        if not ps_data:
+            return []
+        
+        # Sort PS by Won leads (retailed) descending, then by Booked leads descending as tiebreaker
+        sorted_ps = sorted(ps_data, key=lambda x: (-x.get('retailed', 0), -x.get('booked', 0)))
+        
+        # Create rankings with rank numbers
+        rankings = []
+        for i, ps in enumerate(sorted_ps, 1):
+            rankings.append({
+                "rank": i,
+                "ps_name": ps.get('ps_name', ''),
+                "won_leads": ps.get('retailed', 0),
+                "booked_leads": ps.get('booked', 0)
+            })
+        
+        return rankings
+        
+    except Exception as e:
+        print(f"Error extracting PS rankings data: {str(e)}")
+        return []
+
+@app.get("/analytics/sales-manager/lead-conversion")
+async def get_lead_conversion_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get lead conversion analytics for a specific branch.
+    Shows conversion rates and funnel metrics.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate branch parameter
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Get lead conversion data
+        conversion_data = supabase.table("ps_followup_master").select(
+            "ps_name, final_status, created_at, first_call_date"
+        ).eq("ps_branch", branch).execute()
+        
+        if not conversion_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": [],
+                "message": f"No conversion data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+        
+        # Process conversion data
+        processed_data = process_lead_conversion_data(conversion_data.data)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "data": processed_data,
+            "total_records": len(conversion_data.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in lead conversion analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch lead conversion data: {str(e)}"
+        )
+
+def process_lead_conversion_data(raw_data):
+    """Process lead conversion data for analytics"""
+    ps_conversions = {}
+    
+    for row in raw_data:
+        ps_name = row['ps_name']
+        if ps_name not in ps_conversions:
+            ps_conversions[ps_name] = {
+                'ps_name': ps_name,
+                'total_leads': 0,
+                'converted_leads': 0,
+                'conversion_rate': 0.0,
+                'avg_conversion_time': 0
+            }
+        
+        ps_data = ps_conversions[ps_name]
+        ps_data['total_leads'] += 1
+        
+        if row['final_status'] in ['Booked', 'Won']:
+            ps_data['converted_leads'] += 1
+            
+            # Calculate conversion time if both dates exist
+            if row['first_call_date'] and row['created_at']:
+                try:
+                    call_date = datetime.fromisoformat(row['first_call_date'].replace('Z', '+00:00'))
+                    created_date = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
+                    conversion_time = (call_date - created_date).days
+                    ps_data['avg_conversion_time'] += conversion_time
+                except:
+                    pass
+    
+    # Calculate conversion rates and average times
+    for ps_data in ps_conversions.values():
+        if ps_data['total_leads'] > 0:
+            ps_data['conversion_rate'] = (ps_data['converted_leads'] / ps_data['total_leads']) * 100
+        if ps_data['converted_leads'] > 0:
+            ps_data['avg_conversion_time'] = ps_data['avg_conversion_time'] / ps_data['converted_leads']
+    
+    return list(ps_conversions.values())
+
+@app.get("/analytics/sales-manager/branch-summary")
+async def get_branch_summary_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get comprehensive branch summary analytics.
+    High-level metrics for the entire branch.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate branch parameter
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Get comprehensive branch data
+        branch_data = supabase.table("ps_followup_master").select(
+            "ps_name, final_status, created_at, first_call_date, ps_branch"
+        ).eq("ps_branch", branch).execute()
+        
+        if not branch_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": {
+                    "total_leads": 0,
+                    "total_ps": 0,
+                    "conversion_rate": 0.0,
+                    "avg_response_time": 0.0,
+                    "status_distribution": {}
+                },
+                "message": f"No data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+        
+        # Process branch summary
+        summary = process_branch_summary_data(branch_data.data)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "data": summary,
+            "total_records": len(branch_data.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in branch summary analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch branch summary: {str(e)}"
+        )
+
+def process_branch_summary_data(raw_data):
+    """Process branch summary data for high-level analytics"""
+    total_leads = len(raw_data)
+    unique_ps = len(set(row['ps_name'] for row in raw_data))
+    
+    # Status distribution
+    status_counts = {}
+    for row in raw_data:
+        status = row['final_status']
+        status_counts[status] = status_counts.get(status, 0) + 1
+    
+    # Calculate conversion rate
+    converted = status_counts.get('Booked', 0) + status_counts.get('Won', 0)
+    conversion_rate = (converted / total_leads * 100) if total_leads > 0 else 0
+    
+    # Calculate average response time
+    response_times = []
+    for row in raw_data:
+        if row['first_call_date'] and row['created_at']:
+            try:
+                call_date = datetime.fromisoformat(row['first_call_date'].replace('Z', '+00:00'))
+                created_date = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
+                response_time = (call_date - created_date).days
+                response_times.append(response_time)
+            except:
+                pass
+    
+    avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+    
+    return {
+        "total_leads": total_leads,
+        "total_ps": unique_ps,
+        "conversion_rate": round(conversion_rate, 2),
+        "avg_response_time": round(avg_response_time, 1),
+        "status_distribution": status_counts
+    }
+
+@app.get("/analytics/sales-manager/source-analytics")
+async def get_source_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get hierarchical source analytics for a specific branch.
+    Shows main sources and their sub-sources with counts, won leads, and conversion rates.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate branch parameter
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+
+        # Get all source data for the branch
+        source_data = supabase.table("ps_followup_master").select(
+            "source, sub_source, final_status"
+        ).eq("ps_branch", branch).execute()
+
+        if not source_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": [],
+                "message": f"No source data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+
+        # Process the data to create hierarchical structure
+        processed_data = process_source_analytics_data(source_data.data)
+
+        return {
+            "success": True,
+            "branch": branch,
+            "data": processed_data,
+            "total_records": len(source_data.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"Error in source analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch source analytics data: {str(e)}"
+        )
+
+def process_source_analytics_data(raw_data):
+    """Process source analytics data to create hierarchical structure"""
+    # First, collect all unique sources and their sub-sources
+    source_map = {}
+    
+    for row in raw_data:
+        source = row.get('source', 'Unknown')
+        sub_source = row.get('sub_source', 'Unknown')
+        final_status = row.get('final_status', 'Unknown')
+        
+        # Initialize source if not exists
+        if source not in source_map:
+            source_map[source] = {
+                'source': source,
+                'count': 0,
+                'won': 0,
+                'sub_sources': {}
+            }
+        
+        # Count total leads for this source
+        source_map[source]['count'] += 1
+        
+        # Count won leads for this source
+        if final_status == 'Won':
+            source_map[source]['won'] += 1
+        
+        # Initialize sub-source if not exists
+        if sub_source not in source_map[source]['sub_sources']:
+            source_map[source]['sub_sources'][sub_source] = {
+                'sub_source': sub_source,
+                'count': 0,
+                'won': 0
+            }
+        
+        # Count total leads for this sub-source
+        source_map[source]['sub_sources'][sub_source]['count'] += 1
+        
+        # Count won leads for this sub-source
+        if final_status == 'Won':
+            source_map[source]['sub_sources'][sub_source]['won'] += 1
+    
+    # Convert to hierarchical list format
+    hierarchical_data = []
+    
+    for source_name, source_data in source_map.items():
+        # Add main source row
+        conversion_rate = (source_data['won'] / source_data['count'] * 100) if source_data['count'] > 0 else 0
+        
+        hierarchical_data.append({
+            'source': source_name,
+            'count': source_data['count'],
+            'won': source_data['won'],
+            'conversion_percentage': round(conversion_rate, 2),
+            'is_main_source': True
+        })
+        
+        # Add sub-source rows
+        for sub_source_name, sub_source_data in source_data['sub_sources'].items():
+            sub_conversion_rate = (sub_source_data['won'] / sub_source_data['count'] * 100) if sub_source_data['count'] > 0 else 0
+            
+            hierarchical_data.append({
+                'source': sub_source_name,
+                'count': sub_source_data['count'],
+                'won': sub_source_data['won'],
+                'conversion_percentage': round(sub_conversion_rate, 2),
+                'is_main_source': False,
+                'parent_source': source_name
+            })
+    
+    return hierarchical_data
+
+@app.get("/analytics/sales-manager/tl-performance")
+async def get_tl_performance_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get Team Leader performance analytics for a specific branch.
+    Shows team leaders and their PS performance metrics.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate branch parameter
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+
+        # Get all PS followup data for the branch
+        ps_data = supabase.table("ps_followup_master").select(
+            "ps_name, first_call_date, final_status, created_at"
+        ).eq("ps_branch", branch).execute()
+
+        if not ps_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": [],
+                "message": f"No data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+
+        # Get all team leaders for this branch
+        team_leaders_data = supabase.table("users").select(
+            "id, username"
+        ).eq("branch", branch).eq("role", "team_leader").execute()
+
+        print(f"DEBUG: Found {len(team_leaders_data.data) if team_leaders_data.data else 0} team leaders for branch {branch}")
+        if team_leaders_data.data:
+            print(f"DEBUG: Team leaders: {[tl.get('username') for tl in team_leaders_data.data]}")
+
+        # Get PS users with their team leader assignments
+        users_data = supabase.table("users").select(
+            "username, full_name, team_leader_id"
+        ).eq("branch", branch).execute()
+
+        # Create ID to Team Leader name mapping
+        tl_id_to_name_map = {}
+        if team_leaders_data.data:
+            for tl in team_leaders_data.data:
+                tl_id_to_name_map[tl.get('id')] = tl.get('username')
+
+        # Create PS to Team Leader mapping using full_name
+        ps_to_tl_map = {}
+        if users_data.data:
+            for user in users_data.data:
+                ps_username = user.get('username')
+                ps_full_name = user.get('full_name')
+                team_leader_id = user.get('team_leader_id')
+                if ps_full_name and team_leader_id:
+                    team_leader_name = tl_id_to_name_map.get(team_leader_id, f"Unknown TL ({team_leader_id})")
+                    # Map both username and full_name to team leader
+                    ps_to_tl_map[ps_username] = team_leader_name
+                    ps_to_tl_map[ps_full_name] = team_leader_name
+
+        print(f"DEBUG: PS to TL mapping: {ps_to_tl_map}")
+        print(f"DEBUG: Sample PS data: {ps_data.data[:3] if ps_data.data else 'No data'}")
+
+        # Process the data server-side - pass all team leaders and PS data
+        processed_data = process_tl_performance_data(ps_data.data, ps_to_tl_map, team_leaders_data.data)
+
+        return {
+            "success": True,
+            "branch": branch,
+            "data": processed_data,
+            "total_records": len(ps_data.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"Error in TL performance analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch TL performance data: {str(e)}"
+        )
+
+def process_tl_performance_data(raw_data, ps_to_tl_map, team_leaders_data):
+    """Process TL performance data server-side for better performance"""
+    tl_map = {}
+
+    # Process PS data and assign to team leaders
+    for row in raw_data:
+        ps_name = row['ps_name']
+        team_leader = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
+        
+        print(f"DEBUG: Processing PS '{ps_name}' -> Team Leader: '{team_leader}'")
+        
+        # If team leader not in our list, add them
+        if team_leader not in tl_map:
+            tl_map[team_leader] = {
+                'tl_name': team_leader,
+                'lead_count': 0,
+                'unattended': 0,
+                'open_leads': 0,
+                'lost_leads': 0,
+                'approval_pending': 0,
+                'booked': 0,
+                'retailed': 0
+            }
+
+        tl_data = tl_map[team_leader]
+        tl_data['lead_count'] += 1
+
+        if not row['first_call_date']:
+            tl_data['unattended'] += 1
+        elif row['final_status'] == 'Lost':
+            tl_data['lost_leads'] += 1
+        elif row['final_status'] == 'Waiting for Approval':
+            tl_data['approval_pending'] += 1
+        elif row['final_status'] == 'Booked':
+            tl_data['booked'] += 1
+        elif row['final_status'] == 'Won':
+            tl_data['retailed'] += 1
+
+        if (row['first_call_date'] and
+            row['final_status'] in ['Waiting for Approval', 'Pending']):
+            tl_data['open_leads'] += 1
+
+    # Convert to list and add totals
+    tl_list = list(tl_map.values())
+    
+    print(f"DEBUG: Final TL list has {len(tl_list)} entries: {[tl['tl_name'] for tl in tl_list]}")
+
+    # Calculate totals
+    totals = {
+        'tl_name': 'TOTAL',
+        'lead_count': sum(tl['lead_count'] for tl in tl_list),
+        'unattended': sum(tl['unattended'] for tl in tl_list),
+        'open_leads': sum(tl['open_leads'] for tl in tl_list),
+        'lost_leads': sum(tl['lost_leads'] for tl in tl_list),
+        'approval_pending': sum(tl['approval_pending'] for tl in tl_list),
+        'booked': sum(tl['booked'] for tl in tl_list),
+        'retailed': sum(tl['retailed'] for tl in tl_list)
+    }
+
+    return tl_list + [totals]
+
+@app.get("/analytics/health")
+async def analytics_health_check():
+    """
+    Health check endpoint for analytics service.
+    """
+    try:
+        # Test database connection
+        test_query = supabase.table("ps_followup_master").select("ps_name").limit(1).execute()
+        
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.now().isoformat(),
+            "service": "analytics-api"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": "disconnected",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "service": "analytics-api"
+        }
 
 JWT_SECRET = config('JWT_SECRET', default=os.environ.get('JWT_SECRET', 'your-jwt-secret-key-here'))
 JWT_ALGORITHM = config('JWT_ALGORITHM', default=os.environ.get('JWT_ALGORITHM', 'HS256'))
