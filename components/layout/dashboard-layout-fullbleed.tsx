@@ -96,6 +96,10 @@ export function DashboardLayoutFullBleed({ children }: DashboardLayoutFullBleedP
       ],
       branch_head: [
         { icon: Home, label: 'Branch Dashboard', href: '/branch-head/dashboard' },
+      ],
+      sales_manager: [
+        { icon: Home, label: 'Sales Manager Dashboard', href: '/sales-manager/dashboard' },
+        { icon: BarChart3, label: 'Analytics', href: '/sales-manager/analytics' },
       ]
     }
 

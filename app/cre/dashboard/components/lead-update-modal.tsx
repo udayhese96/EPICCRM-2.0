@@ -631,7 +631,7 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
       general_remarks: "",
       call_status: "",
       sales_outcome: "",
-      customer_location: ""
+        customer_location: "",
     }))
   }, [isOpen, lead])
 
