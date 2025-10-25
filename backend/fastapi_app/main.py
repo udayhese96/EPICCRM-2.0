@@ -6,6 +6,23 @@ from pydantic import BaseModel, ValidationError
 from typing import List, Optional, Dict
 import uvicorn
 import time
+import logging
+
+# Import WhatsApp service
+try:
+    from fastapi_app.whatsapp_service import whatsapp_service
+    WHATSAPP_AVAILABLE = True
+    print(f"[Startup] WhatsApp service imported successfully")
+except ImportError as e:
+    print(f"Warning: WhatsApp service import failed: {e}")
+    WHATSAPP_AVAILABLE = False
+    whatsapp_service = None
+except Exception as e:
+    print(f"Warning: WhatsApp service import failed with exception: {e}")
+    import traceback
+    traceback.print_exc()
+    WHATSAPP_AVAILABLE = False
+    whatsapp_service = None
 # Import Supabase with error handling
 try:
     from supabase import create_client, Client
@@ -3578,6 +3595,39 @@ async def assign_lead_to_ps(lead_uid: str, ps_data: dict, current_user=Depends(a
         
         followup_response = supabase.table('ps_follow_up_master').insert(followup_data).execute()
         
+        # Send WhatsApp notification to PS user
+        if WHATSAPP_AVAILABLE and whatsapp_service:
+            try:
+                # Get PS user details from users table
+                ps_user_response = supabase.table('users').select('phone, full_name').eq('id', ps_data["ps_id"]).execute()
+                if ps_user_response.data and ps_user_response.data[0].get('phone'):
+                    ps_phone = ps_user_response.data[0]['phone']
+                    ps_full_name = ps_user_response.data[0].get('full_name', ps_data["ps_name"])
+                    
+                    # Get lead data for notification
+                    lead_data_response = supabase.table('lead_master').select('*').eq('uid', lead_uid).execute()
+                    if lead_data_response.data:
+                        lead_data = lead_data_response.data[0]
+                        
+                        # Send WhatsApp notification
+                        notification_result = whatsapp_service.send_lead_assignment_notification(
+                            ps_phone_number=ps_phone,
+                            ps_name=ps_full_name,
+                            lead_data=lead_data
+                        )
+                        
+                        if notification_result['success']:
+                            print(f"[WhatsApp] Successfully sent notification to {ps_full_name} ({ps_phone})")
+                        else:
+                            print(f"[WhatsApp] Failed to send notification to {ps_full_name}: {notification_result.get('error', 'Unknown error')}")
+                    else:
+                        print(f"[WhatsApp] Could not fetch lead data for notification")
+                else:
+                    print(f"[WhatsApp] PS user {ps_data['ps_name']} (ID: {ps_data['ps_id']}) has no phone number configured")
+            except Exception as whatsapp_error:
+                print(f"[WhatsApp] Error sending notification: {str(whatsapp_error)}")
+                # Don't fail the assignment if WhatsApp fails
+        
         return {"message": "Lead assigned to PS successfully", "followup": followup_response.data[0] if followup_response.data else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -4108,6 +4158,36 @@ async def deassign_qualified_lead(deassignment: dict, current_user=Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class WhatsAppTestRequest(BaseModel):
+    phone_number: str
+    message: Optional[str] = None
+
+@app.post("/api/whatsapp/test")
+async def test_whatsapp_notification(
+    request: WhatsAppTestRequest,
+    current_user=Depends(get_current_user)
+):
+    """Test WhatsApp notification service"""
+    try:
+        # Allow admin and cre_team_leader roles to test
+        if current_user.role not in ['admin', 'cre_team_leader']:
+            raise HTTPException(status_code=403, detail="Insufficient permissions - Admin or CRE Team Leader role required")
+        
+        if not WHATSAPP_AVAILABLE or not whatsapp_service:
+            raise HTTPException(status_code=503, detail="WhatsApp service not available")
+        
+        test_message = request.message or "Test message from EPIC CRM - WhatsApp integration is working!"
+        
+        result = whatsapp_service.send_message(request.phone_number, test_message)
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Test completed"),
+            "error": result.get("error") if not result["success"] else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/qualified-leads/assign")
 async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_user=Depends(get_current_user)):
     """Assign qualified leads to PS users"""
@@ -4179,6 +4259,35 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     print(f"[Assign] Inserting into ps_followup_master for lead_uid: {lead_uid}")
                     supabase.table('ps_followup_master').insert(followup_data).execute()
                     print(f"[Assign] Successfully inserted into ps_followup_master for lead_uid: {lead_uid}")
+                    
+                    # Send WhatsApp notification to PS user
+                    if WHATSAPP_AVAILABLE and whatsapp_service:
+                        try:
+                            # Get PS user details from users table
+                            ps_user_response = supabase.table('users').select('phone, full_name').eq('id', assignment.ps_id).execute()
+                            if ps_user_response.data and ps_user_response.data[0].get('phone'):
+                                ps_phone = ps_user_response.data[0]['phone']
+                                ps_full_name = ps_user_response.data[0].get('full_name', assignment.ps_name)
+                                
+                                # Send WhatsApp notification
+                                notification_result = whatsapp_service.send_lead_assignment_notification(
+                                    ps_phone_number=ps_phone,
+                                    ps_name=ps_full_name,
+                                    lead_data=lead_data
+                                )
+                                
+                                if notification_result['success']:
+                                    print(f"[WhatsApp] Successfully sent notification to {ps_full_name} ({ps_phone})")
+                                else:
+                                    print(f"[WhatsApp] Failed to send notification to {ps_full_name}: {notification_result.get('error', 'Unknown error')}")
+                            else:
+                                print(f"[WhatsApp] PS user {assignment.ps_name} (ID: {assignment.ps_id}) has no phone number configured")
+                        except Exception as whatsapp_error:
+                            print(f"[WhatsApp] Error sending notification: {str(whatsapp_error)}")
+                            # Don't fail the assignment if WhatsApp fails
+                    else:
+                        print(f"[WhatsApp] WhatsApp service not available - WHATSAPP_AVAILABLE: {WHATSAPP_AVAILABLE}, whatsapp_service: {whatsapp_service}")
+                    
                     assigned_count += 1
                 else:
                     print(f"[Assign] Warning: No data found for lead_id {lead_id} in qualified_leads")
