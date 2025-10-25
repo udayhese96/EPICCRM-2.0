@@ -78,6 +78,11 @@ const getNavigationForRole = (role: string) => {
           icon: Building2,
         },
         {
+          name: "Analytics",
+          href: "/admin/analytics",
+          icon: BarChart3,
+        },
+        {
           name: "Reports",
           href: "/reports",
           icon: BarChart3,
@@ -102,7 +107,7 @@ const getNavigationForRole = (role: string) => {
         },
         {
           name: "Analytics",
-          href: "/analytics",
+          href: "/admin/analytics",
           icon: BarChart3,
         },
       ]
@@ -120,7 +125,7 @@ const getNavigationForRole = (role: string) => {
         },
         {
           name: "Analytics",
-          href: "/analytics",
+          href: "/admin/analytics",
           icon: BarChart3,
         },
       ]
@@ -188,6 +193,19 @@ const getNavigationForRole = (role: string) => {
           icon: Users,
         },
       ]
+    case "sales_manager":
+      return [
+        {
+          name: "Sales Manager Dashboard",
+          href: "/sales-manager/dashboard",
+          icon: LayoutDashboard,
+        },
+        {
+          name: "Analytics",
+          href: "/sales-manager/analytics",
+          icon: BarChart3,
+        },
+      ]
     default:
       // For unknown roles, try to redirect to role-specific dashboard
       const dashboardHref = role === 'admin' ? '/admin/dashboard' : '/dashboard'
@@ -217,6 +235,8 @@ export function Sidebar({ userRole }: SidebarProps) {
         return ["dashboard", "leads"].includes(resource)
       case "branch_head":
         return ["dashboard", "leads", "users", "reports"].includes(resource)
+      case "sales_manager":
+        return ["dashboard", "analytics"].includes(resource)
       default:
         return false
     }

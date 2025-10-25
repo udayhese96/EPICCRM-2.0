@@ -1005,7 +1005,9 @@ export default function PSDashboard() {
       })
 
       if (response.ok) {
-        const data = await response.json()
+        const responseData = await response.json()
+        // Extract leads array from the new API response format
+        const data = responseData.leads || responseData || []
         // Qualified leads loaded
         // Debug logging removed
         
@@ -1101,6 +1103,21 @@ export default function PSDashboard() {
 
   const handleUpdateFollowUp = async () => {
     if (!selectedFollowUp) return
+
+    // NEW: Validate booking/retail ID requirements
+    if (callOutcome === 'Booked' || callOutcome === 'Booked with another number') {
+      if (!bookingId || bookingId.trim() === "") {
+        toast.error("Booking ID is required when Call Outcome is 'Booked'. Please enter the booking ID.")
+        return
+      }
+    }
+    
+    if (callOutcome === 'Retailed') {
+      if (!retailedId || retailedId.trim() === "") {
+        toast.error("Retail ID is required when Call Outcome is 'Retailed'. Please enter the retail ID.")
+        return
+      }
+    }
 
     // Validate Order No. format if Booked
     if ((callOutcome === 'Booked' || callOutcome === 'Booked with another number') && bookingId) {

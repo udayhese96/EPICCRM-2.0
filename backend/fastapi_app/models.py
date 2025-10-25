@@ -10,6 +10,7 @@ class UserRole(str, Enum):
     cre_icrop = "cre_icrop"
     cre = "cre"
     ps = "ps"
+    sales_manager = "sales_manager"
     sales_team_leader = "sales_team_leader"
     team_leader = "team_leader"
     receptionist = "receptionist"

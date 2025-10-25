@@ -77,3 +77,4 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
     AND tc.table_name IN ('booking_and_retail_master', 'qualified_leads', 'trade_in_master')
 ORDER BY tc.table_name, tc.constraint_name;
 
+
