@@ -3774,36 +3774,55 @@ async def get_qualified_leads(
 
 @app.get("/api/cre-team-leader/qualified-leads")
 async def get_cre_team_leader_qualified_leads(
-    limit: int = Query(100, ge=1, le=2000, description="Number of records to return"),
-    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(100, ge=1, le=2000, description="Number of records per page"),
     current_user=Depends(get_current_user)
 ):
-    """Get qualified leads from qualified_leads table for CRE Team Leader dashboard - OPTIMIZED"""
+    """Get qualified leads from qualified_leads table for CRE Team Leader dashboard with pagination - MIXED LEADS WITH UNASSIGNED FIRST"""
     try:
+        offset = (page - 1) * limit
+        
         # Create cache key
         cache_params = {
             'role': current_user.role,
             'username': current_user.username,
             'branch_id': getattr(current_user, 'branch_id', None),
             'endpoint': 'cre-team-leader',
-            'limit': limit,
-            'offset': offset
+            'page': page,
+            'limit': limit
         }
         
         # Try to get from cache first
         cached_leads = get_cached_leads(cache_params)
         if cached_leads is not None:
-            return {
-                "leads": cached_leads,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "has_more": len(cached_leads) == limit
-                }
-            }
+            return cached_leads
         
-        # Only show active-qualified leads (exclude Won/Lost/Booked/Retailed)
-        # Show leads with NULL final_status or specific pending statuses
+        # Get total count first
+        count_response = (
+            supabase
+                .table('qualified_leads')
+                .select('id', count='exact')
+                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .execute()
+        )
+        total_count = count_response.count or 0
+        
+        # Get unassigned leads count
+        unassigned_count_response = (
+            supabase
+                .table('qualified_leads')
+                .select('id', count='exact')
+                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .is_('ps_name', 'null')
+                .execute()
+        )
+        unassigned_count = unassigned_count_response.count or 0
+        
+        # Calculate pagination logic
+        total_pages = (total_count + limit - 1) // limit
+        
+        # Get all leads first, then sort and paginate in Python
+        # This ensures proper sorting with unassigned first
         response = (
             supabase
                 .table('qualified_leads')
@@ -3815,25 +3834,39 @@ async def get_cre_team_leader_qualified_leads(
                 )
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .order('created_at', desc=True)
-                .range(offset, offset + limit - 1)
                 .execute()
         )
         
-        leads = response.data or []
-        has_more = len(leads) == limit
-        print(f"[GET Qualified Leads] Returning {len(leads)} leads")
+        # Sort all leads: unassigned first (ps_name is null), then by created_at desc
+        all_leads = response.data or []
+        all_leads.sort(key=lambda x: (
+            x.get('ps_name') is not None,  # False (unassigned) comes before True (assigned)
+            x.get('created_at', '')  # Then by created_at desc
+        ), reverse=False)
         
-        # Cache the results
-        cache_leads(cache_params, leads, ttl=180)  # 3 minutes cache
+        # Apply pagination after sorting
+        leads = all_leads[offset:offset + limit]
+        has_more = page < total_pages
         
-        return {
+        print(f"[GET Qualified Leads] Page {page}: Returning {len(leads)} leads (Total: {total_count}, Unassigned: {unassigned_count})")
+        
+        result = {
             "leads": leads,
             "pagination": {
+                "page": page,
                 "limit": limit,
-                "offset": offset,
+                "total_count": total_count,
+                "unassigned_count": unassigned_count,
+                "assigned_count": total_count - unassigned_count,
+                "total_pages": total_pages,
                 "has_more": has_more
             }
         }
+        
+        # Cache the results
+        cache_leads(cache_params, result, ttl=180)  # 3 minutes cache
+        
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

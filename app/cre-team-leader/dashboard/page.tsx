@@ -79,6 +79,14 @@ export default function CRETeamLeaderDashboard() {
   const [endDate, setEndDate] = useState('')
   const [sourceFilter, setSourceFilter] = useState<string>('all')
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [unassignedCount, setUnassignedCount] = useState(0)
+  const [assignedCount, setAssignedCount] = useState(0)
+  const [unassignedPages, setUnassignedPages] = useState(1)
+
   const [showCallHistory, setShowCallHistory] = useState(false)
   const [showTradeInDetails, setShowTradeInDetails] = useState(false)
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<QualifiedLead | null>(null)
@@ -90,8 +98,14 @@ export default function CRETeamLeaderDashboard() {
     if (supabaseUser) {
       setUser(JSON.parse(supabaseUser))
     }
-    loadData()
+    loadData(1) // Start with page 1
   }, [])
+
+  // Handle page changes
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+    loadData(page)
+  }
 
   useEffect(() => {
     if (selectedBranch) {
@@ -102,53 +116,63 @@ export default function CRETeamLeaderDashboard() {
   }, [selectedBranch, gemUsers])
 
   useEffect(() => {
-    let filtered = qualifiedLeads
+    // Only apply frontend filtering if there are active filters
+    const hasActiveFilters = searchTerm.trim() || startDate || endDate || (sourceFilter !== 'all')
+    
+    if (hasActiveFilters) {
+      let filtered = qualifiedLeads
 
-    if (searchTerm.trim()) {
-      filtered = filtered.filter(lead => 
-        lead.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.customer_mobile_number?.includes(searchTerm) ||
-        lead.lead_uid?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    }
-
-    if (startDate || endDate) {
-      filtered = filtered.filter(lead => {
-        const leadDate = new Date(lead.created_at)
-        const start = startDate ? new Date(startDate) : null
-        const end = endDate ? new Date(endDate) : null
-        
-        if (start && leadDate < start) return false
-        if (end && leadDate > end) return false
-        return true
-      })
-    }
-
-    if (sourceFilter !== 'all') {
-      if (sourceFilter === 'walkin') {
-        filtered = filtered.filter(lead => ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(lead.source))
-      } else {
-        filtered = filtered.filter(lead => lead.source === sourceFilter)
+      if (searchTerm.trim()) {
+        filtered = filtered.filter(lead => 
+          lead.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          lead.customer_mobile_number?.includes(searchTerm) ||
+          lead.lead_uid?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
+        )
       }
+
+      if (startDate || endDate) {
+        filtered = filtered.filter(lead => {
+          const leadDate = new Date(lead.created_at)
+          const start = startDate ? new Date(startDate) : null
+          const end = endDate ? new Date(endDate) : null
+          
+          if (start && leadDate < start) return false
+          if (end && leadDate > end) return false
+          return true
+        })
+      }
+
+      if (sourceFilter !== 'all') {
+        if (sourceFilter === 'walkin') {
+          filtered = filtered.filter(lead => ['Walk-in', 'Digital', 'Google', 'Meta', 'WhatsApp', 'Car Dekho', 'Car Wale', 'OEM', 'Tele Out', 'Referral', 'Other'].includes(lead.source))
+        } else {
+          filtered = filtered.filter(lead => lead.source === sourceFilter)
+        }
+      }
+
+      filtered.sort((a, b) => {
+        if (!a.ps_name && b.ps_name) return -1
+        if (a.ps_name && !b.ps_name) return 1
+        return 0
+      })
+
+      setFilteredLeads(filtered)
+    } else {
+      // No active filters - show the raw page data as-is from backend
+      setFilteredLeads(qualifiedLeads)
     }
-
-    filtered.sort((a, b) => {
-      if (!a.ps_name && b.ps_name) return -1
-      if (a.ps_name && !b.ps_name) return 1
-      return 0
-    })
-
-    setFilteredLeads(filtered)
   }, [searchTerm, qualifiedLeads, startDate, endDate, sourceFilter])
 
-  const loadData = async () => {
+  const loadData = async (page: number = currentPage) => {
     setIsLoading(true)
     try {
       const timestamp = Date.now()
+      const apiUrl = `/api/cre-team-leader/qualified-leads?page=${page}&limit=100&_t=${timestamp}`
+      
       const [leadsResponse, gemResponse, branchesResponse] = await Promise.all([
-        fetch(`/api/cre-team-leader/qualified-leads?_t=${timestamp}`, {
+        fetch(apiUrl, {
           headers: { 'Cache-Control': 'no-store' }
         }),
         fetch(`/api/ps-users?_t=${timestamp}`, {
@@ -158,15 +182,23 @@ export default function CRETeamLeaderDashboard() {
           headers: { 'Cache-Control': 'no-store' }
         })
       ])
-
+      
       const [leadsData, gemData, branchesData] = await Promise.all([
-        leadsResponse.ok ? leadsResponse.json() : {leads: []},
+        leadsResponse.ok ? leadsResponse.json() : {leads: [], pagination: {}},
         gemResponse.ok ? gemResponse.json() : [],
         branchesResponse.ok ? branchesResponse.json() : []
       ])
 
-      // Extract leads array from the new API response format
-      const leadsArray = leadsData.leads || leadsData || []
+      // Extract leads array and pagination info from the API response
+      const leadsArray = leadsData.leads || []
+      const pagination = leadsData.pagination || {}
+      
+      // Update pagination state
+      setTotalPages(pagination.total_pages || 1)
+      setTotalCount(pagination.total_count || 0)
+      setUnassignedCount(pagination.unassigned_count || 0)
+      setAssignedCount(pagination.assigned_count || 0)
+      setUnassignedPages(pagination.unassigned_pages || 1)
       
       const sortedLeads = leadsArray.sort((a: any, b: any) => {
         if (!a.ps_name && b.ps_name) return -1
@@ -200,31 +232,10 @@ export default function CRETeamLeaderDashboard() {
   }
 
   const handleBranchAssignment = async (leadId: string, branch: string) => {
-    try {
-      const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
-      const parsed = session ? JSON.parse(session) : null
-      const token = parsed?.access_token || ''
-      
-      const response = await fetch('/api/qualified-leads/assign-branch', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ lead_id: leadId, branch: branch }),
-      })
-
-      if (response.ok) {
-        toast.success(`Branch assigned successfully`)
-        setQualifiedLeads(prev => 
-          prev.map(lead => lead.id === leadId ? { ...lead, branch: branch } : lead)
-        )
-      } else {
-        toast.error('Failed to assign branch')
-      }
-    } catch (error) {
-      toast.error('Failed to assign branch')
-    }
+    // Just update the local state, don't make API call
+    setQualifiedLeads(prev => 
+      prev.map(lead => lead.id === leadId ? { ...lead, branch: branch } : lead)
+    )
   }
 
   const handleGemSelection = (leadId: string, gemName: string) => {
@@ -252,6 +263,22 @@ export default function CRETeamLeaderDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
       
+      // First assign branch, then assign PS
+      const branchResponse = await fetch('/api/qualified-leads/assign-branch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ lead_id: leadId, branch: lead.branch }),
+      })
+
+      if (!branchResponse.ok) {
+        toast.error('Failed to assign branch')
+        return
+      }
+
+      // Then assign PS
       const response = await fetch('/api/qualified-leads/assign', {
         method: 'POST',
         headers: {
@@ -298,16 +325,18 @@ export default function CRETeamLeaderDashboard() {
         },
         body: JSON.stringify({ lead_id: leadId }),
       })
-
+      
       if (response.ok) {
         toast.success('Lead deassigned successfully')
         setQualifiedLeads(prev => 
           prev.map(lead => lead.id === leadId ? { ...lead, ps_name: '', ps_id: '' } : lead)
         )
       } else {
-        toast.error('Failed to deassign lead')
+        const errorData = await response.json()
+        toast.error(`Failed to deassign lead: ${errorData.detail || 'Unknown error'}`)
       }
     } catch (error) {
+      console.error('Error deassigning lead:', error)
       toast.error('Failed to deassign lead')
     }
   }
@@ -345,7 +374,7 @@ export default function CRETeamLeaderDashboard() {
         setSelectedLeads([])
         setAssignmentDialog(false)
         setSelectedGem("")
-        loadData()
+        loadData(currentPage)
       } else {
         toast.error('Failed to assign leads')
       }
@@ -467,7 +496,7 @@ export default function CRETeamLeaderDashboard() {
                 </div>
                 <div className="flex gap-3">
                   <Button 
-                    onClick={loadData} 
+                    onClick={() => loadData(currentPage)} 
                     disabled={isLoading}
                     className="bg-white/10 hover:bg-white/20 text-white border border-white/20"
                   >
@@ -530,7 +559,7 @@ export default function CRETeamLeaderDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Total Leads</p>
-                    <p className="text-3xl font-bold text-gray-900">{qualifiedLeads.length}</p>
+                    <p className="text-3xl font-bold text-gray-900">{totalCount}</p>
                     <p className="text-xs text-gray-500 mt-1">All qualified leads</p>
                   </div>
                   <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl flex items-center justify-center">
@@ -545,7 +574,7 @@ export default function CRETeamLeaderDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Unassigned</p>
-                    <p className="text-3xl font-bold text-orange-600">{qualifiedLeads.filter(l => !l.ps_name).length}</p>
+                    <p className="text-3xl font-bold text-orange-600">{unassignedCount}</p>
                     <p className="text-xs text-gray-500 mt-1">Need assignment</p>
                   </div>
                   <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-orange-200 rounded-xl flex items-center justify-center">
@@ -560,7 +589,7 @@ export default function CRETeamLeaderDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Assigned</p>
-                    <p className="text-3xl font-bold text-green-600">{qualifiedLeads.filter(l => l.ps_name).length}</p>
+                    <p className="text-3xl font-bold text-green-600">{assignedCount}</p>
                     <p className="text-xs text-gray-500 mt-1">In progress</p>
                   </div>
                   <div className="w-12 h-12 bg-gradient-to-br from-green-100 to-green-200 rounded-xl flex items-center justify-center">
@@ -608,19 +637,50 @@ export default function CRETeamLeaderDashboard() {
                     <SelectItem value="Google">Google</SelectItem>
                   </SelectContent>
                 </Select>
+                {(searchTerm.trim() || startDate || endDate || sourceFilter !== 'all') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearchTerm('')
+                      setStartDate('')
+                      setEndDate('')
+                      setSourceFilter('all')
+                    }}
+                    className="rounded-xl"
+                  >
+                    <X className="w-4 h-4 mr-2" />
+                    Clear Filters
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg rounded-2xl overflow-hidden">
             <CardHeader className="bg-gradient-to-r from-gray-50/80 to-gray-100/80 px-6 py-4">
-              <CardTitle className="text-xl font-bold text-gray-800 flex items-center">
-                <div className="w-2 h-2 bg-orange-500 rounded-full mr-3"></div>
-                Lead Management
-                <Badge className="ml-3 bg-orange-100 text-orange-700 border-0">
-                  {filteredLeads.length} leads
-                </Badge>
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xl font-bold text-gray-800 flex items-center">
+                  <div className="w-2 h-2 bg-orange-500 rounded-full mr-3"></div>
+                  Lead Management
+                  <Badge className="ml-3 bg-orange-100 text-orange-700 border-0">
+                    {filteredLeads.length} leads
+                  </Badge>
+                </CardTitle>
+                <div className="flex items-center space-x-2">
+                  <Badge variant="outline" className="text-xs">
+                    Page {currentPage} of {totalPages}
+                  </Badge>
+                  <Badge className="bg-blue-100 text-blue-700 text-xs">
+                    Mixed Leads (Unassigned First)
+                  </Badge>
+                  {(searchTerm.trim() || startDate || endDate || sourceFilter !== 'all') && (
+                    <Badge className="bg-orange-100 text-orange-700 text-xs">
+                      Filtered
+                    </Badge>
+                  )}
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {filteredLeads.length === 0 ? (
@@ -795,6 +855,95 @@ export default function CRETeamLeaderDashboard() {
                 </div>
               )}
             </CardContent>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="bg-gradient-to-r from-gray-50/80 to-gray-100/80 px-6 py-4 border-t border-gray-200/60">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Showing page {currentPage} of {totalPages} 
+                    <span className="ml-2 text-blue-600 font-medium">
+                      (Mixed leads: {totalCount} total, {unassignedCount} unassigned, {assignedCount} assigned)
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(1)}
+                      disabled={currentPage === 1 || isLoading}
+                      className="text-xs"
+                    >
+                      First
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1 || isLoading}
+                      className="text-xs"
+                    >
+                      Previous
+                    </Button>
+                    
+                    {/* Page numbers */}
+                    <div className="flex items-center space-x-1">
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={currentPage === pageNum ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => handlePageChange(pageNum)}
+                            disabled={isLoading}
+                            className={`text-xs w-8 h-8 ${
+                              currentPage === pageNum 
+                                ? 'bg-orange-600 hover:bg-orange-700 text-white' 
+                                : 'hover:bg-orange-50'
+                            }`}
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages || isLoading}
+                      className="text-xs"
+                    >
+                      Next
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(totalPages)}
+                      disabled={currentPage === totalPages || isLoading}
+                      className="text-xs"
+                    >
+                      Last
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       </div>
