@@ -53,14 +53,26 @@ const computeCountsSnapshot = (leads: any[]) => {
   }
   const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"]) 
   
-  // Fresh leads: all non-qualified, non-won leads (including call outcomes like RNR, DND, etc.)
-  const fresh = leads.filter(l => {
-    const leadStatus = (l?.lead_status || '').toString().toLowerCase()
-    return leadStatus !== 'qualified' && !isFinalizedWon(l)
+  // Calculate individual components
+  const untouched = leads.filter(l => {
+    const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+    const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
+    return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending" && !isFinalizedWon(l)
   }).length
   
-  const called = leads.filter(l => calledSet.has(normalizeStatus(l?.lead_status)) && !isFinalizedWon(l)).length
-  const followUp = leads.filter(l => normalizeStatus(l?.lead_status) === 'call me back' && !isFinalizedWon(l)).length
+  const called = leads.filter(l => {
+    const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+    return calledSet.has(leadStatus) && !isFinalizedWon(l)
+  }).length
+  
+  const followUp = leads.filter(l => {
+    const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+    return leadStatus === "call me back" && !isFinalizedWon(l)
+  }).length
+  
+  // Fresh leads = untouched + called + followup (as requested)
+  const fresh = untouched + called + followUp
+  
   const qualified = leads.filter(l => (l?.lead_status === 'Qualified') && ((l?.final_status || '').toString().toLowerCase() === 'pending') && !isFinalizedWon(l)).length
   const pending = leads.filter(l => ((l?.final_status || '').toString().toLowerCase() === 'pending') && !!(l?.first_call_date) && !isFinalizedWon(l)).length
   return { total: leads.length, fresh, called, followUp, qualified, pending }
@@ -1186,21 +1198,32 @@ export default function CREDashboard() {
       
       // Note: RNR, Call me back, etc. are NOT excluded - they need follow-up!
     }
-    const isUntouched = (l: Lead) => {
+    
+    // Define call outcome statuses
+    const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"])
+    
+    // Calculate individual components
+    const untouched = leads.filter(l => {
       const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
       const finalStatus = (l?.final_status ?? "").toString().toLowerCase()
-      return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending"
-    }
-    const isCalled = (l: Lead) => {
-      const s = (l?.lead_status ?? "").toString().toLowerCase()
-      return ["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"].includes(s)
-    }
-    const isFollowUp = (l: Lead) => (l?.lead_status ?? "").toString().toLowerCase() === "call me back"
+      return (leadStatus === "" || leadStatus === "pending") && finalStatus === "pending" && !isFinalizedWon(l)
+    }).length
+    
+    const called = leads.filter(l => {
+      const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+      return calledSet.has(leadStatus) && !isFinalizedWon(l)
+    }).length
+    
+    const followUp = leads.filter(l => {
+      const leadStatus = (l?.lead_status ?? "").toString().toLowerCase()
+      return leadStatus === "call me back" && !isFinalizedWon(l)
+    }).length
+    
+    // Fresh leads = untouched + called + followup (as requested)
+    const fresh = untouched + called + followUp
+    
     return {
-      fresh: leads.filter(l => {
-        const leadStatus = (l?.lead_status || '').toString().toLowerCase()
-        return leadStatus !== 'qualified' && !isFinalizedWon(l)
-      }).length,
+      fresh,
       followup: leads.filter(lead => {
         if (!lead.follow_up_date) return false
         const followUpDate = lead.follow_up_date.includes('T') 
@@ -1220,11 +1243,16 @@ export default function CREDashboard() {
         const isRetailed = fs === 'retailed'
         return isLost || isLostRequested || isBooked || isRetailed
       }).length,
+      // Fixed: Won leads should show final_status = 'booked' or 'retailed'
       won: leads.filter(lead => {
         const fs = (lead?.final_status || '').toString().toLowerCase()
         return fs === 'booked' || fs === 'retailed'
       }).length,
-      lost: leads.filter(lead => lead?.lead_status === 'Lost').length,
+      // Fixed: Lost leads should show final_status = 'lost' (not lead_status)
+      lost: leads.filter(lead => {
+        const fs = (lead?.final_status || '').toString().toLowerCase()
+        return fs === 'lost'
+      }).length,
       lostRequested: leads.filter(lead => (lead?.final_status || '').toString().toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
       walkin: leads.filter(lead => ['Walk-in', 'Digital', 'Referral'].includes(lead.source)).length
