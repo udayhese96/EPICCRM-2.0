@@ -1104,6 +1104,21 @@ export default function PSDashboard() {
   const handleUpdateFollowUp = async () => {
     if (!selectedFollowUp) return
 
+    // NEW: Validate booking/retail ID requirements
+    if (callOutcome === 'Booked' || callOutcome === 'Booked with another number') {
+      if (!bookingId || bookingId.trim() === "") {
+        toast.error("Booking ID is required when Call Outcome is 'Booked'. Please enter the booking ID.")
+        return
+      }
+    }
+    
+    if (callOutcome === 'Retailed') {
+      if (!retailedId || retailedId.trim() === "") {
+        toast.error("Retail ID is required when Call Outcome is 'Retailed'. Please enter the retail ID.")
+        return
+      }
+    }
+
     // Validate Order No. format if Booked
     if ((callOutcome === 'Booked' || callOutcome === 'Booked with another number') && bookingId) {
       if (bookingId.length !== 12 || !bookingId.startsWith('ORD') || !/^ORD\d{9}$/.test(bookingId)) {
