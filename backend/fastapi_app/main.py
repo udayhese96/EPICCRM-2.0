@@ -2990,8 +2990,8 @@ async def get_fresh_leads(
         
         
         # Query fresh leads from ps_followup_master table
-        # Fresh leads: lead_status = 'Pending' AND final_status = 'Pending'
-        query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('lead_status', 'Pending').eq('final_status', 'Pending')
+        # Fresh leads: final_status = 'Pending' AND first_call_date IS NULL
+        query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Pending').is_('first_call_date', 'null')
         
         # Apply date range filter based on ps_assigned_at
         if date_range and date_range != 'all':

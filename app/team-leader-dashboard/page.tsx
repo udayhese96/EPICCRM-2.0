@@ -150,13 +150,19 @@ interface FollowupSummaryData {
 // Tab-specific data cache interface
 interface TabDataCache {
   [tabId: string]: {
-    data: any
+    data: any[]
     lastFetched: number
     filters: {
       dateRange: string
       selectedPS: string
     }
     isLoading: boolean
+    isLoadingMore: boolean
+    hasMore: boolean
+    totalCount: number
+    currentPage: number
+    searchTerm?: string
+    scrollPosition?: number
   }
 }
 
@@ -356,6 +362,9 @@ export default function TeamLeaderDashboard() {
       [tabId]: {
         ...prev[tabId],
         isLoading: true,
+        isLoadingMore: false,
+        hasMore: true,
+        currentPage: 0,
         filters: currentFilters
       }
     }))
@@ -385,25 +394,28 @@ export default function TeamLeaderDashboard() {
         case 'lost':
           data = await fetchLostData()
           break
-        case 'export-leads':
-          data = await fetchExportLeadsData()
-          break
         default:
           return null
       }
 
-      // Update cache
+      // Update cache with fresh data
       setTabDataCache(prev => ({
         ...prev,
         [tabId]: {
-          data,
+          data: data?.leads || [],
+          isLoading: false,
+          isLoadingMore: false,
+          hasMore: (data?.leads || []).length < (data?.total || 0),
+          totalCount: data?.total || 0,
+          currentPage: 0,
           lastFetched: Date.now(),
           filters: currentFilters,
-          isLoading: false
+          searchTerm: prev[tabId]?.searchTerm || '',
+          scrollPosition: prev[tabId]?.scrollPosition || 0
         }
       }))
 
-      return data
+      return data?.leads || []
     } catch (error) {
       console.error(`Error fetching ${tabId} data:`, error)
       setTabDataCache(prev => ({
@@ -418,14 +430,14 @@ export default function TeamLeaderDashboard() {
   }, [currentUserId, dateRange, selectedPS])
 
   // Individual tab data fetchers
-  const fetchFreshLeadsData = useCallback(async () => {
+  const fetchFreshLeadsData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/fresh-leads?${params.toString()}`, {
@@ -434,19 +446,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchTodaysFollowupData = useCallback(async () => {
+  const fetchTodaysFollowupData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/todays-followup?${params.toString()}`, {
@@ -455,19 +467,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchOpenLeadsData = useCallback(async () => {
+  const fetchOpenLeadsData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/open-leads?${params.toString()}`, {
@@ -476,19 +488,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchWaitingApprovalData = useCallback(async () => {
+  const fetchWaitingApprovalData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/waiting-approval?${params.toString()}`, {
@@ -497,19 +509,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchBookedData = useCallback(async () => {
+  const fetchBookedData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/booked?${params.toString()}`, {
@@ -518,19 +530,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchRetailedData = useCallback(async () => {
+  const fetchRetailedData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/retailed?${params.toString()}`, {
@@ -539,19 +551,19 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchLostData = useCallback(async () => {
+  const fetchLostData = useCallback(async (offset = 0, limit = 20) => {
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
       date_range: dateRange,
-      limit: '50',
-      offset: '0'
+      limit: limit.toString(),
+      offset: offset.toString()
     })
     
     const response = await fetch(`/api/team-leader/lost?${params.toString()}`, {
@@ -560,14 +572,180 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
-      return data.leads || []
+      return data
     }
-    return []
+    return { leads: [], total: 0 }
   }, [currentUserId, selectedPS, dateRange])
 
-  const fetchExportLeadsData = async () => {
-    // TODO: Implement export leads API
-    return []
+  // Refresh function for individual tabs
+  const refreshTabData = useCallback(async (tabId: string) => {
+    if (!currentUserId) return
+
+    const currentFilters = { dateRange, selectedPS }
+    
+    // Set loading state for this tab
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoading: true,
+        filters: currentFilters
+      }
+    }))
+
+    try {
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData()
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData()
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData()
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData()
+          break
+        case 'booked':
+          data = await fetchBookedData()
+          break
+        case 'retailed':
+          data = await fetchRetailedData()
+          break
+        case 'lost':
+          data = await fetchLostData()
+          break
+        default:
+          return null
+      }
+
+      // Update cache with fresh data
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          data: (data?.leads || data || []),
+          isLoading: false,
+          isLoadingMore: false,
+          hasMore: true,
+          totalCount: 0,
+          currentPage: 0,
+          lastFetched: Date.now(),
+          filters: currentFilters,
+          searchTerm: prev[tabId]?.searchTerm || '',
+          scrollPosition: prev[tabId]?.scrollPosition || 0
+        }
+      }))
+
+      return data
+    } catch (error) {
+      console.error(`Error refreshing ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoading: false
+        }
+      }))
+      return null
+    }
+  }, [currentUserId, dateRange, selectedPS, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
+
+  // Load more data for pagination
+  const loadMoreData = useCallback(async (tabId: string) => {
+    if (!currentUserId) return
+
+    const cachedData = tabDataCache[tabId]
+    if (!cachedData || cachedData.isLoadingMore || !cachedData.hasMore) return
+
+    // Set loading more state
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoadingMore: true
+      }
+    }))
+
+    try {
+      const nextPage = cachedData.currentPage + 1
+      const offset = nextPage * 20
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData(offset, 20)
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData(offset, 20)
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData(offset, 20)
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData(offset, 20)
+          break
+        case 'booked':
+          data = await fetchBookedData(offset, 20)
+          break
+        case 'retailed':
+          data = await fetchRetailedData(offset, 20)
+          break
+        case 'lost':
+          data = await fetchLostData(offset, 20)
+          break
+        default:
+          return
+      }
+
+      // Append new data to existing data
+      const newLeads = data?.leads || []
+      const existingData = cachedData.data || []
+      const updatedData = [...existingData, ...newLeads]
+      
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          data: updatedData,
+          isLoadingMore: false,
+          hasMore: updatedData.length < cachedData.totalCount,
+          currentPage: nextPage
+        }
+      }))
+    } catch (error) {
+      console.error(`Error loading more ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoadingMore: false
+        }
+      }))
+    }
+  }, [currentUserId, tabDataCache, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
+
+  // Infinite scroll hook
+  const useInfiniteScroll = (callback: () => void, hasMore: boolean, isLoadingMore: boolean) => {
+    useEffect(() => {
+      const handleScroll = () => {
+        if (isLoadingMore || !hasMore) return
+
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop
+        const windowHeight = window.innerHeight
+        const documentHeight = document.documentElement.scrollHeight
+
+        // Load more when user is 200px from bottom
+        if (scrollTop + windowHeight >= documentHeight - 200) {
+          callback()
+        }
+      }
+
+      window.addEventListener('scroll', handleScroll)
+      return () => window.removeEventListener('scroll', handleScroll)
+    }, [callback, hasMore, isLoadingMore])
   }
 
   // Analytics fetch functions (independent of tab filters)
@@ -652,8 +830,7 @@ export default function TeamLeaderDashboard() {
     { id: 'waiting-approval', label: 'Waiting for Approval', icon: Clock },
     { id: 'booked', label: 'Booked', icon: CheckCircle2 },
     { id: 'retailed', label: 'Retailed', icon: Award },
-    { id: 'lost', label: 'Lost Leads', icon: XCircle },
-    { id: 'export-leads', label: 'Export Leads', icon: ArrowUpRight }
+    { id: 'lost', label: 'Lost', icon: XCircle }
   ]
 
   // Placeholder component for empty tabs
@@ -671,6 +848,81 @@ export default function TeamLeaderDashboard() {
     </div>
   )
 
+  // Lightweight skeleton component for loading states
+  const TabSkeleton = () => (
+    <div className="space-y-6">
+      {/* Search Bar Skeleton */}
+      <div className="flex items-center space-x-4">
+        <div className="relative flex-1">
+          <div className="h-10 bg-gray-200 rounded-md animate-pulse"></div>
+        </div>
+      </div>
+
+      {/* Table Header Skeleton */}
+      <Card className="shadow-sm">
+        <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-6 w-32 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 w-48 bg-gray-200 rounded animate-pulse"></div>
+            </div>
+            <div className="h-6 w-16 bg-gray-200 rounded-full animate-pulse"></div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {/* Table Skeleton */}
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <th key={i} className="px-6 py-4">
+                        <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      {[1, 2, 3, 4, 5, 6].map((j) => (
+                        <td key={j} className="px-6 py-4">
+                          <div className="space-y-2">
+                            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div>
+                            <div className="h-3 w-16 bg-gray-200 rounded animate-pulse"></div>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile Card Skeleton */}
+          <div className="lg:hidden space-y-4 p-4">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="shadow-sm">
+                <CardContent className="p-4">
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((j) => (
+                      <div key={j} className="space-y-2">
+                        <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
+                        <div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
   // Fresh Leads Tab Component
   const FreshLeadsTab = () => {
     const [searchTerm, setSearchTerm] = useState('')
@@ -678,6 +930,16 @@ export default function TeamLeaderDashboard() {
     // Get data from cache
     const freshLeads = getCurrentTabData('fresh-leads')
     const isLoading = getCurrentTabLoading('fresh-leads')
+    const cachedData = tabDataCache['fresh-leads']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    // Infinite scroll for loading more data
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('fresh-leads')
+      }
+    }, hasMore, isLoadingMore)
 
     // Filter leads by search term
     const filteredLeads = useMemo(() => {
@@ -709,14 +971,7 @@ export default function TeamLeaderDashboard() {
     }
 
     if (isLoading) {
-      return (
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
-            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-            <p className="text-lg text-gray-600">Loading fresh leads...</p>
-          </div>
-        </div>
-      )
+      return <TabSkeleton />
     }
 
     return (
@@ -759,9 +1014,21 @@ export default function TeamLeaderDashboard() {
                   Newly assigned leads requiring immediate attention
                 </CardDescription>
               </div>
-              <Badge className="bg-orange-500 text-white">
-                {filteredLeads.length} Leads
-              </Badge>
+              <div className="flex items-center space-x-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refreshTabData('fresh-leads')}
+                  disabled={isLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </Button>
+                <Badge className="bg-orange-500 text-white">
+                  {filteredLeads.length} Leads
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -793,7 +1060,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -876,7 +1143,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any, index: number) => (
-                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <CardContent className="p-4 space-y-4">
                         {/* Lead Info */}
                         <div className="space-y-2">
@@ -956,6 +1223,23 @@ export default function TeamLeaderDashboard() {
                     </Card>
                   ))}
                 </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
               </>
             )}
           </CardContent>
@@ -1089,7 +1373,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -1205,7 +1489,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any, index: number) => (
-                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <CardContent className="p-4 space-y-4">
                         {/* Lead Info */}
                         <div className="space-y-2">
@@ -1451,7 +1735,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -1555,7 +1839,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any, index: number) => (
-                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <CardContent className="p-4 space-y-4">
                         {/* Lead Info */}
                         <div className="space-y-2">
@@ -1789,7 +2073,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -1893,7 +2177,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any, index: number) => (
-                    <Card key={lead.id || lead.lead_uid} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <CardContent className="p-4 space-y-4">
                         {/* Lead Info */}
                         <div className="space-y-2">
@@ -2127,7 +2411,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -2231,7 +2515,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any) => (
-                    <Card key={lead.id || lead.lead_uid} className="shadow-sm hover:shadow-md transition-shadow">
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className="shadow-sm hover:shadow-md transition-shadow">
                       <CardContent className="p-4">
                         <div className="space-y-3">
                           {/* Lead Info */}
@@ -2464,7 +2748,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
@@ -2568,7 +2852,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any) => (
-                    <Card key={lead.id || lead.lead_uid} className="shadow-sm hover:shadow-md transition-shadow">
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className="shadow-sm hover:shadow-md transition-shadow">
                       <CardContent className="p-4">
                         <div className="space-y-3">
                           {/* Lead Info */}
@@ -2789,7 +3073,7 @@ export default function TeamLeaderDashboard() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredLeads.map((lead: any, index: number) => (
-                        <tr key={lead.id || lead.lead_uid} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           {/* Lead Info */}
                           <td className="px-6 py-4 whitespace-normal break-normal">
                             <div className="space-y-1">
@@ -2889,7 +3173,7 @@ export default function TeamLeaderDashboard() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden space-y-4 p-4">
                   {filteredLeads.map((lead: any) => (
-                    <Card key={lead.id || lead.lead_uid} className="shadow-sm hover:shadow-md transition-shadow">
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} className="shadow-sm hover:shadow-md transition-shadow">
                       <CardContent className="p-4">
                         <div className="space-y-4">
                           {/* Lead Info */}
@@ -3381,7 +3665,7 @@ export default function TeamLeaderDashboard() {
                         {perf.leads && perf.leads.length > 0 ? (
                           perf.leads.map((lead) => (
                             <div 
-                              key={lead.id || lead.lead_uid} 
+                              key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`} 
                               className="p-4 hover:bg-gray-50 transition-colors cursor-pointer"
                               onClick={() => handleViewLead(lead)}
                             >
@@ -3931,12 +4215,7 @@ export default function TeamLeaderDashboard() {
             {/* Other Tab Content */}
             {activeTab === 'todays-followup' && (
               getCurrentTabLoading('todays-followup') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading today's follow-up...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <TodaysFollowupTab />
               )
@@ -3944,12 +4223,7 @@ export default function TeamLeaderDashboard() {
 
             {activeTab === 'open-leads' && (
               getCurrentTabLoading('open-leads') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading open leads...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <OpenLeadsTab />
               )
@@ -3957,12 +4231,7 @@ export default function TeamLeaderDashboard() {
 
             {activeTab === 'waiting-approval' && (
               getCurrentTabLoading('waiting-approval') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading waiting approval leads...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <WaitingApprovalTab />
               )
@@ -3970,12 +4239,7 @@ export default function TeamLeaderDashboard() {
 
             {activeTab === 'booked' && (
               getCurrentTabLoading('booked') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading booked leads...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <BookedTab />
               )
@@ -3983,12 +4247,7 @@ export default function TeamLeaderDashboard() {
 
             {activeTab === 'retailed' && (
               getCurrentTabLoading('retailed') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-green-200 border-t-green-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading retailed leads...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <RetailedTab />
               )
@@ -3996,31 +4255,9 @@ export default function TeamLeaderDashboard() {
 
             {activeTab === 'lost' && (
               getCurrentTabLoading('lost') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-red-200 border-t-red-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading lost leads...</p>
-                  </div>
-                </div>
+                <TabSkeleton />
               ) : (
                 <LostTab />
-              )
-            )}
-
-            {activeTab === 'export-leads' && (
-              getCurrentTabLoading('export-leads') ? (
-                <div className="flex items-center justify-center min-h-[400px]">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-                    <p className="text-lg text-gray-600">Loading export data...</p>
-                  </div>
-                </div>
-              ) : (
-                <EmptyStateCard 
-                  icon={ArrowUpRight} 
-                  title="Export Leads" 
-                  description="No export functionality available at the moment." 
-                />
               )
             )}
           </div>
@@ -4290,7 +4527,7 @@ export default function TeamLeaderDashboard() {
                       {selectedPSDetail.leads && selectedPSDetail.leads.length > 0 ? (
                         selectedPSDetail.leads.map((lead) => (
                           <Card 
-                            key={lead.id || lead.lead_uid}
+                            key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${index}`}
                             className="hover:shadow-md transition-shadow cursor-pointer"
                             onClick={() => {
                               setSelectedLead(lead)
