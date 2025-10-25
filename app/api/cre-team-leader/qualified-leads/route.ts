@@ -11,10 +11,15 @@ export async function GET(request: NextRequest) {
     // Get token from cookies if not in headers
     const token = request.cookies.get('access_token')?.value || request.headers.get('Authorization')
     
-    // Add cache-busting timestamp
-    const timestamp = Date.now()
+    // Get query parameters
+    const { searchParams } = new URL(request.url)
+    const page = searchParams.get('page') || '1'
+    const limit = searchParams.get('limit') || '100'
+    const timestamp = searchParams.get('_t') || Date.now().toString()
     
-    const response = await fetch(`${FASTAPI_URL}/api/cre-team-leader/qualified-leads?_t=${timestamp}`, {
+    console.log(`[NextJS API] Forwarding request: page=${page}, limit=${limit}`)
+    
+    const response = await fetch(`${FASTAPI_URL}/api/cre-team-leader/qualified-leads?page=${page}&limit=${limit}&_t=${timestamp}`, {
       method: 'GET',
       headers: {
         'Authorization': token ? `Bearer ${token}` : '',
