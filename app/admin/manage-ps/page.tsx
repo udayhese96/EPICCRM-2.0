@@ -93,9 +93,9 @@ export default function ManagePSPage() {
         is_active: formData.is_active,
         role: 'ps'
       }
-      // Use password_hash per DB schema; include only if provided on create or edit
+      // Include password field as required by UserCreate model
       if (formData.password) {
-        payload.password_hash = formData.password
+        payload.password = formData.password
       }
 
       const response = await fetch(url, {

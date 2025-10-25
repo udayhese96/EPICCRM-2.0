@@ -193,9 +193,19 @@ export function OptimizedLeadUpdateModal({ isOpen, onClose, lead, onUpdate }: Le
     const pendingExactStatus = formData.pending_reason || "Called"
 
     // Validation for required fields
+    // Exception: when call outcome is a terminal lost reason or sales outcome is Lost, follow-up date is NOT required
+    const isLostCallOutcome = (val?: string) => {
+      const v = (val || "").trim().toLowerCase()
+      return v === "lost to co-dealer" || v === "lost to competitor" || v === "not interested"
+    }
+    
+    const isSalesOutcomeLost = formData.sales_outcome === "Lost"
+    
     if (leadStatus === "Qualified" && !formData.follow_up_date) {
-      toast.error("Please select a follow-up date before submitting.")
-      return
+      if (!isLostCallOutcome(formData.call_status) && !isSalesOutcomeLost) {
+        toast.error("Please select a follow-up date before submitting.")
+        return
+      }
     }
 
     if (selectedStatus === "qualified" && (!formData.model_interested || !formData.variant || !formData.follow_up_date)) {

@@ -309,6 +309,7 @@ export default function AdminDashboard() {
                 desc="Comprehensive system analytics"
                 icon={BarChart3}
                 accent="blue"
+                onClick={() => router.push("/admin/analytics")}
               />
               <QuickCard
                 cardId="analytics-2"

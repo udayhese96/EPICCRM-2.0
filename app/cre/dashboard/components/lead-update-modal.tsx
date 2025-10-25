@@ -713,10 +713,14 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
     // Exception: when call outcome is a terminal lost reason, follow-up date is NOT required
     const isLostCallOutcome = (val?: string) => {
       const v = (val || "").trim().toLowerCase()
-      return v === "lost to co-dealer" || v === "lost to competitor"
+      return v === "lost to co-dealer" || v === "lost to competitor" || v === "not interested"
     }
+    
+    // Check if sales outcome is Lost
+    const isSalesOutcomeLost = formData.sales_outcome === "Lost"
+    
     if (currentStatus === "Qualified" && !formData.follow_up_date) {
-      if (!isLostCallOutcome(formData.call_status)) {
+      if (!isLostCallOutcome(formData.call_status) && !isSalesOutcomeLost) {
         toast.error("Please select a follow-up date before submitting.")
         return
       }
@@ -1030,14 +1034,30 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
 
       // Proactively notify dashboard to refresh immediately
       try {
-        window.dispatchEvent(new CustomEvent('lead-master-updated', { detail: { uid: lead?.uid } }))
-        // Also trigger lead status change event for immediate section updates
-        window.dispatchEvent(new CustomEvent('lead-status-changed', {
+        // Get current user from localStorage
+        const supabaseUser = localStorage.getItem("supabase_user")
+        const currentUser = supabaseUser ? JSON.parse(supabaseUser) : null
+        
+        // Dispatch CRE-specific events to avoid affecting other CREs
+        const eventName = `lead-master-updated-${currentUser?.username}`
+        window.dispatchEvent(new CustomEvent(eventName, { 
+          detail: { 
+            uid: lead?.uid,
+            creName: currentUser?.username,
+            currentUser: currentUser?.username 
+          } 
+        }))
+        
+        // Also trigger CRE-specific lead status change event
+        const statusEventName = `lead-status-changed-${currentUser?.username}`
+        window.dispatchEvent(new CustomEvent(statusEventName, {
           detail: {
             leadUid: lead?.uid,
             oldStatus: lead?.lead_status,
             newStatus: (updateData as any).lead_status,
-            selectedStatus: selectedStatus
+            selectedStatus: selectedStatus,
+            creName: currentUser?.username,
+            currentUser: currentUser?.username
           }
         }))
       } catch {}
@@ -1556,12 +1576,13 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         <Select value={formData.call_status} onValueChange={(value) => {
                           const v = (value || '').trim().toLowerCase()
                           const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
+                          const isNotInterested = v === 'not interested'
                           setFormData(prev => ({
                             ...prev,
                             call_status: value,
                             // Auto-close as Lost and clear follow-up date for terminal lost outcomes
-                            sales_outcome: isTerminalLost ? 'Lost' : prev.sales_outcome,
-                            follow_up_date: isTerminalLost ? '' : prev.follow_up_date
+                            sales_outcome: (isTerminalLost || isNotInterested) ? 'Lost' : prev.sales_outcome,
+                            follow_up_date: (isTerminalLost || isNotInterested) ? '' : prev.follow_up_date
                           }))
                         }}>
                            <SelectTrigger>
@@ -1624,20 +1645,25 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                         {(() => {
                           const v = (formData.call_status || '').trim().toLowerCase()
                           const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
-                          return isTerminalLost ? 'Next Follow-up Date (not required for Lost)' : 'Next Follow-up Date *'
+                          const isNotInterested = v === 'not interested'
+                          const isSalesOutcomeLost = formData.sales_outcome === 'Lost'
+                          return (isTerminalLost || isNotInterested || isSalesOutcomeLost) ? 'Next Follow-up Date (not required for Lost)' : 'Next Follow-up Date *'
                         })()}
                       </Label>
                       {(() => {
                         const v = (formData.call_status || '').trim().toLowerCase()
                         const isTerminalLost = v === 'lost to co-dealer' || v === 'lost to competitor'
+                        const isNotInterested = v === 'not interested'
+                        const isSalesOutcomeLost = formData.sales_outcome === 'Lost'
+                        const isLostOutcome = isTerminalLost || isNotInterested || isSalesOutcomeLost
                         return (
                           <Input
                             type="date"
-                            value={isTerminalLost ? today : (formData.follow_up_date || tomorrow)}
+                            value={isLostOutcome ? today : (formData.follow_up_date || tomorrow)}
                             onChange={(e) => setFormData(prev => ({ ...prev, follow_up_date: e.target.value }))}
-                            disabled={isTerminalLost}
-                            readOnly={isTerminalLost}
-                            className={`h-10 text-sm ${isTerminalLost ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            disabled={isLostOutcome}
+                            readOnly={isLostOutcome}
+                            className={`h-10 text-sm ${isLostOutcome ? 'opacity-60 cursor-not-allowed' : ''}`}
                           />
                         )
                       })()}
@@ -1660,7 +1686,12 @@ export function LeadUpdateModal({ isOpen, onClose, lead, onUpdate }: LeadUpdateM
                                 ? "bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-700 border-emerald-200 shadow-sm"
                                 : "border-gray-200 bg-white hover:bg-gray-50"
                             }`}
-                            onClick={() => setFormData(prev => ({ ...prev, sales_outcome: outcome }))}
+                            onClick={() => setFormData(prev => ({ 
+                              ...prev, 
+                              sales_outcome: outcome,
+                              // Clear follow-up date when Lost is selected
+                              follow_up_date: outcome === 'Lost' ? '' : prev.follow_up_date
+                            }))}
                           >
                             {outcome}
                           </button>

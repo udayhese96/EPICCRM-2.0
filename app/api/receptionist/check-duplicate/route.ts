@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
     }
     
     // Forward to FastAPI backend
-    const response = await fetch(`${process.env.FASTAPI_URL || 'http://localhost:8000'}/api/receptionist/check-duplicate?mobile=${mobile}`, {
+    const FASTAPI_URL = process.env.FASTAPI_URL || process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8000'
+    const response = await fetch(`${FASTAPI_URL}/api/receptionist/check-duplicate?mobile=${mobile}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
