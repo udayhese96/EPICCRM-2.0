@@ -4182,6 +4182,8 @@ async def get_ps_members(
 ):
     """Get PS members for a Team Leader"""
     try:
+        print(f"[PS Members] Starting request for team leader: {team_leader_id}")
+        
         # Check if user has team leader permissions
         if current_user.role not in ['team_leader', 'admin', 'branch_head']:
             raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
@@ -4191,8 +4193,10 @@ async def get_ps_members(
             raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's PS members.")
         
         # Get all PS members under this team leader
+        print(f"[PS Members] Querying PS members for team leader: {team_leader_id}")
         ps_members_response = supabase.table('users').select('id, full_name, branch').eq('role', 'ps').eq('is_active', True).eq('team_leader_id', team_leader_id).execute()
         
+        print(f"[PS Members] Found {len(ps_members_response.data or [])} PS members")
         return ps_members_response.data or []
         
     except Exception as e:
@@ -4207,6 +4211,8 @@ async def get_analytics_kpi(
 ):
     """Get analytics KPI data for Team Leaders - aggregate counts only"""
     try:
+        print(f"[Analytics KPI] Starting request for team leader: {team_leader_id}")
+        
         # Check if user has team leader permissions
         if current_user.role not in ['team_leader', 'admin', 'branch_head']:
             raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
@@ -4221,6 +4227,8 @@ async def get_analytics_kpi(
         start_date = body.get('start_date')
         end_date = body.get('end_date')
         
+        print(f"[Analytics KPI] PS IDs: {ps_ids}, Start: {start_date}, End: {end_date}")
+        
         if not ps_ids:
             return {
                 "total_assigned": 0,
@@ -4231,7 +4239,7 @@ async def get_analytics_kpi(
         
         # Query ps_followup_master table for analytics
         # Total Leads Assigned: COUNT(DISTINCT lead_uid) filtered by ps_assigned_at
-        total_query = supabase.table('ps_followup_master').select('lead_uid', count='exact').in_('ps_id', ps_ids)
+        total_query = supabase.table('ps_followup_master').select('lead_uid').in_('ps_id', ps_ids)
         if start_date:
             total_query = total_query.gte('ps_assigned_at', start_date)
         if end_date:
@@ -4247,31 +4255,31 @@ async def get_analytics_kpi(
         total_assigned = len(unique_leads)
         
         # Open Leads: COUNT(*) where final_status='Pending' with ps_assigned_at filter
-        open_query = supabase.table('ps_followup_master').select('*', count='exact').in_('ps_id', ps_ids).eq('final_status', 'Pending')
+        open_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Pending')
         if start_date:
             open_query = open_query.gte('ps_assigned_at', start_date)
         if end_date:
             open_query = open_query.lte('ps_assigned_at', end_date)
         open_response = open_query.execute()
-        open_leads = open_response.count if hasattr(open_response, 'count') else len(open_response.data or [])
+        open_leads = len(open_response.data or [])
         
         # Won Leads: COUNT(*) where final_status='Won' filtered by won_timestamp
-        won_query = supabase.table('ps_followup_master').select('*', count='exact').in_('ps_id', ps_ids).eq('final_status', 'Won')
+        won_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Won')
         if start_date:
             won_query = won_query.gte('won_timestamp', start_date)
         if end_date:
             won_query = won_query.lte('won_timestamp', end_date)
         won_response = won_query.execute()
-        won_leads = won_response.count if hasattr(won_response, 'count') else len(won_response.data or [])
+        won_leads = len(won_response.data or [])
         
         # Lost Leads: COUNT(*) where final_status='Lost' filtered by lost_timestamp
-        lost_query = supabase.table('ps_followup_master').select('*', count='exact').in_('ps_id', ps_ids).eq('final_status', 'Lost')
+        lost_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Lost')
         if start_date:
             lost_query = lost_query.gte('lost_timestamp', start_date)
         if end_date:
             lost_query = lost_query.lte('lost_timestamp', end_date)
         lost_response = lost_query.execute()
-        lost_leads = lost_response.count if hasattr(lost_response, 'count') else len(lost_response.data or [])
+        lost_leads = len(lost_response.data or [])
         
         return {
             "total_assigned": total_assigned,
@@ -4282,6 +4290,137 @@ async def get_analytics_kpi(
         
     except Exception as e:
         print(f"Error in analytics-kpi endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/team-leader/{team_leader_id}/source-performance")
+async def get_source_performance(
+    team_leader_id: str,
+    request: Request,
+    current_user=Depends(get_current_user)
+):
+    """Get source performance data for Team Leaders - grouped by source and sub-source"""
+    try:
+        print(f"[Source Performance] Starting request for team leader: {team_leader_id}")
+        
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Verify the team leader ID matches the current user
+        if current_user.role == 'team_leader' and current_user.id != team_leader_id:
+            raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's source performance.")
+        
+        # Parse request body
+        body = await request.json()
+        ps_ids = body.get('ps_ids', [])
+        start_date = body.get('start_date')
+        end_date = body.get('end_date')
+        ps_name = body.get('ps_name')  # For specific PS filtering
+        
+        print(f"[Source Performance] PS IDs: {ps_ids}, Start: {start_date}, End: {end_date}, PS Name: {ps_name}")
+        
+        if not ps_ids:
+            return {"sources": []}
+        
+        # Get all leads for the PS team with source information
+        # This matches your SQL query logic exactly
+        base_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids)
+        
+        # Apply PS name filter if provided (for specific PS filtering)
+        if ps_name:
+            base_query = base_query.eq('ps_name', ps_name)
+        
+        # Apply date range filter for ps_assigned_at
+        if start_date:
+            base_query = base_query.gte('ps_assigned_at', start_date)
+        if end_date:
+            base_query = base_query.lte('ps_assigned_at', end_date)
+        
+        response = base_query.execute()
+        all_leads = response.data or []
+        
+        print(f"[Source Performance] Found {len(all_leads)} leads")
+        
+        # Debug: Log Google leads specifically
+        google_leads = [lead for lead in all_leads if lead.get('source', '').lower() == 'google']
+        print(f"[Source Performance] Google leads found: {len(google_leads)}")
+        for lead in google_leads:
+            print(f"[Source Performance] Google lead {lead.get('lead_uid')}: final_status='{lead.get('final_status')}', first_call_date={lead.get('first_call_date')}, ps_assigned_at={lead.get('ps_assigned_at')}")
+        
+        # Group leads by source using your exact logic
+        source_groups = {}
+        
+        for lead in all_leads:
+            source = lead.get('source', 'Unknown')
+            final_status = lead.get('final_status', 'Pending')
+            first_call_date = lead.get('first_call_date')
+            lead_uid = lead.get('lead_uid')
+            
+            # Use source as key (normalize for grouping)
+            source_key = source.strip().lower() if source else 'unknown'
+            
+            if source_key not in source_groups:
+                source_groups[source_key] = {
+                    'source': source.strip(),  # Keep original source name for display
+                    'leads': set(),  # Use set to avoid duplicate lead_uid (DISTINCT)
+                    'untouched': set(),
+                    'waiting_for_approval': set(),
+                    'won': set(),
+                    'lost': set()
+                }
+            
+            group = source_groups[source_key]
+            group['leads'].add(lead_uid)  # COUNT(DISTINCT lead_uid)
+            
+            # Categorize leads according to your SQL logic
+            if final_status == 'Pending' and not first_call_date:
+                group['untouched'].add(lead_uid)  # Untouched: Pending + No First Call
+                if source.lower() == 'google':
+                    print(f"[Source Performance] Google lead {lead_uid} categorized as UNTOUCHED")
+            elif final_status == 'Waiting for Approval':
+                group['waiting_for_approval'].add(lead_uid)
+            elif final_status == 'Won':
+                group['won'].add(lead_uid)
+            elif final_status in ['Lost', 'Lost Requested']:  # Handle both Lost statuses
+                group['lost'].add(lead_uid)
+                if source.lower() == 'google':
+                    print(f"[Source Performance] Google lead {lead_uid} categorized as LOST (status: {final_status})")
+        
+        print(f"[Source Performance] Grouped into {len(source_groups)} source groups")
+        
+        # Build response matching your SQL output
+        sources = []
+        
+        for source_key, group in source_groups.items():
+            total_leads = len(group['leads'])  # COUNT(DISTINCT lead_uid)
+            untouched = len(group['untouched'])  # COUNT(DISTINCT CASE WHEN final_status = 'Pending' AND first_call_date IS NULL THEN lead_uid END)
+            waiting_for_approval = len(group['waiting_for_approval'])  # COUNT(DISTINCT CASE WHEN final_status = 'Waiting for Approval' THEN lead_uid END)
+            won = len(group['won'])  # COUNT(DISTINCT CASE WHEN final_status = 'Won' THEN lead_uid END)
+            lost = len(group['lost'])  # COUNT(DISTINCT CASE WHEN final_status = 'Lost' THEN lead_uid END)
+            called = total_leads - untouched  # Called = Total - Untouched
+            
+            sources.append({
+                'source': group['source'],
+                'untouched': untouched,
+                'total_assigned': total_leads,  # Match frontend interface
+                'waiting_for_approval': waiting_for_approval,
+                'won': won,
+                'lost': lost,
+                'called': called
+            })
+        
+        # Sort sources alphabetically (ORDER BY source ASC)
+        sources.sort(key=lambda x: x['source'])
+        
+        print(f"[Source Performance] Returning {len(sources)} source entries")
+        print(f"[Source Performance] Source names: {[s['source'] for s in sources]}")
+        
+        return {
+            "sources": sources
+        }
+        
+    except Exception as e:
+        print(f"Error in source-performance endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/debug/cre-call-history")
@@ -4340,7 +4479,7 @@ async def debug_cre_call_history():
 async def get_public_cre_assigned(username: str, name: Optional[str] = None):
     try:
         print(f"Fetching leads for username: {username}, name: {name}")
-        
+
         # Prefer full name if provided; otherwise use username
         clean_user = (username or '').strip()
         clean_name = (name or '').strip()
@@ -4362,9 +4501,9 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
                 all_leads_response = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes').execute()
                 if all_leads_response.data:
                     found_leads = [
-                        lead for lead in all_leads_response.data 
+                            lead for lead in all_leads_response.data 
                         if lead.get('cre_name', '').lower() == search_term.lower()
-                    ]
+                        ]
             except Exception as e:
                 print(f"Error with case-insensitive match: {e}")
         

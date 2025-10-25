@@ -111,6 +111,17 @@ interface LeadStatusData {
   color: string
 }
 
+interface SourcePerformanceData {
+  source: string
+  sub_source?: string
+  untouched: number
+  called: number
+  waiting_for_approval: number
+      won: number
+  lost: number
+  total_assigned: number
+  is_sub_source?: boolean
+}
 
 // Tab-specific data cache interface
 interface TabDataCache {
@@ -169,6 +180,46 @@ export default function TeamLeaderDashboard() {
     lostLeads: 0
   })
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+
+  // Source Performance data
+  const [sourcePerformanceData, setSourcePerformanceData] = useState<SourcePerformanceData[]>([])
+  const [sourcePerformanceLoading, setSourcePerformanceLoading] = useState(false)
+  const [sourcePerformanceSearch, setSourcePerformanceSearch] = useState('')
+
+  const [isAuthChecking, setIsAuthChecking] = useState(true)
+
+  // Check authentication status on mount
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        // Try to make a simple authenticated request to check if token is valid
+        const response = await fetch('/api/users?role=ps&limit=1', {
+          credentials: 'include'
+        })
+        
+        if (response.status === 401) {
+          console.warn('[Frontend] Token expired, redirecting to login')
+          window.location.href = '/auth/login'
+          return
+        } else if (response.status === 403) {
+          // 403 means token exists but user doesn't have permission - this is also an auth issue
+          console.warn('[Frontend] Access forbidden, redirecting to login')
+          window.location.href = '/auth/login'
+          return
+        }
+        
+        console.log('[Frontend] Authentication check passed')
+      } catch (error) {
+        console.error('[Frontend] Auth check failed:', error)
+        // If there's a network error, don't redirect immediately
+        // Let the user try to use the app and see if individual requests work
+      } finally {
+        setIsAuthChecking(false)
+      }
+    }
+    
+    checkAuthStatus()
+  }, [])
 
   // Read current user id (sales TL) from localStorage once on mount
   useEffect(() => {
@@ -398,6 +449,68 @@ export default function TeamLeaderDashboard() {
     }
   }, [currentUserId, dateRange, selectedPS])
 
+  // Global authenticated fetch wrapper
+  const authenticatedFetch = useCallback(async (url: string, options: RequestInit = {}) => {
+    const response = await fetch(url, {
+      ...options,
+      credentials: 'include'
+    })
+    
+    if (response.status === 401 || response.status === 403) {
+      console.warn('[Frontend] Authentication failed, redirecting to login')
+      window.location.href = '/auth/login'
+      throw new Error('Authentication failed')
+    }
+    
+    return response
+  }, [])
+
+  // Utility function to handle authentication errors
+  const handleAuthError = useCallback((response: Response) => {
+    if (response.status === 401) {
+      console.warn('[Frontend] Authentication failed, redirecting to login')
+      window.location.href = '/auth/login'
+      return true
+    }
+    return false
+  }, [])
+
+  // Fetch Source Performance Data
+  const fetchSourcePerformanceData = useCallback(async () => {
+    console.log('[Frontend] fetchSourcePerformanceData called')
+    if (!currentUserId) {
+      console.log('[Frontend] No currentUserId, returning')
+      return
+    }
+
+    console.log('[Frontend] Setting source performance loading to true')
+    setSourcePerformanceLoading(true)
+    try {
+      const params = new URLSearchParams({
+        team_leader_id: currentUserId,
+        date_range: dateRange,
+        ps_member: selectedPS
+      })
+
+      console.log('[Frontend] Fetching source performance data with params:', { team_leader_id: currentUserId, date_range: dateRange, ps_member: selectedPS })
+
+      const response = await authenticatedFetch(`/api/team-leader/source-performance?${params.toString()}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[Frontend] Source performance data received:', data)
+        setSourcePerformanceData(data.sources || [])
+      } else {
+        console.error('Failed to fetch source performance data')
+      }
+    } catch (error) {
+      console.error('Error fetching source performance data:', error)
+    } finally {
+      console.log('[Frontend] Setting source performance loading to false')
+      setSourcePerformanceLoading(false)
+    }
+  }, [currentUserId, dateRange, selectedPS])
+
   // Fetch Analytics KPI Data
   const fetchAnalyticsData = useCallback(async () => {
     if (!currentUserId) return
@@ -410,16 +523,9 @@ export default function TeamLeaderDashboard() {
         ps_member: selectedPS
       })
 
-      // Get the access token from localStorage
-      const userData = typeof window !== 'undefined' ? localStorage.getItem('user') : null
-      const accessToken = userData ? JSON.parse(userData).access_token : null
+      console.log('[Frontend] Fetching analytics data with params:', { team_leader_id: currentUserId, date_range: dateRange, ps_member: selectedPS })
 
-      const response = await fetch(`/api/team-leader/analytics-summary?${params.toString()}`, {
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      })
+      const response = await authenticatedFetch(`/api/team-leader/analytics-summary?${params.toString()}`)
 
       if (response.ok) {
         const data = await response.json()
@@ -437,7 +543,11 @@ export default function TeamLeaderDashboard() {
     } finally {
       setAnalyticsLoading(false)
     }
+    
+    // Also fetch source performance data
+    await fetchSourcePerformanceData()
   }, [currentUserId, dateRange, selectedPS])
+
 
   // Individual tab data fetchers
   const fetchFreshLeadsData = useCallback(async (offset = 0, limit = 100) => {
@@ -760,8 +870,17 @@ export default function TeamLeaderDashboard() {
 
   // Tab switching with lazy loading
   const handleTabChange = async (tabId: string) => {
+    console.log('[Frontend] Tab changed to:', tabId)
     setActiveTab(tabId)
+    
+    // Handle special tabs that don't use the standard fetchTabData
+    if (tabId === 'analytics') {
+      console.log('[Frontend] Fetching analytics data...')
+      await fetchAnalyticsData()
+    } else {
+      console.log('[Frontend] Fetching standard tab data for:', tabId)
       await fetchTabData(tabId)
+    }
   }
 
   // Get current tab data
@@ -3413,13 +3532,15 @@ export default function TeamLeaderDashboard() {
     )
   }
 
-  if (isLoading) {
+  if (isAuthChecking || isLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-screen">
           <div className="text-center space-y-4">
             <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-            <p className="text-lg text-gray-600">Loading your team analytics...</p>
+            <p className="text-lg text-gray-600">
+              {isAuthChecking ? 'Verifying authentication...' : 'Loading your team analytics...'}
+            </p>
           </div>
         </div>
       </DashboardLayout>
@@ -3544,7 +3665,7 @@ export default function TeamLeaderDashboard() {
                     <RefreshCw className={`h-4 w-4 mr-2 ${analyticsLoading ? 'animate-spin' : ''}`} />
                     Refresh Analytics
                         </Button>
-                      </div>
+                </div>
 
                 {/* KPI Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -3563,23 +3684,23 @@ export default function TeamLeaderDashboard() {
                         </button>
                       </div>
               </CardHeader>
-                    <CardContent>
+              <CardContent>
                       {analyticsLoading ? (
                         <div className="animate-pulse">
                           <div className="h-10 bg-blue-200 rounded w-24 mb-2"></div>
-                      </div>
+          </div>
                       ) : (
                         <div className="text-4xl font-bold text-blue-900">
                           {analyticsData.totalLeadsAssigned.toLocaleString()}
-                          </div>
+                  </div>
                         )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
                   {/* Open Leads Card */}
                   <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-medium text-orange-700">
                           Open Leads
                   </CardTitle>
@@ -3589,20 +3710,20 @@ export default function TeamLeaderDashboard() {
                         >
                           <Info className="h-4 w-4" />
                         </button>
-                  </div>
-                      </CardHeader>
+                      </div>
+                    </CardHeader>
                       <CardContent>
                       {analyticsLoading ? (
                         <div className="animate-pulse">
                           <div className="h-10 bg-orange-200 rounded w-24 mb-2"></div>
-                          </div>
+                      </div>
                         ) : (
                         <div className="text-4xl font-bold text-orange-900">
                           {analyticsData.openLeads.toLocaleString()}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
                   {/* Won Leads Card */}
                   <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm hover:shadow-md transition-shadow">
@@ -3610,7 +3731,7 @@ export default function TeamLeaderDashboard() {
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-medium text-green-700">
                           Won Leads
-                        </CardTitle>
+                </CardTitle>
                         <button
                           className="text-green-600 hover:text-green-800"
                           title="Leads with status 'Won' filtered by won timestamp"
@@ -3618,24 +3739,24 @@ export default function TeamLeaderDashboard() {
                           <Info className="h-4 w-4" />
                         </button>
                       </div>
-                      </CardHeader>
+              </CardHeader>
                       <CardContent>
                       {analyticsLoading ? (
                         <div className="animate-pulse">
                           <div className="h-10 bg-green-200 rounded w-24 mb-2"></div>
-                          </div>
+                      </div>
                         ) : (
                         <div className="text-4xl font-bold text-green-900">
                           {analyticsData.wonLeads.toLocaleString()}
-                          </div>
+                      </div>
                         )}
-                      </CardContent>
-                    </Card>
+              </CardContent>
+            </Card>
 
                   {/* Lost Leads Card */}
                   <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200 shadow-sm hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-medium text-red-700">
                           Lost Leads
                         </CardTitle>
@@ -3645,18 +3766,156 @@ export default function TeamLeaderDashboard() {
                         >
                           <Info className="h-4 w-4" />
                         </button>
-                        </div>
+                                  </div>
                       </CardHeader>
                       <CardContent>
                       {analyticsLoading ? (
                         <div className="animate-pulse">
                           <div className="h-10 bg-red-200 rounded w-24 mb-2"></div>
-                          </div>
+                                    </div>
                         ) : (
                         <div className="text-4xl font-bold text-red-900">
                           {analyticsData.lostLeads.toLocaleString()}
+                          </div>
+                        )}
+            </CardContent>
+          </Card>
+                        </div>
+
+                {/* Source Performance Table */}
+        <div className="space-y-6">
+                  {/* Header with Search and Refresh */}
+                  <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                    <div className="flex-1 max-w-md">
+                      <Input
+                        placeholder="Search sources..."
+                        value={sourcePerformanceSearch}
+                        onChange={(e) => setSourcePerformanceSearch(e.target.value)}
+                        className="w-full"
+                    />
+                  </div>
+                    <Button 
+                      onClick={fetchSourcePerformanceData}
+                      disabled={sourcePerformanceLoading}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${sourcePerformanceLoading ? 'animate-spin' : ''}`} />
+                      Refresh Source Data
+                    </Button>
+              </div>
+
+                  {/* Source Performance Table */}
+                  <Card className="overflow-hidden">
+                    <CardHeader className="pb-4">
+                      <CardTitle className="text-lg font-semibold">Source Performance Overview</CardTitle>
+                        <CardDescription>
+                        Performance metrics by lead source for your PS team
+                        </CardDescription>
+                      </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b sticky top-0 z-10">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 min-w-[200px]">
+                                Source
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                                Untouched
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                                Called
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[120px]">
+                                Waiting for Approval
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                                Won
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                                Lost
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {sourcePerformanceLoading ? (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-8 text-center">
+                                  <div className="flex items-center justify-center space-x-2">
+                                    <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+                                    <span className="text-gray-600">Loading source performance data...</span>
+                          </div>
+                                </td>
+                              </tr>
+                            ) : sourcePerformanceData.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                                  No source performance data available
+                                </td>
+                              </tr>
+                            ) : (
+                              <>
+                                {sourcePerformanceData
+                                  .filter(item =>
+                                    !sourcePerformanceSearch ||
+                                    item.source.toLowerCase().includes(sourcePerformanceSearch.toLowerCase())
+                                  )
+                                  .map((item, index) => (
+                                    <tr
+                                      key={`${item.source}-${index}`}
+                                      className={`hover:bg-gray-50 transition-colors ${
+                                        index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                                      }`}
+                                    >
+                                      <td className="px-4 py-3 text-sm">
+                                        <div className="font-medium text-gray-900">
+                                          {item.source}
                                       </div>
-                      )}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.untouched.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.called.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.waiting_for_approval.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-green-600 font-medium">
+                                        {item.won.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-red-600 font-medium">
+                                        {item.lost.toLocaleString()}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                {/* Summary Row */}
+                                {sourcePerformanceData.length > 0 && (
+                                  <tr className="bg-blue-50 border-t-2 border-blue-200 font-semibold">
+                                    <td className="px-4 py-3 text-sm text-blue-900">Total</td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.untouched, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.called, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.waiting_for_approval, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.won, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.lost, 0).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            )}
+                          </tbody>
+                        </table>
+                                  </div>
                                 </CardContent>
                               </Card>
                           </div>
