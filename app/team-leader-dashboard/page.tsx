@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { RoleGuard } from '@/components/auth/role-guard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -29,21 +30,18 @@ import {
   MapPin,
   Building,
   Award,
-  BarChart3,
   ArrowUpRight,
   ArrowDownRight,
   Calendar,
   MessageSquare,
   TrendingUpDown,
-  PieChart,
-  Filter,
   RefreshCw,
-  Info
+  Info,
+  Pencil,
+  Search,
+  BarChart3
 } from 'lucide-react'
 import Link from 'next/link'
-import { LeadSourceChart } from '@/components/reports/lead-source-chart'
-import { LeadStatusChart } from '@/components/reports/lead-status-chart'
-import { TeamLeaderAnalytics } from '@/components/reports/team-leader-analytics'
 
 interface PSUser {
   id: string
@@ -73,6 +71,8 @@ interface Lead {
   remarks?: string
   model_interested?: string
   follow_up_date?: string
+  ps_assigned_at?: string
+  icrop_id?: string
 }
 
 interface TeamPerformanceData {
@@ -111,37 +111,52 @@ interface LeadStatusData {
   color: string
 }
 
-// Analytics interfaces
-interface PSPerformanceData {
-  ps_name: string
-  leads_assigned: number
-  leads_contacted: number
-  gap: number
-}
-
-interface SourceAnalysisData {
-  ps_name: string
-  total_leads: number
-  won_leads: number
-  win_rate: number
-  sources: {
-    [key: string]: {
-      total: number
+interface SourcePerformanceData {
+  source: string
+  sub_source?: string
+  untouched: number
+  called: number
+  waiting_for_approval: number
       won: number
-      win_rate: number
-    }
-  }
+  lost: number
+  total_assigned: number
+  is_sub_source?: boolean
 }
 
-interface FollowupSummaryData {
+interface PendingFollowupData {
   ps_name: string
-  F1: { CRE: number; WALK_IN: number }
-  F2: { CRE: number; WALK_IN: number }
-  F3: { CRE: number; WALK_IN: number }
-  F4: { CRE: number; WALK_IN: number }
-  F5: { CRE: number; WALK_IN: number }
-  F6: { CRE: number; WALK_IN: number }
-  F7: { CRE: number; WALK_IN: number }
+  untouched_f1: number
+  f2: number
+  f3: number
+  f4: number
+  f5: number
+  f6: number
+  f7: number
+  f8: number
+  f9: number
+  f10: number
+}
+
+// Tab-specific data cache interface
+interface TabDataCache {
+  [tabId: string]: {
+    data: any[]
+    lastFetched: number
+    filters: {
+      dateRange: string
+      selectedPS: string
+      dateFilterType: string
+      customStartDate?: string
+      customEndDate?: string
+    }
+    isLoading: boolean
+    isLoadingMore: boolean
+    hasMore: boolean
+    totalCount: number
+    currentPage: number
+    searchTerm?: string
+    scrollPosition?: number
+  }
 }
 
 export default function TeamLeaderDashboard() {
@@ -150,8 +165,123 @@ export default function TeamLeaderDashboard() {
   const [individualPerformance, setIndividualPerformance] = useState<PSIndividualPerformance[]>([])
   const [selectedPS, setSelectedPS] = useState<string>('all')
   const [dateRange, setDateRange] = useState<string>('30')
+  const [dateFilterType, setDateFilterType] = useState<string>('last_30')
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState<string>('analytics')
+  
+  // Helper function to get date parameters based on filter type
+  const getDateParameters = () => {
+    const now = new Date()
+    
+    switch (dateFilterType) {
+      case 'today':
+        const todayStart = new Date(now)
+        todayStart.setHours(0, 0, 0, 0)
+        const todayEnd = new Date(now)
+        todayEnd.setHours(23, 59, 59, 999)
+        return {
+          dateRange: 'today',
+          startDate: todayStart.toISOString(),
+          endDate: todayEnd.toISOString()
+        }
+      
+      case 'all_time':
+        return {
+          dateRange: 'all',
+          startDate: null,
+          endDate: null
+        }
+      
+      case 'date_range':
+        if (!customStartDate || !customEndDate) {
+          // Fallback to last 30 days if custom dates not set
+          const startDate = new Date(now)
+          startDate.setDate(now.getDate() - 30)
+          const endDate = new Date(now)
+          endDate.setHours(23, 59, 59, 999)
+          return {
+            dateRange: '30',
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString()
+          }
+        }
+        
+        const start = new Date(customStartDate)
+        start.setHours(0, 0, 0, 0)
+        const end = new Date(customEndDate)
+        end.setHours(23, 59, 59, 999)
+        
+        return {
+          dateRange: 'custom',
+          startDate: start.toISOString(),
+          endDate: end.toISOString()
+        }
+      
+      case 'last_7':
+        const start7 = new Date(now)
+        start7.setDate(now.getDate() - 7)
+        const end7 = new Date(now)
+        end7.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '7',
+          startDate: start7.toISOString(),
+          endDate: end7.toISOString()
+        }
+      
+      case 'last_30':
+        const start30 = new Date(now)
+        start30.setDate(now.getDate() - 30)
+        const end30 = new Date(now)
+        end30.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '30',
+          startDate: start30.toISOString(),
+          endDate: end30.toISOString()
+        }
+      
+      case 'last_90':
+        const start90 = new Date(now)
+        start90.setDate(now.getDate() - 90)
+        const end90 = new Date(now)
+        end90.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '90',
+          startDate: start90.toISOString(),
+          endDate: end90.toISOString()
+        }
+      
+      case 'last_365':
+        const start365 = new Date(now)
+        start365.setDate(now.getDate() - 365)
+        const end365 = new Date(now)
+        end365.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '365',
+          startDate: start365.toISOString(),
+          endDate: end365.toISOString()
+        }
+      
+      case 'last_days':
+      default:
+        const startDate = new Date(now)
+        startDate.setDate(now.getDate() - parseInt(dateRange))
+        const endDate = new Date(now)
+        endDate.setHours(23, 59, 59, 999)
+        return {
+          dateRange: dateRange,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
+        }
+    }
+  }
+  
+  // Tab-specific data cache
+  const [tabDataCache, setTabDataCache] = useState<TabDataCache>({})
   
   // Modal states
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
@@ -163,27 +293,72 @@ export default function TeamLeaderDashboard() {
   const [leadSourceData, setLeadSourceData] = useState<LeadSourceData[]>([])
   const [leadStatusData, setLeadStatusData] = useState<LeadStatusData[]>([])
   
-  // Analytics data
-  const [psPerformanceData, setPsPerformanceData] = useState<PSPerformanceData[]>([])
-  const [sourceAnalysisData, setSourceAnalysisData] = useState<SourceAnalysisData[]>([])
-  const [followupSummaryData, setFollowupSummaryData] = useState<FollowupSummaryData[]>([])
+  // Analytics KPI data
+  const [analyticsData, setAnalyticsData] = useState<{
+    totalLeadsAssigned: number
+    openLeads: number
+    wonLeads: number
+    lostLeads: number
+  }>({
+    totalLeadsAssigned: 0,
+    openLeads: 0,
+    wonLeads: 0,
+    lostLeads: 0
+  })
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
-  const [analyticsFromDate, setAnalyticsFromDate] = useState('')
-  const [analyticsToDate, setAnalyticsToDate] = useState('')
-  const [analyticsMode, setAnalyticsMode] = useState('all')
+
+  // Source Performance data
+  const [sourcePerformanceData, setSourcePerformanceData] = useState<SourcePerformanceData[]>([])
+  const [sourcePerformanceLoading, setSourcePerformanceLoading] = useState(false)
+  const [sourcePerformanceSearch, setSourcePerformanceSearch] = useState('')
+
+  // Pending Follow-up Summary data
+  const [pendingFollowupData, setPendingFollowupData] = useState<any[]>([])
+  const [pendingFollowupLoading, setPendingFollowupLoading] = useState(false)
+
+  const [isAuthChecking, setIsAuthChecking] = useState(true)
+
+  // Check authentication status on mount
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        // Try to make a simple authenticated request to check if token is valid
+        const response = await fetch('/api/users?role=ps&limit=1', {
+          credentials: 'include'
+        })
+        
+        if (response.status === 401) {
+          console.warn('[Frontend] Token expired, redirecting to login')
+          window.location.href = '/auth/login'
+          return
+        } else if (response.status === 403) {
+          // 403 means token exists but user doesn't have permission - this is also an auth issue
+          console.warn('[Frontend] Access forbidden, redirecting to login')
+          window.location.href = '/auth/login'
+          return
+        }
+        
+        console.log('[Frontend] Authentication check passed')
+      } catch (error) {
+        console.error('[Frontend] Auth check failed:', error)
+        // If there's a network error, don't redirect immediately
+        // Let the user try to use the app and see if individual requests work
+      } finally {
+        setIsAuthChecking(false)
+      }
+    }
+    
+    checkAuthStatus()
+  }, [])
 
   // Read current user id (sales TL) from localStorage once on mount
   useEffect(() => {
     try {
-      console.log('[TL-Dashboard] Checking localStorage for user...')
       const supabaseUserRaw = typeof window !== 'undefined' ? localStorage.getItem('supabase_user') : null
-      console.log('[TL-Dashboard] supabase_user raw:', supabaseUserRaw)
       
       if (supabaseUserRaw) {
         const u = JSON.parse(supabaseUserRaw)
-        console.log('[TL-Dashboard] Parsed supabase user:', u)
         if (u?.id) {
-          console.log('[TL-Dashboard] Loaded supabase user:', u)
           setCurrentUserId(u.id as string)
         } else {
           console.warn('[TL-Dashboard] supabase_user found but no id field:', u)
@@ -191,12 +366,9 @@ export default function TeamLeaderDashboard() {
         }
       } else {
         const legacyUserRaw = typeof window !== 'undefined' ? localStorage.getItem('user') : null
-        console.log('[TL-Dashboard] legacy user raw:', legacyUserRaw)
         if (legacyUserRaw) {
           const u = JSON.parse(legacyUserRaw)
-          console.log('[TL-Dashboard] Parsed legacy user:', u)
           if (u?.id) {
-            console.log('[TL-Dashboard] Loaded legacy user:', u)
             setCurrentUserId(u.id as string)
           } else {
             console.warn('[TL-Dashboard] legacy user found but no id field:', u)
@@ -223,7 +395,6 @@ export default function TeamLeaderDashboard() {
       setIsLoading(true)
       try {
         // Fetch PS users filtered by team_leader_id
-        console.log('[TL-Dashboard] Fetching PS users for TL:', currentUserId)
         const resp = await fetch(`/api/users?role=ps&_=${Date.now()}`, { 
           cache: 'no-store' as any 
         })
@@ -235,8 +406,6 @@ export default function TeamLeaderDashboard() {
         
         const data = await resp.json()
         const users: PSUser[] = data?.users || []
-        console.log('[TL-Dashboard] PS assigned to current TL:', users.length, users)
-        console.log('[TL-Dashboard] Full API response:', data)
         setAssignedPS(users)
 
         if (users.length === 0) {
@@ -249,8 +418,7 @@ export default function TeamLeaderDashboard() {
           return
         }
 
-        // Fetch analytics via new endpoints and stop loading
-        await fetchAnalyticsData()
+        // Stop loading
         setIsLoading(false)
         return
 
@@ -322,59 +490,3345 @@ export default function TeamLeaderDashboard() {
     return <AlertCircle className="h-4 w-4" />
   }
 
-  // Analytics fetch functions
-  const fetchAnalyticsData = async () => {
+  // Tab-specific data fetching functions
+  const fetchTabData = useCallback(async (tabId: string, forceRefresh = false) => {
     if (!currentUserId) return
+
+    const currentFilters = {
+      dateRange,
+      selectedPS,
+      dateFilterType,
+      customStartDate,
+      customEndDate
+    }
+    const cachedData = tabDataCache[tabId]
     
+    // Check if we need to fetch data
+    const shouldFetch = forceRefresh || 
+      !cachedData || 
+      cachedData.filters.dateRange !== dateRange || 
+      cachedData.filters.selectedPS !== selectedPS ||
+      cachedData.filters.dateFilterType !== dateFilterType ||
+      cachedData.filters.customStartDate !== customStartDate ||
+      cachedData.filters.customEndDate !== customEndDate ||
+      (Date.now() - cachedData.lastFetched) > 300000 // 5 minutes cache
+
+    if (!shouldFetch) return cachedData.data
+
+    // Set loading state for this tab
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoading: true,
+        isLoadingMore: false,
+        hasMore: true,
+        currentPage: 0,
+        filters: currentFilters
+      }
+    }))
+
+    try {
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData()
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData()
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData()
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData()
+          break
+        case 'booked':
+          data = await fetchBookedData()
+          break
+        case 'retailed':
+          data = await fetchRetailedData()
+          break
+        case 'lost':
+          data = await fetchLostData()
+          break
+        default:
+          return null
+      }
+
+      // Update cache with fresh data
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          data: data?.leads || [],
+          isLoading: false,
+          isLoadingMore: false,
+          hasMore: (data?.leads || []).length < (data?.total || 0),
+          totalCount: data?.total || 0,
+          currentPage: 0,
+          lastFetched: Date.now(),
+          filters: currentFilters,
+          searchTerm: prev[tabId]?.searchTerm || '',
+          scrollPosition: prev[tabId]?.scrollPosition || 0
+        }
+      }))
+
+      return data?.leads || []
+    } catch (error) {
+      console.error(`Error fetching ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoading: false
+        }
+      }))
+      return null
+    }
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate])
+
+  // Global authenticated fetch wrapper
+  const authenticatedFetch = useCallback(async (url: string, options: RequestInit = {}) => {
+    const response = await fetch(url, {
+      ...options,
+      credentials: 'include'
+    })
+    
+    if (response.status === 401 || response.status === 403) {
+      console.warn('[Frontend] Authentication failed, redirecting to login')
+      window.location.href = '/auth/login'
+      throw new Error('Authentication failed')
+    }
+    
+    return response
+  }, [])
+
+  // Utility function to handle authentication errors
+  const handleAuthError = useCallback((response: Response) => {
+    if (response.status === 401) {
+      console.warn('[Frontend] Authentication failed, redirecting to login')
+      window.location.href = '/auth/login'
+      return true
+    }
+    return false
+  }, [])
+
+  // Fetch Source Performance Data
+  const fetchSourcePerformanceData = useCallback(async () => {
+    console.log('[Frontend] fetchSourcePerformanceData called')
+    if (!currentUserId) {
+      console.log('[Frontend] No currentUserId, returning')
+      return
+    }
+
+    console.log('[Frontend] Setting source performance loading to true')
+    setSourcePerformanceLoading(true)
+    try {
+      const dateParams = getDateParameters()
+      const params = new URLSearchParams({
+        team_leader_id: currentUserId,
+        date_range: dateParams.dateRange,
+        ps_member: selectedPS
+      })
+
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
+      }
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
+      }
+
+      console.log('[Frontend] Fetching source performance data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange, 
+        ps_member: selectedPS,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
+
+      const response = await authenticatedFetch(`/api/team-leader/source-performance?${params.toString()}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[Frontend] Source performance data received:', data)
+        setSourcePerformanceData(data.sources || [])
+      } else {
+        console.error('Failed to fetch source performance data')
+      }
+    } catch (error) {
+      console.error('Error fetching source performance data:', error)
+    } finally {
+      console.log('[Frontend] Setting source performance loading to false')
+      setSourcePerformanceLoading(false)
+    }
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate])
+
+  // Fetch Pending Follow-up Summary Data
+  const fetchPendingFollowupData = useCallback(async () => {
+    console.log('[Frontend] fetchPendingFollowupData called')
+    if (!currentUserId) {
+      console.log('[Frontend] No currentUserId, returning')
+      return
+    }
+
+    console.log('[Frontend] Setting pending followup loading to true')
+    setPendingFollowupLoading(true)
+    try {
+      const dateParams = getDateParameters()
+      const params = new URLSearchParams({
+        team_leader_id: currentUserId,
+        date_range: dateParams.dateRange
+      })
+
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
+      }
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
+      }
+
+      console.log('[Frontend] Fetching pending followup data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
+
+      const response = await authenticatedFetch(`/api/team-leader/pending-followup-summary?${params.toString()}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[Frontend] Pending followup data received:', data)
+        setPendingFollowupData(data.summary || [])
+      } else {
+        console.error('Failed to fetch pending followup data')
+      }
+    } catch (error) {
+      console.error('Error fetching pending followup data:', error)
+    } finally {
+      console.log('[Frontend] Setting pending followup loading to false')
+      setPendingFollowupLoading(false)
+    }
+  }, [currentUserId, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  // Fetch Analytics KPI Data
+  const fetchAnalyticsData = useCallback(async () => {
+    if (!currentUserId) return
+
     setAnalyticsLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (analyticsFromDate) params.append('from_date', analyticsFromDate)
-      if (analyticsToDate) params.append('to_date', analyticsToDate)
-      
-      // Fetch PS Performance
-      const psPerfResponse = await fetch(`/api/team-leader/ps-performance?${params.toString()}`)
-      if (psPerfResponse.ok) {
-        const psPerfData = await psPerfResponse.json()
-        setPsPerformanceData(psPerfData)
+      const dateParams = getDateParameters()
+      const params = new URLSearchParams({
+        team_leader_id: currentUserId,
+        date_range: dateParams.dateRange,
+        ps_member: selectedPS
+      })
+
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
       }
-      
-      // Fetch Source Analysis
-      const sourceResponse = await fetch(`/api/team-leader/source-analysis?${params.toString()}`)
-      if (sourceResponse.ok) {
-        const sourceData = await sourceResponse.json()
-        setSourceAnalysisData(sourceData)
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
       }
-      
-      // Fetch Follow-up Summary
-      const followupParams = new URLSearchParams(params)
-      followupParams.append('mode', analyticsMode)
-      const followupResponse = await fetch(`/api/team-leader/followup-summary?${followupParams.toString()}`)
-      if (followupResponse.ok) {
-        const followupData = await followupResponse.json()
-        setFollowupSummaryData(followupData)
+
+      console.log('[Frontend] Fetching analytics data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange, 
+        ps_member: selectedPS,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
+
+      const response = await authenticatedFetch(`/api/team-leader/analytics-summary?${params.toString()}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        setAnalyticsData({
+          totalLeadsAssigned: data.total_assigned || 0,
+          openLeads: data.open_leads || 0,
+          wonLeads: data.won_leads || 0,
+          lostLeads: data.lost_leads || 0
+        })
+      } else {
+        console.error('Failed to fetch analytics data')
       }
-      
     } catch (error) {
       console.error('Error fetching analytics data:', error)
     } finally {
       setAnalyticsLoading(false)
     }
+    
+    // Also fetch source performance data and pending follow-up data
+    await fetchSourcePerformanceData()
+    await fetchPendingFollowupData()
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchSourcePerformanceData, fetchPendingFollowupData])
+
+
+  // Individual tab data fetchers
+  const fetchFreshLeadsData = useCallback(async (offset = 0, limit = 100) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/fresh-leads?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchTodaysFollowupData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/todays-followup?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchOpenLeadsData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/open-leads?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchWaitingApprovalData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/waiting-approval?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchBookedData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/booked?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchRetailedData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/retailed?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  const fetchLostData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
+    const params = new URLSearchParams({
+      team_leader_id: currentUserId!,
+      search: '',
+      ps_member: selectedPS,
+      date_range: dateParams.dateRange,
+      limit: limit.toString(),
+      offset: offset.toString()
+    })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
+    
+    const response = await fetch(`/api/team-leader/lost?${params.toString()}`, {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+    return { leads: [], total: 0 }
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
+
+  // Refresh function for individual tabs
+  const refreshTabData = useCallback(async (tabId: string) => {
+    if (!currentUserId) return
+
+    const currentFilters = { 
+      dateRange, 
+      selectedPS, 
+      dateFilterType, 
+      customStartDate, 
+      customEndDate 
+    }
+    
+    // Set loading state for this tab
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoading: true,
+        filters: currentFilters
+      }
+    }))
+
+    try {
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData()
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData()
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData()
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData()
+          break
+        case 'booked':
+          data = await fetchBookedData()
+          break
+        case 'retailed':
+          data = await fetchRetailedData()
+          break
+        case 'lost':
+          data = await fetchLostData()
+          break
+        default:
+          return null
+      }
+
+      // Update cache with fresh data
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          data: (data?.leads || data || []),
+          isLoading: false,
+          isLoadingMore: false,
+          hasMore: true,
+          totalCount: 0,
+          currentPage: 0,
+          lastFetched: Date.now(),
+          filters: currentFilters,
+          searchTerm: prev[tabId]?.searchTerm || '',
+          scrollPosition: prev[tabId]?.scrollPosition || 0
+        }
+      }))
+
+      return data
+    } catch (error) {
+      console.error(`Error refreshing ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoading: false
+        }
+      }))
+      return null
+    }
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
+
+  // Load more data for pagination
+  const loadMoreData = useCallback(async (tabId: string) => {
+    if (!currentUserId) return
+
+    const cachedData = tabDataCache[tabId]
+    if (!cachedData || cachedData.isLoadingMore || !cachedData.hasMore) return
+
+    // Set loading more state
+    setTabDataCache(prev => ({
+      ...prev,
+      [tabId]: {
+        ...prev[tabId],
+        isLoadingMore: true
+      }
+    }))
+
+    try {
+      const nextPage = cachedData.currentPage + 1
+      const offset = nextPage * 50
+      let data = null
+      
+      switch (tabId) {
+        case 'fresh-leads':
+          data = await fetchFreshLeadsData(offset, 50)
+          break
+        case 'todays-followup':
+          data = await fetchTodaysFollowupData(offset, 50)
+          break
+        case 'open-leads':
+          data = await fetchOpenLeadsData(offset, 50)
+          break
+        case 'waiting-approval':
+          data = await fetchWaitingApprovalData(offset, 50)
+          break
+        case 'booked':
+          data = await fetchBookedData(offset, 50)
+          break
+        case 'retailed':
+          data = await fetchRetailedData(offset, 50)
+          break
+        case 'lost':
+          data = await fetchLostData(offset, 50)
+          break
+        default:
+          return
+      }
+
+      // Append new data to existing data
+      const newLeads = data?.leads || []
+      const existingData = cachedData.data || []
+      const updatedData = [...existingData, ...newLeads]
+      
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          data: updatedData,
+          isLoadingMore: false,
+          hasMore: updatedData.length < cachedData.totalCount,
+          currentPage: nextPage
+        }
+      }))
+    } catch (error) {
+      console.error(`Error loading more ${tabId} data:`, error)
+      setTabDataCache(prev => ({
+        ...prev,
+        [tabId]: {
+          ...prev[tabId],
+          isLoadingMore: false
+        }
+      }))
+    }
+  }, [currentUserId, tabDataCache, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
+
+  // Infinite scroll hook
+  const useInfiniteScroll = (callback: () => void, hasMore: boolean, isLoadingMore: boolean) => {
+    useEffect(() => {
+      const handleScroll = () => {
+        if (isLoadingMore || !hasMore) return
+
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop
+        const windowHeight = window.innerHeight
+        const documentHeight = document.documentElement.scrollHeight
+
+        // Load more when user is 200px from bottom
+        if (scrollTop + windowHeight >= documentHeight - 200) {
+          callback()
+        }
+      }
+
+      window.addEventListener('scroll', handleScroll)
+      return () => window.removeEventListener('scroll', handleScroll)
+    }, [callback, hasMore, isLoadingMore])
   }
 
-  const resetAnalyticsFilters = () => {
-    setAnalyticsFromDate('')
-    setAnalyticsToDate('')
-    setAnalyticsMode('all')
+  // Tab switching with lazy loading
+  const handleTabChange = async (tabId: string) => {
+    console.log('[Frontend] Tab changed to:', tabId)
+    setActiveTab(tabId)
+    
+    // Handle special tabs that don't use the standard fetchTabData
+    if (tabId === 'analytics') {
+      console.log('[Frontend] Fetching analytics data...')
+      await fetchAnalyticsData()
+    } else {
+      console.log('[Frontend] Fetching standard tab data for:', tabId)
+      await fetchTabData(tabId)
+    }
   }
 
-  if (isLoading) {
+  // Get current tab data
+  const getCurrentTabData = (tabId: string) => {
+    return tabDataCache[tabId]?.data || []
+  }
+
+  // Get current tab loading state
+  const getCurrentTabLoading = (tabId: string) => {
+    return tabDataCache[tabId]?.isLoading || false
+  }
+
+  // Effect to refetch data when filters change for active tab
+  useEffect(() => {
+    if (currentUserId) {
+      if (activeTab === 'analytics') {
+        fetchAnalyticsData()
+      } else {
+      fetchTabData(activeTab, true) // Force refresh when filters change
+    }
+    }
+  }, [activeTab, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, currentUserId, fetchAnalyticsData, fetchTabData])
+
+  // Tab configuration
+  const tabs = [
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+    { id: 'fresh-leads', label: 'Fresh Leads', icon: Target },
+    { id: 'todays-followup', label: "Today's Follow Up", icon: Calendar },
+    { id: 'open-leads', label: 'Open Leads', icon: Eye },
+    { id: 'waiting-approval', label: 'Waiting for Approval', icon: Clock },
+    { id: 'booked', label: 'Booked', icon: CheckCircle2 },
+    { id: 'retailed', label: 'Retailed', icon: Award },
+    { id: 'lost', label: 'Lost', icon: XCircle }
+  ]
+
+  // Placeholder component for empty tabs
+  const EmptyStateCard = ({ icon: Icon, title, description }: { icon: any, title: string, description: string }) => (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center space-y-4 max-w-md mx-auto">
+        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+          <Icon className="h-8 w-8 text-gray-400" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-600 mb-2">{title}</h3>
+          <p className="text-gray-500">{description}</p>
+        </div>
+      </div>
+    </div>
+  )
+
+  // Lightweight skeleton component for loading states
+  const TabSkeleton = () => (
+    <div className="space-y-6">
+      {/* Search Bar Skeleton */}
+      <div className="flex items-center space-x-4">
+        <div className="relative flex-1">
+          <div className="h-10 bg-gray-200 rounded-md animate-pulse"></div>
+        </div>
+      </div>
+
+      {/* Table Header Skeleton */}
+      <Card className="shadow-sm">
+        <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-6 w-32 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 w-48 bg-gray-200 rounded animate-pulse"></div>
+            </div>
+            <div className="h-6 w-16 bg-gray-200 rounded-full animate-pulse"></div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {/* Table Skeleton */}
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <th key={i} className="px-6 py-4">
+                        <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      {[1, 2, 3, 4, 5, 6].map((j) => (
+                        <td key={j} className="px-6 py-4">
+                          <div className="space-y-2">
+                            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div>
+                            <div className="h-3 w-16 bg-gray-200 rounded animate-pulse"></div>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile Card Skeleton */}
+          <div className="lg:hidden space-y-4 p-4">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="shadow-sm">
+                <CardContent className="p-4">
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((j) => (
+                      <div key={j} className="space-y-2">
+                        <div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div>
+                        <div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  // Fresh Leads Tab Component
+  const FreshLeadsTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const freshLeads = getCurrentTabData('fresh-leads')
+    const isLoading = getCurrentTabLoading('fresh-leads')
+    const cachedData = tabDataCache['fresh-leads']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    // Infinite scroll for loading more data
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('fresh-leads')
+      }
+    }, hasMore, isLoadingMore)
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return freshLeads
+      const searchLower = searchTerm.toLowerCase()
+      return freshLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [freshLeads, searchTerm])
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('new') || statusLower.includes('fresh')) return 'bg-purple-100 text-purple-800 border-purple-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('new') || statusLower.includes('fresh')) return <Target className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return <TabSkeleton />
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search by name, mobile, or UID..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Fresh Leads Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Target className="h-5 w-5 mr-2 text-orange-600" />
+                  Fresh Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Newly assigned leads requiring immediate attention
+                </CardDescription>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refreshTabData('fresh-leads')}
+                  disabled={isLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </Button>
+                <Badge className="bg-orange-500 text-white">
+                  {filteredLeads.length} Leads
+                </Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Target className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Fresh Leads</h3>
+                    <p className="text-gray-500">No fresh leads for the selected date/PS.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.ps_assigned_at || lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </td>
+
+                                {/* ICROP ID */}
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  {lead.icrop_id ? (
+                                    <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                      {lead.icrop_id}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-sm text-gray-400">-</span>
+                                  )}
+                                </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                                {lead.source && (
+                                  <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                    <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                  </div>
+                                )}
+                                {lead.sub_source && (
+                                  <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                    <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                  </div>
+                                )}
+                                <div className="text-xs text-gray-500">
+                                  Assigned: {new Date(lead.ps_assigned_at || lead.created_at).toLocaleString('en-IN')}
+                                </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status and ICROP */}
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Status</div>
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+                                <div className="space-y-1">
+                                  <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                                  {lead.icrop_id ? (
+                                    <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                      {lead.icrop_id}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-sm text-gray-400">-</span>
+                                  )}
+                                </div>
+                        </div>
+
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Today's Follow-Up Tab Component
+  const TodaysFollowupTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const todaysFollowup = getCurrentTabData('todays-followup')
+    const isLoading = getCurrentTabLoading('todays-followup')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return todaysFollowup
+      const searchLower = searchTerm.toLowerCase()
+      return todaysFollowup.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [todaysFollowup, searchTerm])
+
+    // Infinite scroll for Today's Follow-Up
+    const cachedData = tabDataCache['todays-followup']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('todays-followup')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading today's follow-up...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Today's Follow-Up Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Calendar className="h-5 w-5 mr-2 text-orange-600" />
+                  Today's Follow-Up
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Follow-up leads scheduled for today or overdue
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Follow-ups
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Calendar className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Follow-ups for Today</h3>
+                    <p className="text-gray-500">No follow-up data available for today.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                              <div className="mt-1">
+                                {lead.final_status === 'Waiting for Approval' && (
+                                  <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                    Waiting for Sales Manager Approval
+                                  </Badge>
+                                )}
+                                {lead.final_status === 'Lost Requested' && (
+                                  <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                    Waiting for CRE Approval
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number || 1}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                          {lead.source && (
+                            <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                              <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                            </div>
+                          )}
+                          {lead.sub_source && (
+                            <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                              <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(lead.created_at).toLocaleString('en-IN')}
+                          </div>
+                        </div>
+
+                        {/* Next Call/Overdue */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Next Call</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            Call #{lead.next_call_number || 1}
+                          </div>
+                          {lead.follow_up_date && (
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                            </div>
+                          )}
+                          {lead.is_overdue && (
+                            <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                              Overdue: {lead.overdue_days} days
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Status</div>
+                          <div className="space-y-1">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                            <div className="mt-1">
+                              {lead.final_status === 'Waiting for Approval' && (
+                                <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                  Waiting for Sales Manager Approval
+                                </Badge>
+                              )}
+                              {lead.final_status === 'Lost Requested' && (
+                                <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                  Waiting for CRE Approval
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ICROP ID */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                          {lead.icrop_id ? (
+                            <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                              {lead.icrop_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Open Leads Tab Component
+  const OpenLeadsTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const openLeads = getCurrentTabData('open-leads')
+    const isLoading = getCurrentTabLoading('open-leads')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return openLeads
+      const searchLower = searchTerm.toLowerCase()
+      return openLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [openLeads, searchTerm])
+
+    // Infinite scroll for Open Leads
+    const cachedData = tabDataCache['open-leads']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('open-leads')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      if (statusLower.includes('rnr')) return 'bg-gray-100 text-gray-800 border-gray-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      if (statusLower.includes('rnr')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading open leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Open Leads Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Eye className="h-5 w-5 mr-2 text-orange-600" />
+                  Open Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  All pending leads assigned to your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Eye className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Open Leads</h3>
+                    <p className="text-gray-500">No pending leads for the selected date/PS.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                              {lead.awaiting_cre_approval && (
+                                <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                  Awaiting CRE Approval
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number || 1}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                          {lead.source && (
+                            <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                              <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                            </div>
+                          )}
+                          {lead.sub_source && (
+                            <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                              <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(lead.created_at).toLocaleString('en-IN')}
+                          </div>
+                        </div>
+
+                        {/* Next Call */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Next Call</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            Call #{lead.next_call_number || 1}
+                          </div>
+                          {lead.follow_up_date && (
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Status</div>
+                          <div className="space-y-1">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                            {lead.awaiting_cre_approval && (
+                              <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs px-2 py-1">
+                                Awaiting CRE Approval
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ICROP ID */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                          {lead.icrop_id ? (
+                            <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                              {lead.icrop_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Waiting for Approval Tab Component
+  const WaitingApprovalTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const waitingApprovalLeads = getCurrentTabData('waiting-approval')
+    const isLoading = getCurrentTabLoading('waiting-approval')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return waitingApprovalLeads
+      const searchLower = searchTerm.toLowerCase()
+      return waitingApprovalLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [waitingApprovalLeads, searchTerm])
+
+    // Infinite scroll for Waiting for Approval
+    const cachedData = tabDataCache['waiting-approval']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('waiting-approval')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      if (statusLower.includes('rnr')) return 'bg-gray-100 text-gray-800 border-gray-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      if (statusLower.includes('rnr')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading waiting approval leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Waiting for Approval Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <Clock className="h-5 w-5 mr-2 text-orange-600" />
+                  Waiting for Approval
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Leads awaiting CRE approval from your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-orange-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <Clock className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Leads Waiting for Approval</h3>
+                    <p className="text-gray-500">No leads are currently awaiting CRE approval.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number || 1}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any, index: number) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`shadow-sm hover:shadow-md transition-all duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <CardContent className="p-4 space-y-4">
+                        {/* Lead Info */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-base font-semibold text-gray-900">{lead.customer_name}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {lead.lead_uid}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <PhoneCall className="h-4 w-4 mr-2 text-orange-500" />
+                            {lead.customer_mobile_number}
+                          </div>
+                          {lead.source && (
+                            <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                              <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                            </div>
+                          )}
+                          {lead.sub_source && (
+                            <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                              <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                            </div>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(lead.created_at).toLocaleString('en-IN')}
+                          </div>
+                        </div>
+
+                        {/* Next Call/Overdue */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Next Call</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            Call #{lead.next_call_number || 1}
+                          </div>
+                          {lead.follow_up_date && (
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                            </div>
+                          )}
+                          {lead.is_overdue && (
+                            <Badge className="bg-red-500 text-white text-xs px-2 py-1">
+                              Overdue: {lead.overdue_days} days
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Status</div>
+                          <div className="space-y-1">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Assigned PS */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.ps_name || 'Unassigned'}
+                          </div>
+                          {lead.ps_branch && (
+                            <div className="text-xs text-gray-500">
+                              {lead.ps_branch}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vehicle Details */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {lead.make} {lead.model}
+                          </div>
+                          {lead.variant && (
+                            <div className="text-sm text-gray-600">
+                              {lead.variant}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ICROP ID */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                          {lead.icrop_id ? (
+                            <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                              {lead.icrop_id}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Booked Tab Component
+  const BookedTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const bookedLeads = getCurrentTabData('booked')
+    const isLoading = getCurrentTabLoading('booked')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return bookedLeads
+      const searchLower = searchTerm.toLowerCase()
+      return bookedLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [bookedLeads, searchTerm])
+
+    // Infinite scroll for Booked
+    const cachedData = tabDataCache['booked']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('booked')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('booked')) return 'bg-blue-100 text-blue-800 border-blue-200'
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('booked')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading booked leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Booked Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <CheckCircle2 className="h-5 w-5 mr-2 text-blue-600" />
+                  Booked Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Successfully booked leads from your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-blue-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Booked Leads</h3>
+                    <p className="text-gray-500">No leads have been booked for the selected filters.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-blue-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-sm text-gray-600">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className="shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="p-4">
+                        <div className="space-y-3">
+                          {/* Lead Info */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Lead Info</div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                              <Badge variant="outline" className="text-xs">
+                                {lead.lead_uid}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <PhoneCall className="h-4 w-4 mr-1.5 text-blue-500" />
+                              {lead.customer_mobile_number}
+                            </div>
+                            {lead.source && (
+                              <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                              </div>
+                            )}
+                            {lead.sub_source && (
+                              <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.created_at).toLocaleString('en-IN')}
+                            </div>
+                          </div>
+
+                          {/* Assigned PS */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Vehicle Details */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.make} {lead.model}
+                            </div>
+                            {lead.variant && (
+                              <div className="text-sm text-gray-600">
+                                {lead.variant}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Status */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Status</div>
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+
+                          {/* Next Call */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Next Call</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              Call #{lead.next_call_number}
+                            </div>
+                            {lead.follow_up_date && (
+                              <div className="text-sm text-gray-600">
+                                {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                              </div>
+                            )}
+                            {lead.is_overdue && (
+                              <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                Overdue: {lead.overdue_days} days
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* ICROP ID */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Retailed Tab Component
+  const RetailedTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const retailedLeads = getCurrentTabData('retailed')
+    const isLoading = getCurrentTabLoading('retailed')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return retailedLeads
+      const searchLower = searchTerm.toLowerCase()
+      return retailedLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [retailedLeads, searchTerm])
+
+    // Infinite scroll for Retailed
+    const cachedData = tabDataCache['retailed']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('retailed')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won') || statusLower.includes('closed won')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('won')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-green-200 border-t-green-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading retailed leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Toolbar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search Input */}
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search: Name, mobile or UID"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Retailed Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <CheckCircle2 className="h-5 w-5 mr-2 text-green-600" />
+                  Retailed Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Successfully retailed leads from your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-green-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Retailed Leads</h3>
+                    <p className="text-gray-500">No leads have been retailed for the selected filters.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-green-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                  <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                {lead.make} {lead.model}
+                              </div>
+                              {lead.variant && (
+                                <div className="text-sm text-gray-600">
+                                  {lead.variant}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                                {getStatusIcon(lead.lead_status)}
+                                <span className="ml-1">{lead.lead_status}</span>
+                              </Badge>
+                            </div>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-sm text-gray-600">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className="shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="p-4">
+                        <div className="space-y-3">
+                          {/* Lead Info */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Lead Info</div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                              <Badge variant="outline" className="text-xs">
+                                {lead.lead_uid}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <PhoneCall className="h-4 w-4 mr-1.5 text-green-500" />
+                              {lead.customer_mobile_number}
+                            </div>
+                            {lead.source && (
+                              <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                              </div>
+                            )}
+                            {lead.sub_source && (
+                              <div className="text-xs text-gray-500 bg-green-50 px-2 py-1 rounded-md border border-green-200">
+                                <span className="font-medium text-green-700">Sub Source:</span> {lead.sub_source}
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.created_at).toLocaleString('en-IN')}
+                            </div>
+                          </div>
+
+                          {/* Assigned PS */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Vehicle Details */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.make} {lead.model}
+                            </div>
+                            {lead.variant && (
+                              <div className="text-sm text-gray-600">
+                                {lead.variant}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Status */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Status</div>
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+
+                          {/* Next Call */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Next Call</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              Call #{lead.next_call_number}
+                            </div>
+                            {lead.follow_up_date && (
+                              <div className="text-sm text-gray-600">
+                                {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                              </div>
+                            )}
+                            {lead.is_overdue && (
+                              <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                Overdue: {lead.overdue_days} days
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* ICROP ID */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Lost Tab Component
+  const LostTab = () => {
+    const [searchTerm, setSearchTerm] = useState('')
+    
+    // Get data from cache
+    const lostLeads = getCurrentTabData('lost')
+    const isLoading = getCurrentTabLoading('lost')
+
+    // Filter leads by search term
+    const filteredLeads = useMemo(() => {
+      if (!searchTerm) return lostLeads
+      const searchLower = searchTerm.toLowerCase()
+      return lostLeads.filter((lead: any) => 
+        lead.customer_name?.toLowerCase().includes(searchLower) ||
+        lead.customer_mobile_number?.includes(searchTerm) ||
+        lead.lead_uid?.toLowerCase().includes(searchLower)
+      )
+    }, [lostLeads, searchTerm])
+
+    // Infinite scroll for Lost
+    const cachedData = tabDataCache['lost']
+    const isLoadingMore = cachedData?.isLoadingMore || false
+    const hasMore = cachedData?.hasMore || false
+
+    useInfiniteScroll(() => {
+      if (hasMore && !isLoadingMore) {
+        loadMoreData('lost')
+      }
+    }, hasMore, isLoadingMore)
+
+    const getStatusColor = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('lost') || statusLower.includes('closed lost')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('lost requested')) return 'bg-orange-100 text-orange-800 border-orange-200'
+      if (statusLower.includes('lost to co-dealer')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('connected')) return 'bg-green-100 text-green-800 border-green-200'
+      if (statusLower.includes('not connected')) return 'bg-red-100 text-red-800 border-red-200'
+      if (statusLower.includes('pending')) return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+
+    const getStatusIcon = (status: string) => {
+      const statusLower = status.toLowerCase()
+      if (statusLower.includes('lost')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('connected')) return <CheckCircle2 className="h-3 w-3" />
+      if (statusLower.includes('not connected')) return <XCircle className="h-3 w-3" />
+      if (statusLower.includes('pending')) return <Clock className="h-3 w-3" />
+      return <AlertCircle className="h-3 w-3" />
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center space-y-4">
+            <div className="w-16 h-16 border-4 border-red-200 border-t-red-500 rounded-full animate-spin mx-auto"></div>
+            <p className="text-lg text-gray-600">Loading lost leads...</p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Search Bar */}
+        <div className="flex items-center space-x-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input
+              placeholder="Search: Name, mobile or UID"
+              value={searchTerm}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+        </div>
+
+        {/* Lost Table */}
+        <Card className="shadow-sm">
+          <CardHeader className="bg-gradient-to-r from-red-50 to-pink-50 border-b border-red-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <XCircle className="h-5 w-5 mr-2 text-red-600" />
+                  Lost Leads
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Lost leads from your team members
+                </CardDescription>
+              </div>
+              <Badge className="bg-red-500 text-white">
+                {filteredLeads.length} Leads
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {filteredLeads.length === 0 ? (
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="text-center space-y-4">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                    <XCircle className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-600 mb-2">No Lost Leads</h3>
+                    <p className="text-gray-500">No leads have been lost for the selected filters.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Info</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned PS</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vehicle Details</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Call</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ICROP ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeads.map((lead: any, index: number) => (
+                        <tr key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className={`hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          {/* Lead Info */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {lead.lead_uid}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center text-sm text-gray-600">
+                                <PhoneCall className="h-4 w-4 mr-1.5 text-red-500" />
+                                {lead.customer_mobile_number}
+                              </div>
+                              {lead.source && (
+                                <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                  <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                                </div>
+                              )}
+                              {lead.sub_source && (
+                                <div className="text-xs text-gray-500 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                                  <span className="font-medium text-red-700">Sub Source:</span> {lead.sub_source}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.created_at).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Assigned PS */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Vehicle Details */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.model || '-'}
+                            </div>
+                            {lead.variant && (
+                              <div className="text-xs text-gray-500">
+                                {lead.variant}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </td>
+
+                          {/* Next Call */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-900">
+                                Call #{lead.next_call_number}
+                              </div>
+                              {lead.follow_up_date && (
+                                <div className="text-xs text-gray-500">
+                                  {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                              {lead.is_overdue && (
+                                <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                  Overdue: {lead.overdue_days} days
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* ICROP ID */}
+                          <td className="px-6 py-4 whitespace-normal break-normal">
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="lg:hidden space-y-4 p-4">
+                  {filteredLeads.map((lead: any) => (
+                    <Card key={`${lead.id || lead.lead_uid}-${lead.customer_mobile_number}-${lead.ps_assigned_at || lead.created_at}`} className="shadow-sm hover:shadow-md transition-shadow">
+                      <CardContent className="p-4">
+                        <div className="space-y-4">
+                          {/* Lead Info */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Lead Info</div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="text-sm font-medium text-gray-900">{lead.customer_name}</h4>
+                              <Badge variant="outline" className="text-xs">
+                                {lead.lead_uid}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <PhoneCall className="h-4 w-4 mr-1.5 text-red-500" />
+                              {lead.customer_mobile_number}
+                            </div>
+                            {lead.source && (
+                              <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                                <span className="font-medium text-blue-700">Source:</span> {lead.source}
+                              </div>
+                            )}
+                            {lead.sub_source && (
+                              <div className="text-xs text-gray-500 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                                <span className="font-medium text-red-700">Sub Source:</span> {lead.sub_source}
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-500">
+                              {new Date(lead.created_at).toLocaleString('en-IN')}
+                            </div>
+                          </div>
+
+                          {/* Assigned PS */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Assigned PS</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.ps_name || 'Unassigned'}
+                            </div>
+                            {lead.ps_branch && (
+                              <div className="text-xs text-gray-500">
+                                {lead.ps_branch}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Vehicle Details */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Vehicle Details</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {lead.model || '-'}
+                            </div>
+                            {lead.variant && (
+                              <div className="text-xs text-gray-500">
+                                {lead.variant}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Status */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Status</div>
+                            <Badge className={`${getStatusColor(lead.lead_status)} text-xs px-2 py-1`}>
+                              {getStatusIcon(lead.lead_status)}
+                              <span className="ml-1">{lead.lead_status}</span>
+                            </Badge>
+                          </div>
+
+                          {/* Next Call */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">Next Call</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              Call #{lead.next_call_number}
+                            </div>
+                            {lead.follow_up_date && (
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.follow_up_date).toLocaleString('en-IN')}
+                              </div>
+                            )}
+                            {lead.is_overdue && (
+                              <Badge className="bg-red-100 text-red-800 border-red-200 text-xs px-2 py-1">
+                                Overdue: {lead.overdue_days} days
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* ICROP ID */}
+                          <div className="space-y-1">
+                            <div className="text-sm font-medium text-gray-700">ICROP ID</div>
+                            {lead.icrop_id ? (
+                              <Badge className="bg-purple-500 text-white text-xs px-2 py-1">
+                                {lead.icrop_id}
+                              </Badge>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Loading More Indicator */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
+                      <span className="text-sm text-gray-600">Loading more leads...</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* End of Data Indicator */}
+                {!hasMore && filteredLeads.length > 0 && (
+                  <div className="flex items-center justify-center py-4">
+                    <span className="text-sm text-gray-500">No more leads to load</span>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (isAuthChecking || isLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-screen">
           <div className="text-center space-y-4">
             <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto"></div>
-            <p className="text-lg text-gray-600">Loading your team analytics...</p>
+            <p className="text-lg text-gray-600">
+              {isAuthChecking ? 'Verifying authentication...' : 'Loading your team analytics...'}
+            </p>
           </div>
         </div>
       </DashboardLayout>
@@ -408,38 +3862,85 @@ export default function TeamLeaderDashboard() {
       <RoleGuard requiredRole="team_leader">
         <div className="space-y-6 pb-8">
           {/* Header with Gradient */}
-          <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 p-8 shadow-sm border border-orange-100">
-            <div className="flex justify-between items-start">
+          <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 p-4 sm:p-8 shadow-sm border border-orange-100">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
               <div className="space-y-2">
-                <h1 className="text-3xl font-bold text-gray-900">Team Leader Dashboard</h1>
-                <p className="text-gray-700">
+                <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Team Leader Dashboard</h1>
+                <p className="text-sm sm:text-base text-gray-700">
                   Comprehensive analytics and performance insights for your team
                 </p>
-                <div className="flex items-center space-x-4 mt-3">
-                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800">
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800 text-xs">
                     <Users className="h-3 w-3 mr-1" />
                     {assignedPS.length} PS Members
                   </Badge>
-                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800">
+                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800 text-xs">
                     <Calendar className="h-3 w-3 mr-1" />
-                    Last {dateRange} days
+                    {dateFilterType === 'today' ? 'Today' : 
+                     dateFilterType === 'all_time' ? 'All Time' :
+                     dateFilterType === 'date_range' ? 'Custom Range' :
+                     dateFilterType === 'last_days' ? `Last ${dateRange} days` :
+                     dateFilterType === 'last_7' ? 'Last 7 days' :
+                     dateFilterType === 'last_30' ? 'Last 30 days' :
+                     dateFilterType === 'last_90' ? 'Last 90 days' :
+                     dateFilterType === 'last_365' ? 'Last year' :
+                     `Last ${dateRange} days`}
                   </Badge>
                 </div>
               </div>
-              <div className="flex space-x-3">
-                <Select value={dateRange} onValueChange={setDateRange}>
-                  <SelectTrigger className="w-40 bg-white shadow-sm border-orange-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">Last 7 days</SelectItem>
-                    <SelectItem value="30">Last 30 days</SelectItem>
-                    <SelectItem value="90">Last 90 days</SelectItem>
-                    <SelectItem value="365">Last year</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex flex-wrap gap-3 w-full sm:w-auto">
+                {/* Unified Date Filter Selector */}
+                <div className="w-full sm:w-48">
+                  <select 
+                    value={dateFilterType} 
+                    onChange={(e) => {
+                      e.preventDefault()
+                      const value = e.target.value
+                      console.log('[Date Filter] Selected value:', value)
+                      if (value.startsWith('last_')) {
+                        setDateFilterType(value) // Keep the original value like 'last_7', 'last_30'
+                        setDateRange(value.replace('last_', ''))
+                      } else {
+                        setDateFilterType(value)
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-orange-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="today">Today</option>
+                    <option value="last_7">Last 7 days</option>
+                    <option value="last_30">Last 30 days</option>
+                    <option value="last_90">Last 90 days</option>
+                    <option value="last_365">Last year</option>
+                    <option value="date_range">Date Range</option>
+                    <option value="all_time">All Time</option>
+                  </select>
+                </div>
+
+                {/* Custom Date Range (only show when date_range is selected) */}
+                {dateFilterType === 'date_range' && (
+                  <>
+                    <div className="flex items-center space-x-2 w-full sm:w-auto">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">From:</label>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2 w-full sm:w-auto">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">To:</label>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  </>
+                )}
                 <Select value={selectedPS} onValueChange={setSelectedPS}>
-                  <SelectTrigger className="w-52 bg-white shadow-sm border-orange-200">
+                  <SelectTrigger className="w-full sm:w-52 bg-white shadow-sm border-orange-200">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -455,1169 +3956,539 @@ export default function TeamLeaderDashboard() {
             </div>
           </div>
 
-          {/* Key Performance Indicators */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Card className="border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-700">Total Leads</CardTitle>
-                <Target className="h-5 w-5 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-gray-900">{teamPerformance?.total_leads || 0}</div>
-                <p className="text-xs text-gray-600 mt-1">
-                  <span className="text-orange-600 font-medium">{teamPerformance?.new_leads || 0}</span> new this period
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-700">Conversion Rate</CardTitle>
-                <TrendingUp className="h-5 w-5 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-gray-900">
-                  {teamPerformance?.conversion_rate?.toFixed(1) || 0}%
-                </div>
-                <p className="text-xs text-gray-600 mt-1">
-                  <span className="text-green-600 font-medium">{teamPerformance?.closed_won || 0}</span> closed won
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-700">Call Volume</CardTitle>
-                <Phone className="h-5 w-5 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-gray-900">{teamPerformance?.call_volume || 0}</div>
-                <p className="text-xs text-gray-600 mt-1">
-                  Avg <span className="font-medium">{teamPerformance?.avg_response_time?.toFixed(1) || 0}</span> min response
-                </p>
-              </CardContent>
-            </Card>
-
-          </div>
-
-          {/* Team Performance Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Qualified Leads</p>
-                    <p className="text-2xl font-bold text-gray-900">{teamPerformance?.qualified_leads || 0}</p>
-                  </div>
-                  <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                    <CheckCircle2 className="h-6 w-6 text-blue-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Closed Won</p>
-                    <p className="text-2xl font-bold text-green-600">{teamPerformance?.closed_won || 0}</p>
-                  </div>
-                  <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
-                    <Award className="h-6 w-6 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Closed Lost</p>
-                    <p className="text-2xl font-bold text-red-600">{teamPerformance?.closed_lost || 0}</p>
-                  </div>
-                  <div className="h-12 w-12 rounded-full bg-red-100 flex items-center justify-center">
-                    <XCircle className="h-6 w-6 text-red-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* PS Team Performance Cards */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-xl flex items-center">
-                    <Users className="h-5 w-5 mr-2 text-orange-600" />
-                    PS Team Performance Overview
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    Individual performance metrics for each team member
-                  </CardDescription>
-                </div>
-                <Badge className="bg-orange-500 text-white">
-                  {filteredPerformance.length} Members
-                </Badge>
+          {/* Tab Navigation */}
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
+            <div className="px-2 sm:px-6 py-2 sm:py-4">
+              <div className="flex flex-wrap gap-1 sm:gap-2 overflow-x-auto">
+                {tabs.map((tab) => {
+                  const Icon = tab.icon
+                  const isActive = activeTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => handleTabChange(tab.id)}
+                      className={`
+                        flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition-all duration-200
+                        ${isActive 
+                          ? 'bg-blue-500 text-white shadow-md' 
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        }
+                      `}
+                    >
+                      <Icon className="h-3 w-3 sm:h-4 sm:w-4" />
+                      <span>{tab.label}</span>
+                    </button>
+                  )
+                })}
               </div>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredPerformance.map((perf) => (
-                  <Card 
-                    key={perf.ps_user.id} 
-                    className="border-2 hover:border-orange-300 transition-all hover:shadow-lg cursor-pointer"
-                    onClick={() => handleViewPSDetail(perf)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <CardTitle className="text-lg font-semibold">{perf.ps_user.full_name}</CardTitle>
-                          <CardDescription className="text-xs mt-1">
-                            @{perf.ps_user.username} • {perf.ps_user.branch}
-                          </CardDescription>
-                        </div>
+            </div>
+          </div>
+
+          {/* Tab Content */}
+          <div className="space-y-6">
+            {/* Analytics Tab Content */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-6">
+                {/* Refresh Button */}
+                <div className="flex justify-end">
                         <Button 
-                          variant="ghost" 
+                    onClick={fetchAnalyticsData}
+                    disabled={analyticsLoading}
+                    variant="outline"
                           size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleViewPSDetail(perf)
-                          }}
                         >
-                          <Eye className="h-4 w-4" />
+                    <RefreshCw className={`h-4 w-4 mr-2 ${analyticsLoading ? 'animate-spin' : ''}`} />
+                    Refresh Analytics
                         </Button>
+                </div>
+
+                {/* KPI Cards Grid */}
+                <div className="grid grid-cols-2 gap-3 sm:gap-6">
+                  {/* Total Leads Assigned Card */}
+                  <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-sm hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-2 px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-blue-700">
+                          Total Leads Assigned
+                </CardTitle>
+                        <button
+                          className="text-blue-600 hover:text-blue-800"
+                          title="Total unique leads assigned to your PS team within the selected date range"
+                        >
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+                        </button>
+                      </div>
+              </CardHeader>
+              <CardContent className="px-3 py-2">
+                      {analyticsLoading ? (
+                        <div className="animate-pulse">
+                          <div className="h-8 bg-blue-200 rounded w-16 mb-2"></div>
+          </div>
+                      ) : (
+                        <div className="text-2xl sm:text-4xl font-bold text-blue-900">
+                          {analyticsData.totalLeadsAssigned.toLocaleString()}
+                  </div>
+                        )}
+              </CardContent>
+            </Card>
+
+                  {/* Open Leads Card */}
+                  <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-2 px-3 py-2">
+                <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-orange-700">
+                          Open Leads
+                  </CardTitle>
+                        <button
+                          className="text-orange-600 hover:text-orange-800"
+                          title="Leads with status 'Pending' within the selected date range"
+                        >
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+                        </button>
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex items-center justify-between p-2 bg-orange-50 rounded-lg">
-                        <span className="text-sm text-gray-600">Total Leads</span>
-                        <Badge className="bg-orange-500 text-white">{perf.metrics.total_leads}</Badge>
+                      <CardContent className="px-3 py-2">
+                      {analyticsLoading ? (
+                        <div className="animate-pulse">
+                          <div className="h-8 bg-orange-200 rounded w-16 mb-2"></div>
                       </div>
-                      
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2 bg-green-50 rounded text-center">
-                          <p className="text-xs text-gray-600">Won</p>
-                          <p className="text-lg font-bold text-green-600">{perf.metrics.closed_won}</p>
-                        </div>
-                        <div className="p-2 bg-blue-50 rounded text-center">
-                          <p className="text-xs text-gray-600">Qualified</p>
-                          <p className="text-lg font-bold text-blue-600">{perf.metrics.qualified_leads}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs text-gray-600 pt-2 border-t">
-                        <span className="flex items-center">
-                          <Phone className="h-3 w-3 mr-1" />
-                          {perf.metrics.call_volume} calls
-                        </span>
-                        <span className="flex items-center">
-                          <TrendingUp className="h-3 w-3 mr-1" />
-                          {perf.metrics.conversion_rate?.toFixed(1)}%
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              {filteredPerformance.length === 0 && (
-                <div className="text-center py-12">
-                  <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">No PS members assigned to your team yet.</p>
+                        ) : (
+                        <div className="text-2xl sm:text-4xl font-bold text-orange-900">
+                          {analyticsData.openLeads.toLocaleString()}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Charts Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="shadow-sm">
-              <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-                <CardTitle className="flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2 text-orange-600" />
-                  Lead Source Distribution
+                  {/* Won Leads Card */}
+                  <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-2 px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-green-700">
+                          Won Leads
                 </CardTitle>
-                <CardDescription>Where your team's leads are coming from</CardDescription>
+                        <button
+                          className="text-green-600 hover:text-green-800"
+                          title="Leads with status 'Won' filtered by won timestamp"
+                        >
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+                        </button>
+                      </div>
               </CardHeader>
-              <CardContent className="pt-6">
-                <LeadSourceChart data={leadSourceData} />
-                <div className="mt-4 space-y-2">
-                  {leadSourceData.slice(0, 5).map((source, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">{source.source}</span>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium">{source.count}</span>
-                        <span className="text-gray-400">({source.percentage}%)</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm">
-              <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-                <CardTitle className="flex items-center">
-                  <Activity className="h-5 w-5 mr-2 text-orange-600" />
-                  Lead Status Overview
-                </CardTitle>
-                <CardDescription>Current status distribution of all leads</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <LeadStatusChart data={leadStatusData} />
-                <div className="mt-4 space-y-2">
-                  {leadStatusData.slice(0, 5).map((status, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center">
-                        {getStatusIcon(status.status)}
-                        <span className="text-gray-600 ml-2">{status.status}</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium">{status.count}</span>
-                        <span className="text-gray-400">({status.percentage}%)</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Detailed Leads by PS Member */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-              <CardTitle className="flex items-center">
-                <Users className="h-5 w-5 mr-2 text-orange-600" />
-                Detailed Lead Breakdown by PS Member
-              </CardTitle>
-              <CardDescription>Click on any lead to view complete details</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <ScrollArea className="h-[600px] pr-4">
-                <div className="space-y-6">
-                  {filteredPerformance.map((perf) => (
-                    <div key={perf.ps_user.id} className="border rounded-lg overflow-hidden">
-                      <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-4 border-b">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-lg">{perf.ps_user.full_name}</h3>
-                            <p className="text-sm text-gray-600">
-                              @{perf.ps_user.username} • {perf.ps_user.email}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <Badge className="bg-orange-500 text-white text-lg px-3 py-1">
-                              {perf.leads?.length || 0} Leads
-                            </Badge>
-                            <p className="text-xs text-gray-600 mt-1">{perf.ps_user.branch}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="divide-y">
-                        {perf.leads && perf.leads.length > 0 ? (
-                          perf.leads.map((lead) => (
-                            <div 
-                              key={lead.id || lead.lead_uid} 
-                              className="p-4 hover:bg-gray-50 transition-colors cursor-pointer"
-                              onClick={() => handleViewLead(lead)}
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1 min-w-0 space-y-2">
-                                  <div className="flex items-center space-x-3">
-                                    <h4 className="font-medium text-gray-900">{lead.customer_name}</h4>
-                                    <Badge variant="outline" className="text-xs">
-                                      {lead.lead_uid}
-                                    </Badge>
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                                    <div className="flex items-center text-gray-600">
-                                      <PhoneCall className="h-4 w-4 mr-1.5 text-orange-500" />
-                                      {lead.customer_mobile_number}
-                                    </div>
-                                    {lead.customer_email && (
-                                      <div className="flex items-center text-gray-600">
-                                        <Mail className="h-4 w-4 mr-1.5 text-orange-500" />
-                                        {lead.customer_email}
-                                      </div>
-                                    )}
-                                    <div className="flex items-center text-gray-600">
-                                      <Building className="h-4 w-4 mr-1.5 text-orange-500" />
-                                      {lead.source}
-                                      {lead.subsource && ` • ${lead.subsource}`}
-                                    </div>
-                                    {(lead.city || lead.state) && (
-                                      <div className="flex items-center text-gray-600">
-                                        <MapPin className="h-4 w-4 mr-1.5 text-orange-500" />
-                                        {lead.city}{lead.city && lead.state && ', '}{lead.state}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center space-x-3">
-                                    <Badge className={getStatusColor(lead.final_status || lead.lead_status)}>
-                                      {getStatusIcon(lead.final_status || lead.lead_status)}
-                                      <span className="ml-1">{lead.final_status || lead.lead_status}</span>
-                                    </Badge>
-                                    <span className="text-xs text-gray-500">
-                                      Created: {new Date(lead.created_at).toLocaleDateString('en-IN')}
-                                    </span>
-                                    {lead.follow_up_date && (
-                                      <span className="text-xs text-orange-600 flex items-center">
-                                        <Calendar className="h-3 w-3 mr-1" />
-                                        Follow-up: {new Date(lead.follow_up_date).toLocaleDateString('en-IN')}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  className="ml-4 border-orange-300 hover:bg-orange-50"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleViewLead(lead)
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4 mr-1" />
-                                  View
-                                </Button>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="p-8 text-center text-gray-500">
-                            <Target className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                            <p>No leads assigned yet</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Recent Team Activities */}
-          <Card className="shadow-sm">
-            <CardHeader className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-              <CardTitle className="flex items-center">
-                <Activity className="h-5 w-5 mr-2 text-orange-600" />
-                Recent Team Activities
-              </CardTitle>
-              <CardDescription>Latest activities across your PS team</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <ScrollArea className="h-[400px] pr-4">
-                <div className="space-y-3">
-                  {individualPerformance.flatMap(perf => 
-                    perf.recent_activities.map(activity => ({
-                      ...activity,
-                      ps_user: perf.ps_user
-                    }))
-                  ).sort((a, b) => 
-                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                  ).slice(0, 20).map((activity, idx) => (
-                    <div key={`${activity.id}-${idx}`} className="flex items-start space-x-4 p-3 border rounded-lg hover:bg-gray-50 transition-colors">
-                      <div className="flex-shrink-0 mt-1">
-                        <div className="w-10 h-10 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center border-2 border-orange-200">
-                          <UserCheck className="h-5 w-5 text-orange-600" />
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <p className="font-medium text-gray-900">{activity.ps_user.full_name}</p>
-                          <Badge variant="outline" className="text-xs">{activity.type}</Badge>
-                        </div>
-                        <p className="text-sm text-gray-600">{activity.description}</p>
-                        <div className="flex items-center space-x-3 mt-2 text-xs text-gray-500">
-                          <span className="flex items-center">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {new Date(activity.created_at).toLocaleString('en-IN')}
-                          </span>
-                          <span>•</span>
-                          <span>@{activity.ps_user.username}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {individualPerformance.flatMap(p => p.recent_activities).length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Activity className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                      <p>No recent activities to display</p>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Analytics Dashboard Section */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-xl flex items-center">
-                    <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
-                    Analytics Dashboard
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    Comprehensive analytics and performance insights
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6">
-              {/* Analytics Filter */}
-              <div className="mb-6">
-                <div className="flex items-center space-x-4 mb-4">
-                  <h3 className="text-lg font-semibold flex items-center">
-                    <Filter className="h-4 w-4 mr-2" />
-                    Analytics Filter
-                  </h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">From Date:</label>
-                    <input
-                      type="date"
-                      value={analyticsFromDate}
-                      onChange={(e) => setAnalyticsFromDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">To Date:</label>
-                    <input
-                      type="date"
-                      value={analyticsToDate}
-                      onChange={(e) => setAnalyticsToDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="flex items-end space-x-2">
-                    <Button 
-                      onClick={fetchAnalyticsData} 
-                      disabled={analyticsLoading}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
+                      <CardContent className="px-3 py-2">
                       {analyticsLoading ? (
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Filter className="h-4 w-4 mr-2" />
-                      )}
-                      Apply Filter
-                    </Button>
-                    <Button 
-                      onClick={resetAnalyticsFilters} 
-                      variant="outline"
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Reset
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Analytics Tabs */}
-              <Tabs defaultValue="ps-performance" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="ps-performance" className="flex items-center">
-                    <Users className="h-4 w-4 mr-2" />
-                    PS Performance
-                  </TabsTrigger>
-                  <TabsTrigger value="source-analysis" className="flex items-center">
-                    <PieChart className="h-4 w-4 mr-2" />
-                    Source Analysis
-                  </TabsTrigger>
-                  <TabsTrigger value="followup-summary" className="flex items-center">
-                    <Activity className="h-4 w-4 mr-2" />
-                    Follow-up Summary
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="ps-performance" className="mt-6">
-                  <div className="space-y-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center">
-                          <Users className="h-5 w-5 mr-2" />
-                          Product Specialist Performance
-                        </CardTitle>
-                        <CardDescription>
-                          Click on any PS card to view detailed performance metrics
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {psPerformanceData.length === 0 ? (
-                          <div className="text-center py-12">
-                            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-lg font-semibold text-gray-600 mb-2">No PS Performance Data</h3>
-                            <p className="text-gray-500">No PS users found or no data available for the selected date range.</p>
-                          </div>
+                        <div className="animate-pulse">
+                          <div className="h-8 bg-green-200 rounded w-16 mb-2"></div>
+                      </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {psPerformanceData.map((ps) => (
-                              <Card 
-                                key={ps.ps_name} 
-                                className="hover:shadow-lg transition-all duration-300 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600"
-                                onClick={() => {
-                                  setSelectedPSDetail({
-                                    ps_user: { id: ps.ps_name, full_name: ps.ps_name, username: ps.ps_name, email: '', branch: '' },
-                                    metrics: {
-                                      total_leads: ps.leads_assigned,
-                                      new_leads: ps.leads_assigned,
-                                      qualified_leads: ps.leads_contacted,
-                                      closed_won: 0,
-                                      closed_lost: 0,
-                                      call_volume: 0,
-                                      avg_response_time: 0,
-                                      conversion_rate: ps.leads_assigned > 0 ? (ps.leads_contacted / ps.leads_assigned) * 100 : 0
-                                    },
-                                    leads: [],
-                                    recent_activities: []
-                                  })
-                                  setIsPSDetailOpen(true)
-                                }}
-                              >
-                                <CardContent className="p-6">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                                        <Users className="h-5 w-5 text-blue-600" />
-                                      </div>
-                                      <div>
-                                        <h3 className="font-semibold text-gray-900">{ps.ps_name}</h3>
-                                        <p className="text-sm text-gray-500">Product Specialist</p>
-                                      </div>
-                                    </div>
-                                    <Badge 
-                                      variant={ps.gap > 0 ? "destructive" : "secondary"}
-                                      className="text-xs"
-                                    >
-                                      {ps.gap > 0 ? `${ps.gap} Gap` : 'On Track'}
-                                    </Badge>
+                        <div className="text-2xl sm:text-4xl font-bold text-green-900">
+                          {analyticsData.wonLeads.toLocaleString()}
+                      </div>
+                        )}
+              </CardContent>
+            </Card>
+
+                  {/* Lost Leads Card */}
+                  <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200 shadow-sm hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-2 px-3 py-2">
+                        <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-red-700">
+                          Lost Leads
+                        </CardTitle>
+                        <button
+                          className="text-red-600 hover:text-red-800"
+                          title="Leads with status 'Lost' filtered by lost timestamp"
+                        >
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
+                        </button>
                                   </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-blue-600">{ps.leads_assigned}</div>
-                                      <div className="text-xs text-gray-500">Assigned</div>
+                      </CardHeader>
+                      <CardContent className="px-3 py-2">
+                      {analyticsLoading ? (
+                        <div className="animate-pulse">
+                          <div className="h-8 bg-red-200 rounded w-16 mb-2"></div>
                                     </div>
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-green-600">{ps.leads_contacted}</div>
-                                      <div className="text-xs text-gray-500">Contacted</div>
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="mt-4">
-                                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                                      <span>Contact Rate</span>
-                                      <span>{ps.leads_assigned > 0 ? Math.round((ps.leads_contacted / ps.leads_assigned) * 100) : 0}%</span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                      <div 
-                                        className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-                                        style={{ 
-                                          width: `${ps.leads_assigned > 0 ? (ps.leads_contacted / ps.leads_assigned) * 100 : 0}%` 
-                                        }}
-                                      ></div>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
+                        ) : (
+                        <div className="text-2xl sm:text-4xl font-bold text-red-900">
+                          {analyticsData.lostLeads.toLocaleString()}
                           </div>
                         )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="source-analysis" className="mt-6">
-                  <div className="space-y-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center">
-                          <PieChart className="h-5 w-5 mr-2" />
-                          Source-wise Leads Analysis
-                        </CardTitle>
-                        <CardDescription>
-                          Click on any PS card to view detailed source breakdown
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {sourceAnalysisData.length === 0 ? (
-                          <div className="text-center py-12">
-                            <PieChart className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-lg font-semibold text-gray-600 mb-2">No Source Analysis Data</h3>
-                            <p className="text-gray-500">No PS users found or no data available for the selected date range.</p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {sourceAnalysisData.map((ps) => (
-                              <Card 
-                                key={ps.ps_name} 
-                                className="hover:shadow-lg transition-all duration-300 cursor-pointer border-l-4 border-l-purple-500 hover:border-l-purple-600"
-                                onClick={() => {
-                                  // Create a modal or detailed view for source analysis
-                                  const sourceDetails = Object.entries(ps.sources).map(([source, data]) => ({
-                                    source,
-                                    ...data
-                                  })).filter(source => source.total > 0)
-                                  
-                                  alert(`Source Analysis for ${ps.ps_name}:\n\n${sourceDetails.map(s => 
-                                    `${s.source}: ${s.total} leads, ${s.won} won (${s.win_rate}% win rate)`
-                                  ).join('\n')}`)
-                                }}
-                              >
-                                <CardContent className="p-6">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                                        <PieChart className="h-5 w-5 text-purple-600" />
-                                      </div>
-                                      <div>
-                                        <h3 className="font-semibold text-gray-900">{ps.ps_name}</h3>
-                                        <p className="text-sm text-gray-500">Source Performance</p>
-                                      </div>
-                                    </div>
-                                    <Badge 
-                                      variant={ps.win_rate > 10 ? "default" : "secondary"}
-                                      className="text-xs"
-                                    >
-                                      {ps.win_rate}% Win Rate
-                                    </Badge>
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-4 mb-4">
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-purple-600">{ps.total_leads}</div>
-                                      <div className="text-xs text-gray-500">Total Leads</div>
-                                    </div>
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-green-600">{ps.won_leads}</div>
-                                      <div className="text-xs text-gray-500">Won Leads</div>
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="space-y-2">
-                                    <div className="text-xs font-medium text-gray-700 mb-2">Top Sources:</div>
-                                    {Object.entries(ps.sources)
-                                      .filter(([_, data]) => data.total > 0)
-                                      .sort(([_, a], [__, b]) => b.total - a.total)
-                                      .slice(0, 3)
-                                      .map(([source, data]) => (
-                                        <div key={source} className="flex justify-between items-center">
-                                          <span className="text-xs text-gray-600">{source}</span>
-                                          <div className="flex items-center space-x-2">
-                                            <span className="text-xs text-gray-500">{data.total}</span>
-                                            <div className="w-12 bg-gray-200 rounded-full h-1">
-                                              <div 
-                                                className="bg-purple-500 h-1 rounded-full" 
-                                                style={{ width: `${(data.total / ps.total_leads) * 100}%` }}
-                                              ></div>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ))}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="followup-summary" className="mt-6">
-                  <div className="space-y-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center">
-                          <Activity className="h-5 w-5 mr-2" />
-                          Product Specialist Follow-up Summary
-                        </CardTitle>
-                        <div className="flex items-center space-x-4">
-                          <div>
-                            <label className="text-sm font-medium text-gray-700 mb-2 block">Mode:</label>
-                            <Select value={analyticsMode} onValueChange={setAnalyticsMode}>
-                              <SelectTrigger className="w-48">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Leads</SelectItem>
-                                <SelectItem value="pending">All Pending Leads</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Info className="h-4 w-4 mr-1" />
-                            Mode 1: All pending leads
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        {followupSummaryData.length === 0 ? (
-                          <div className="text-center py-12">
-                            <Activity className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-lg font-semibold text-gray-600 mb-2">No Follow-up Data</h3>
-                            <p className="text-gray-500">No PS users found or no data available for the selected date range.</p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {followupSummaryData.map((ps) => (
-                              <Card 
-                                key={ps.ps_name} 
-                                className="hover:shadow-lg transition-all duration-300 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600"
-                                onClick={() => {
-                                  const followupDetails = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'].map(stage => {
-                                    const stageData = ps[stage as keyof FollowupSummaryData] as { CRE: number; WALK_IN: number }
-                                    const total = stageData.CRE + stageData.WALK_IN
-                                    return `${stage}: ${total} leads (${stageData.CRE} CRE, ${stageData.WALK_IN} Walk-in)`
-                                  }).filter(detail => detail.includes(': 0 leads') === false)
-                                  
-                                  alert(`Follow-up Summary for ${ps.ps_name}:\n\n${followupDetails.join('\n')}`)
-                                }}
-                              >
-                                <CardContent className="p-6">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                                        <Activity className="h-5 w-5 text-orange-600" />
-                                      </div>
-                                      <div>
-                                        <h3 className="font-semibold text-gray-900">{ps.ps_name}</h3>
-                                        <p className="text-sm text-gray-500">Follow-up Stages</p>
-                                      </div>
-                                    </div>
-                                    <Badge variant="outline" className="text-xs">
-                                      Click to View
-                                    </Badge>
-                                  </div>
-                                  
-                                  <div className="space-y-3">
-                                    {['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'].map(stage => {
-                                      const stageData = ps[stage as keyof FollowupSummaryData] as { CRE: number; WALK_IN: number }
-                                      const total = stageData.CRE + stageData.WALK_IN
-                                      
-                                      if (total === 0) return null
-                                      
-                                      return (
-                                        <div key={stage} className="flex items-center justify-between">
-                                          <div className="flex items-center space-x-2">
-                                            <Badge variant="outline" className="text-xs font-mono">
-                                              {stage}
-                                            </Badge>
-                                            <span className="text-sm text-gray-600">{total} leads</span>
-                                          </div>
-                                          <div className="flex space-x-1">
-                                            {stageData.CRE > 0 && (
-                                              <Badge variant="destructive" className="text-xs px-1 py-0">
-                                                {stageData.CRE}
-                                              </Badge>
-                                            )}
-                                            {stageData.WALK_IN > 0 && (
-                                              <Badge variant="secondary" className="text-xs px-1 py-0">
-                                                {stageData.WALK_IN}
-                                              </Badge>
-                                            )}
-                                          </div>
-                                        </div>
-                                      )
-                                    }).filter(Boolean)}
-                                    
-                                    {['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'].every(stage => {
-                                      const stageData = ps[stage as keyof FollowupSummaryData] as { CRE: number; WALK_IN: number }
-                                      return stageData.CRE + stageData.WALK_IN === 0
-                                    }) && (
-                                      <div className="text-center py-4 text-gray-500">
-                                        <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                        <p className="text-sm">No follow-up data</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-              </Tabs>
             </CardContent>
           </Card>
-        </div>
+                        </div>
 
-        {/* Lead Detail Modal */}
-        <Dialog open={isLeadDetailOpen} onOpenChange={setIsLeadDetailOpen}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-2xl flex items-center">
-                <Target className="h-6 w-6 mr-2 text-orange-600" />
-                Lead Details
-              </DialogTitle>
-              <DialogDescription>
-                Complete information for lead {selectedLead?.lead_uid}
-              </DialogDescription>
-            </DialogHeader>
-
-            {selectedLead && (
-              <div className="space-y-6">
-                {/* Status Badge */}
-                <div className="flex items-center justify-between">
-                  <Badge className={`${getStatusColor(selectedLead.final_status || selectedLead.lead_status)} text-base px-4 py-2`}>
-                    {getStatusIcon(selectedLead.final_status || selectedLead.lead_status)}
-                    <span className="ml-2">{selectedLead.final_status || selectedLead.lead_status}</span>
-                  </Badge>
-                  <Badge variant="outline" className="text-sm">
-                    {selectedLead.lead_uid}
-                  </Badge>
-                </div>
-
-                <Separator />
-
-                {/* Customer Information */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-3 flex items-center">
-                    <UserCheck className="h-5 w-5 mr-2 text-orange-600" />
-                    Customer Information
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-                    <div>
-                      <label className="text-sm text-gray-600">Full Name</label>
-                      <p className="font-medium">{selectedLead.customer_name}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm text-gray-600">Mobile Number</label>
-                      <p className="font-medium flex items-center">
-                        <PhoneCall className="h-4 w-4 mr-1 text-orange-500" />
-                        {selectedLead.customer_mobile_number}
-                      </p>
-                    </div>
-                    {selectedLead.customer_email && (
-                      <div>
-                        <label className="text-sm text-gray-600">Email</label>
-                        <p className="font-medium flex items-center">
-                          <Mail className="h-4 w-4 mr-1 text-orange-500" />
-                          {selectedLead.customer_email}
-                        </p>
-                      </div>
-                    )}
-                    {(selectedLead.city || selectedLead.state) && (
-                      <div>
-                        <label className="text-sm text-gray-600">Location</label>
-                        <p className="font-medium flex items-center">
-                          <MapPin className="h-4 w-4 mr-1 text-orange-500" />
-                          {selectedLead.city}{selectedLead.city && selectedLead.state && ', '}{selectedLead.state}
-                        </p>
-                      </div>
-                    )}
+                {/* Source Performance Table */}
+        <div className="space-y-6">
+                  {/* Header with Search and Refresh */}
+                  <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                    <div className="flex-1 max-w-md">
+                      <Input
+                        placeholder="Search sources..."
+                        value={sourcePerformanceSearch}
+                        onChange={(e) => setSourcePerformanceSearch(e.target.value)}
+                        className="w-full"
+                    />
                   </div>
-                </div>
-
-                <Separator />
-
-                {/* Lead Information */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-3 flex items-center">
-                    <Building className="h-5 w-5 mr-2 text-orange-600" />
-                    Lead Information
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-                    <div>
-                      <label className="text-sm text-gray-600">Source</label>
-                      <p className="font-medium">{selectedLead.source}</p>
-                    </div>
-                    {selectedLead.subsource && (
-                      <div>
-                        <label className="text-sm text-gray-600">Sub-source</label>
-                        <p className="font-medium">{selectedLead.subsource}</p>
-                      </div>
-                    )}
-                    {selectedLead.model_interested && (
-                      <div>
-                        <label className="text-sm text-gray-600">Model Interested</label>
-                        <p className="font-medium">{selectedLead.model_interested}</p>
-                      </div>
-                    )}
-                    {selectedLead.budget && (
-                      <div>
-                        <label className="text-sm text-gray-600">Budget</label>
-                        <p className="font-medium">₹{selectedLead.budget.toLocaleString('en-IN')}</p>
-                      </div>
-                    )}
-                    <div>
-                      <label className="text-sm text-gray-600">Created On</label>
-                      <p className="font-medium">
-                        {new Date(selectedLead.created_at).toLocaleString('en-IN')}
-                      </p>
-                    </div>
-                    {selectedLead.updated_at && (
-                      <div>
-                        <label className="text-sm text-gray-600">Last Updated</label>
-                        <p className="font-medium">
-                          {new Date(selectedLead.updated_at).toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                    {selectedLead.follow_up_date && (
-                      <div className="md:col-span-2">
-                        <label className="text-sm text-gray-600">Next Follow-up</label>
-                        <p className="font-medium text-orange-600 flex items-center">
-                          <Calendar className="h-4 w-4 mr-1" />
-                          {new Date(selectedLead.follow_up_date).toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {selectedLead.remarks && (
-                  <>
-                    <Separator />
-                    <div>
-                      <h3 className="text-lg font-semibold mb-3 flex items-center">
-                        <MessageSquare className="h-5 w-5 mr-2 text-orange-600" />
-                        Remarks
-                      </h3>
-                      <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg">
-                        <p className="text-gray-700">{selectedLead.remarks}</p>
-                      </div>
-                    </div>
-                  </>
-                )}
+                    <Button 
+                      onClick={fetchSourcePerformanceData}
+                      disabled={sourcePerformanceLoading}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${sourcePerformanceLoading ? 'animate-spin' : ''}`} />
+                      Refresh Source Data
+                    </Button>
               </div>
-            )}
-          </DialogContent>
-        </Dialog>
 
-        {/* PS Detail Modal */}
-        <Dialog open={isPSDetailOpen} onOpenChange={setIsPSDetailOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-2xl flex items-center">
-                <UserCheck className="h-6 w-6 mr-2 text-orange-600" />
-                {selectedPSDetail?.ps_user.full_name} - Performance Details
-              </DialogTitle>
-              <DialogDescription>
-                Comprehensive performance analytics and activity breakdown
-              </DialogDescription>
-            </DialogHeader>
-
-            {selectedPSDetail && (
-              <Tabs defaultValue="overview" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
-                  <TabsTrigger value="leads">Leads ({selectedPSDetail.leads?.length || 0})</TabsTrigger>
-                  <TabsTrigger value="activities">Activities</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="overview" className="space-y-6 mt-6">
-                  {/* PS User Info */}
-                  <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-6 rounded-lg border border-orange-100">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-2">
-                        <h3 className="text-2xl font-bold">{selectedPSDetail.ps_user.full_name}</h3>
-                        <p className="text-gray-600">@{selectedPSDetail.ps_user.username}</p>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600">
-                          <span className="flex items-center">
-                            <Mail className="h-4 w-4 mr-1" />
-                            {selectedPSDetail.ps_user.email}
-                          </span>
-                          <span className="flex items-center">
-                            <Building className="h-4 w-4 mr-1" />
-                            {selectedPSDetail.ps_user.branch}
-                          </span>
-                        </div>
-                      </div>
-                      <Badge className="bg-orange-500 text-white text-lg px-4 py-2">
-                        PS Member
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {/* Performance Metrics Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <Card className="border-2 border-orange-200">
-                      <CardContent className="pt-6 text-center">
-                        <Target className="h-8 w-8 mx-auto mb-2 text-orange-600" />
-                        <p className="text-3xl font-bold">{selectedPSDetail.metrics.total_leads}</p>
-                        <p className="text-sm text-gray-600">Total Leads</p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-2 border-green-200">
-                      <CardContent className="pt-6 text-center">
-                        <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-600" />
-                        <p className="text-3xl font-bold text-green-600">{selectedPSDetail.metrics.closed_won}</p>
-                        <p className="text-sm text-gray-600">Closed Won</p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-2 border-blue-200">
-                      <CardContent className="pt-6 text-center">
-                        <Phone className="h-8 w-8 mx-auto mb-2 text-blue-600" />
-                        <p className="text-3xl font-bold text-blue-600">{selectedPSDetail.metrics.call_volume}</p>
-                        <p className="text-sm text-gray-600">Call Volume</p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-2 border-purple-200">
-                      <CardContent className="pt-6 text-center">
-                        <TrendingUp className="h-8 w-8 mx-auto mb-2 text-purple-600" />
-                        <p className="text-3xl font-bold text-purple-600">
-                          {selectedPSDetail.metrics.conversion_rate?.toFixed(1)}%
-                        </p>
-                        <p className="text-sm text-gray-600">Conversion Rate</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {/* Additional Metrics */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-gray-600">New Leads</p>
-                            <p className="text-2xl font-bold">{selectedPSDetail.metrics.new_leads}</p>
+                  {/* Source Performance Table */}
+                  <Card className="overflow-hidden">
+                    <CardHeader className="pb-4">
+                      <CardTitle className="text-lg font-semibold">Source Performance Overview</CardTitle>
+                        <CardDescription>
+                        Performance metrics by lead source for your PS team
+                        </CardDescription>
+                      </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b sticky top-0 z-10">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 min-w-[200px]">
+                                Source
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                                Untouched
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                                Called
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[120px]">
+                                Waiting for Approval
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                                Won
+                              </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                                Lost
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {sourcePerformanceLoading ? (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-8 text-center">
+                                  <div className="flex items-center justify-center space-x-2">
+                                    <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+                                    <span className="text-gray-600">Loading source performance data...</span>
                           </div>
-                          <ArrowUpRight className="h-8 w-8 text-green-500" />
-                        </div>
+                                </td>
+                              </tr>
+                            ) : sourcePerformanceData.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                                  No source performance data available
+                                </td>
+                              </tr>
+                            ) : (
+                              <>
+                                {sourcePerformanceData
+                                  .filter(item =>
+                                    !sourcePerformanceSearch ||
+                                    item.source.toLowerCase().includes(sourcePerformanceSearch.toLowerCase())
+                                  )
+                                  .map((item, index) => (
+                                    <tr
+                                      key={`${item.source}-${index}`}
+                                      className={`hover:bg-gray-50 transition-colors ${
+                                        index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                                      }`}
+                                    >
+                                      <td className="px-4 py-3 text-sm">
+                                        <div className="font-medium text-gray-900">
+                                          {item.source}
+                                      </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.untouched.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.called.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                        {item.waiting_for_approval.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-green-600 font-medium">
+                                        {item.won.toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-center text-sm text-red-600 font-medium">
+                                        {item.lost.toLocaleString()}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                {/* Summary Row */}
+                                {sourcePerformanceData.length > 0 && (
+                                  <tr className="bg-blue-50 border-t-2 border-blue-200 font-semibold">
+                                    <td className="px-4 py-3 text-sm text-blue-900">Total</td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.untouched, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.called, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.waiting_for_approval, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.won, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + item.lost, 0).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            )}
+                          </tbody>
+                        </table>
+                                  </div>
                       </CardContent>
                     </Card>
 
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-gray-600">Qualified</p>
-                            <p className="text-2xl font-bold">{selectedPSDetail.metrics.qualified_leads}</p>
-                          </div>
-                          <CheckCircle2 className="h-8 w-8 text-blue-500" />
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent className="pt-6">
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="leads" className="mt-6">
-                  <ScrollArea className="h-[500px] pr-4">
-                    <div className="space-y-3">
-                      {selectedPSDetail.leads && selectedPSDetail.leads.length > 0 ? (
-                        selectedPSDetail.leads.map((lead) => (
-                          <Card 
-                            key={lead.id || lead.lead_uid}
-                            className="hover:shadow-md transition-shadow cursor-pointer"
-                            onClick={() => {
-                              setSelectedLead(lead)
-                              setIsLeadDetailOpen(true)
-                            }}
-                          >
-                            <CardContent className="pt-6">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1 space-y-2">
-                                  <div className="flex items-center space-x-3">
-                                    <h4 className="font-semibold">{lead.customer_name}</h4>
-                                    <Badge variant="outline" className="text-xs">{lead.lead_uid}</Badge>
+              {/* Pending Leads Follow-up Summary Table */}
+              <div className="space-y-6 mt-6">
+                {/* Header with Refresh */}
+                <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                                      <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Pending Leads – Follow-up Summary</h3>
+                    <p className="text-sm text-gray-600 mt-1">Follow-up stages for pending leads across all PS members</p>
+                                      </div>
+                  <Button 
+                    onClick={fetchPendingFollowupData}
+                    disabled={pendingFollowupLoading}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${pendingFollowupLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
                                   </div>
                                   
-                                  <div className="flex flex-wrap gap-3 text-sm text-gray-600">
-                                    <span className="flex items-center">
-                                      <PhoneCall className="h-3 w-3 mr-1" />
-                                      {lead.customer_mobile_number}
-                                    </span>
-                                    <span className="flex items-center">
-                                      <Building className="h-3 w-3 mr-1" />
-                                      {lead.source}
-                                    </span>
-                                    {lead.city && (
-                                      <span className="flex items-center">
-                                        <MapPin className="h-3 w-3 mr-1" />
-                                        {lead.city}
-                                      </span>
-                                    )}
+                {/* Pending Follow-up Table Card */}
+                <Card className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b sticky top-0 z-10">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 min-w-[150px]">
+                              PS Name
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                              Untouched
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F1
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F2
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F3
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F4
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F5
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F6
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F7
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F8
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F9
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F10
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {pendingFollowupLoading ? (
+                            <tr>
+                              <td colSpan={12} className="px-4 py-8 text-center">
+                                <div className="flex items-center justify-center space-x-2">
+                                  <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+                                  <span className="text-gray-600">Loading pending follow-up data...</span>
+                                    </div>
+                              </td>
+                            </tr>
+                          ) : pendingFollowupData.length === 0 ? (
+                            <tr>
+                              <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
+                                No pending follow-up data available
+                              </td>
+                            </tr>
+                          ) : (
+                            <>
+                              {pendingFollowupData.map((item, index) => (
+                                <tr
+                                  key={`${item.ps_name}-${index}`}
+                                  className={`hover:bg-gray-50 transition-colors ${
+                                    index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                                  }`}
+                                >
+                                  <td className="px-4 py-3 text-sm">
+                                    <div className="font-medium text-gray-900">
+                                      {item.ps_name}
+                                      </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.untouched?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f1?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f2?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f3?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f4?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f5?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f6?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f7?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f8?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f9?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f10?.toLocaleString() || 0}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Summary Row */}
+                              {pendingFollowupData.length > 0 && (
+                                <tr className="bg-blue-50 border-t-2 border-blue-200 font-semibold">
+                                  <td className="px-4 py-3 text-sm text-blue-900">Total</td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.untouched || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f1 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f2 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f3 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f4 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f5 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f6 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f7 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f8 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f9 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f10 || 0), 0).toLocaleString()}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )}
+                        </tbody>
+                      </table>
                                   </div>
-
-                                  <Badge className={getStatusColor(lead.final_status || lead.lead_status)}>
-                                    {getStatusIcon(lead.final_status || lead.lead_status)}
-                                    <span className="ml-1">{lead.final_status || lead.lead_status}</span>
-                                  </Badge>
-                                </div>
-
-                                <Button variant="outline" size="sm">
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      ) : (
-                        <div className="text-center py-12 text-gray-500">
-                          <Target className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                          <p>No leads assigned yet</p>
-                        </div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="activities" className="mt-6">
-                  <ScrollArea className="h-[500px] pr-4">
-                    <div className="space-y-3">
-                      {selectedPSDetail.recent_activities.length > 0 ? (
-                        selectedPSDetail.recent_activities.map((activity) => (
-                          <Card key={activity.id}>
-                            <CardContent className="pt-6">
-                              <div className="flex items-start space-x-4">
-                                <div className="w-10 h-10 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                  <Activity className="h-5 w-5 text-orange-600" />
-                                </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center space-x-2 mb-1">
-                                    <Badge variant="outline">{activity.type}</Badge>
-                                    <span className="text-xs text-gray-500">
-                                      {new Date(activity.created_at).toLocaleString('en-IN')}
-                                    </span>
-                                  </div>
-                                  <p className="text-sm text-gray-700">{activity.description}</p>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      ) : (
-                        <div className="text-center py-12 text-gray-500">
-                          <Activity className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                          <p>No recent activities</p>
-                        </div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-              </Tabs>
+                                </CardContent>
+                              </Card>
+                          </div>
+                  </div>
+                </div>
             )}
-          </DialogContent>
-        </Dialog>
+
+            {/* Fresh Leads Tab Content */}
+            {activeTab === 'fresh-leads' && (
+              <FreshLeadsTab />
+            )}
+
+            {/* Other Tab Content */}
+            {activeTab === 'todays-followup' && (
+              getCurrentTabLoading('todays-followup') ? (
+                <TabSkeleton />
+              ) : (
+                <TodaysFollowupTab />
+              )
+            )}
+
+            {activeTab === 'open-leads' && (
+              getCurrentTabLoading('open-leads') ? (
+                <TabSkeleton />
+              ) : (
+                <OpenLeadsTab />
+              )
+            )}
+
+            {activeTab === 'waiting-approval' && (
+              getCurrentTabLoading('waiting-approval') ? (
+                <TabSkeleton />
+              ) : (
+                <WaitingApprovalTab />
+              )
+            )}
+
+            {activeTab === 'booked' && (
+              getCurrentTabLoading('booked') ? (
+                <TabSkeleton />
+              ) : (
+                <BookedTab />
+              )
+            )}
+
+            {activeTab === 'retailed' && (
+              getCurrentTabLoading('retailed') ? (
+                <TabSkeleton />
+              ) : (
+                <RetailedTab />
+              )
+            )}
+
+            {activeTab === 'lost' && (
+              getCurrentTabLoading('lost') ? (
+                <TabSkeleton />
+              ) : (
+                <LostTab />
+              )
+            )}
+          </div>
+        </div>
       </RoleGuard>
     </DashboardLayout>
   )
