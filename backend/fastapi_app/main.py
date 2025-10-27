@@ -3742,6 +3742,7 @@ class QualifiedLeadAssignment(BaseModel):
     ps_id: str
     ps_name: str
     ps_branch: str
+    branch: Optional[str] = None  # Branch for the lead (selected by user)
 
 @app.get("/api/qualified-leads")
 async def get_qualified_leads(
@@ -4108,8 +4109,25 @@ async def assign_branch_to_lead(assignment: dict, current_user=Depends(get_curre
         lead_id = assignment.get('lead_id')
         branch = assignment.get('branch')
         
-        if not lead_id or not branch:
+        if not lead_id or not branch or branch.strip() == '':
             raise HTTPException(status_code=400, detail="lead_id and branch are required")
+        
+        # Convert lead_id to int if needed (handle both string and int IDs)
+        try:
+            lead_id_str = str(lead_id).strip()
+            if lead_id_str == '':
+                raise ValueError("Empty lead_id")
+            lead_id_int = int(lead_id_str)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid lead_id format: {lead_id}")
+        
+        # First check if the lead exists
+        check_response = supabase.table('qualified_leads').select('id, lead_uid').eq('id', lead_id_int).execute()
+        
+        if not check_response.data:
+            raise HTTPException(status_code=404, detail=f"Lead not found with id: {lead_id}")
+        
+        lead_uid = check_response.data[0].get('lead_uid')
         
         # Update qualified lead with branch
         update_data = {
@@ -4117,15 +4135,19 @@ async def assign_branch_to_lead(assignment: dict, current_user=Depends(get_curre
             "updated_at": now_ist_iso()
         }
         
-        response = supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
+        response = supabase.table('qualified_leads').update(update_data).eq('id', lead_id_int).execute()
         
         if response.data:
             # Invalidate cache
-            invalidate_on_lead_change(response.data[0].get('lead_uid'), 'update')
-            return {"message": "Branch assigned successfully", "lead_id": lead_id, "branch": branch}
+            if lead_uid:
+                invalidate_on_lead_change(lead_uid, 'update')
+            return {"message": "Branch assigned successfully", "lead_id": lead_id_int, "branch": branch}
         else:
             raise HTTPException(status_code=404, detail="Lead not found")
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -4229,6 +4251,10 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     "updated_at": now_ist_iso()
                 }
                 
+                # If branch is provided, add it to the update
+                if assignment.branch:
+                    update_data["branch"] = assignment.branch
+                
                 print(f"[Assign] Updating qualified_leads for lead_id: {lead_id} with ps_name: {assignment.ps_name}")
                 supabase.table('qualified_leads').update(update_data).eq('id', lead_id).execute()
                 print(f"[Assign] Updated qualified_leads successfully for lead_id: {lead_id}")
@@ -4250,7 +4276,7 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     lead_master_update = {
                         "ps_name": assignment.ps_name,
                         "ps_id": assignment.ps_id,
-                        "branch": assignment.ps_branch,
+                        "branch": assignment.branch if assignment.branch else assignment.ps_branch,
                         "updated_at": now_ist_iso()
                     }
                     supabase.table('lead_master').update(lead_master_update).eq('uid', lead_uid).execute()
