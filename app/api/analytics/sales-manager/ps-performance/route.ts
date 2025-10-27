@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || 'http://localhost:8000'
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
 const MAX_RETRIES = 3
 const RETRY_DELAY = 1000 // 1 second
 
@@ -10,7 +10,9 @@ async function sleep(ms: number) {
 
 async function callFastAPIWithRetry(branch: string, authToken: string, retries = MAX_RETRIES): Promise<Response> {
   try {
-    const response = await fetch(`${FASTAPI_BASE_URL}/analytics/sales-manager/ps-performance?branch=${encodeURIComponent(branch)}`, {
+    const url = `${FASTAPI_BASE_URL}/analytics/sales-manager/ps-performance?branch=${encodeURIComponent(branch)}`
+    console.log(`🔄 Calling FastAPI: ${url}`)
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -61,6 +63,7 @@ export async function GET(request: NextRequest) {
 
     const authToken = authHeader.substring(7) // Remove 'Bearer ' prefix
     console.log(`🔄 Fetching PS performance data for branch: ${branch}`)
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
     // Call FastAPI backend with retry logic and authentication
     const fastApiResponse = await callFastAPIWithRetry(branch, authToken)
@@ -128,7 +131,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ 
       error: 'Internal server error - Failed to process analytics request',
       success: false,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.message : String(error)) : undefined
     }, { status: 500 })
   }
 }

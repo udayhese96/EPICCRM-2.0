@@ -6784,36 +6784,43 @@ def process_ps_performance_data(raw_data):
     ps_map = {}
     
     for row in raw_data:
-        ps_name = row['ps_name']
-        if ps_name not in ps_map:
-            ps_map[ps_name] = {
-                'ps_name': ps_name,
-                'lead_count': 0,
-                'unattended': 0,
-                'open_leads': 0,
-                'lost_leads': 0,
-                'approval_pending': 0,
-                'booked': 0,
-                'retailed': 0
-            }
-        
-        ps_data = ps_map[ps_name]
-        ps_data['lead_count'] += 1
-        
-        if not row['first_call_date']:
-            ps_data['unattended'] += 1
-        elif row['final_status'] == 'Lost':
-            ps_data['lost_leads'] += 1
-        elif row['final_status'] == 'Waiting for Approval':
-            ps_data['approval_pending'] += 1
-        elif row['final_status'] == 'Booked':
-            ps_data['booked'] += 1
-        elif row['final_status'] == 'Won':
-            ps_data['retailed'] += 1
-        
-        if (row['first_call_date'] and 
-            row['final_status'] in ['Waiting for Approval', 'Pending']):
-            ps_data['open_leads'] += 1
+        try:
+            ps_name = row.get('ps_name', 'Unknown')
+            first_call_date = row.get('first_call_date')
+            final_status = row.get('final_status', 'Pending')
+            
+            if ps_name not in ps_map:
+                ps_map[ps_name] = {
+                    'ps_name': ps_name,
+                    'lead_count': 0,
+                    'unattended': 0,
+                    'open_leads': 0,
+                    'lost_leads': 0,
+                    'approval_pending': 0,
+                    'booked': 0,
+                    'retailed': 0
+                }
+            
+            ps_data = ps_map[ps_name]
+            ps_data['lead_count'] += 1
+            
+            if not first_call_date:
+                ps_data['unattended'] += 1
+            elif final_status == 'Lost':
+                ps_data['lost_leads'] += 1
+            elif final_status == 'Waiting for Approval':
+                ps_data['approval_pending'] += 1
+            elif final_status == 'Booked':
+                ps_data['booked'] += 1
+            elif final_status == 'Won':
+                ps_data['retailed'] += 1
+            
+            if (first_call_date and 
+                final_status in ['Waiting for Approval', 'Pending']):
+                ps_data['open_leads'] += 1
+        except Exception as e:
+            print(f"Error processing PS performance row: {str(e)}, row data: {row}")
+            continue
     
     # Convert to list and add totals
     ps_list = list(ps_map.values())
@@ -7369,41 +7376,47 @@ def process_tl_performance_data(raw_data, ps_to_tl_map, team_leaders_data):
 
     # Process PS data and assign to team leaders
     for row in raw_data:
-        ps_name = row['ps_name']
-        team_leader = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
-        
-        print(f"DEBUG: Processing PS '{ps_name}' -> Team Leader: '{team_leader}'")
-        
-        # If team leader not in our list, add them
-        if team_leader not in tl_map:
-            tl_map[team_leader] = {
-                'tl_name': team_leader,
-                'lead_count': 0,
-                'unattended': 0,
-                'open_leads': 0,
-                'lost_leads': 0,
-                'approval_pending': 0,
-                'booked': 0,
-                'retailed': 0
-            }
+        try:
+            ps_name = row.get('ps_name', 'Unknown')
+            team_leader = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
+            first_call_date = row.get('first_call_date')
+            final_status = row.get('final_status', 'Pending')
+            
+            print(f"DEBUG: Processing PS '{ps_name}' -> Team Leader: '{team_leader}'")
+            
+            # If team leader not in our list, add them
+            if team_leader not in tl_map:
+                tl_map[team_leader] = {
+                    'tl_name': team_leader,
+                    'lead_count': 0,
+                    'unattended': 0,
+                    'open_leads': 0,
+                    'lost_leads': 0,
+                    'approval_pending': 0,
+                    'booked': 0,
+                    'retailed': 0
+                }
 
-        tl_data = tl_map[team_leader]
-        tl_data['lead_count'] += 1
+            tl_data = tl_map[team_leader]
+            tl_data['lead_count'] += 1
 
-        if not row['first_call_date']:
-            tl_data['unattended'] += 1
-        elif row['final_status'] == 'Lost':
-            tl_data['lost_leads'] += 1
-        elif row['final_status'] == 'Waiting for Approval':
-            tl_data['approval_pending'] += 1
-        elif row['final_status'] == 'Booked':
-            tl_data['booked'] += 1
-        elif row['final_status'] == 'Won':
-            tl_data['retailed'] += 1
+            if not first_call_date:
+                tl_data['unattended'] += 1
+            elif final_status == 'Lost':
+                tl_data['lost_leads'] += 1
+            elif final_status == 'Waiting for Approval':
+                tl_data['approval_pending'] += 1
+            elif final_status == 'Booked':
+                tl_data['booked'] += 1
+            elif final_status == 'Won':
+                tl_data['retailed'] += 1
 
-        if (row['first_call_date'] and
-            row['final_status'] in ['Waiting for Approval', 'Pending']):
-            tl_data['open_leads'] += 1
+            if (first_call_date and
+                final_status in ['Waiting for Approval', 'Pending']):
+                tl_data['open_leads'] += 1
+        except Exception as e:
+            print(f"Error processing TL performance row: {str(e)}, row data: {row}")
+            continue
 
     # Convert to list and add totals
     tl_list = list(tl_map.values())
