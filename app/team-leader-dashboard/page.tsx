@@ -3862,19 +3862,19 @@ export default function TeamLeaderDashboard() {
       <RoleGuard requiredRole="team_leader">
         <div className="space-y-6 pb-8">
           {/* Header with Gradient */}
-          <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 p-8 shadow-sm border border-orange-100">
-            <div className="flex justify-between items-start">
+          <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 p-4 sm:p-8 shadow-sm border border-orange-100">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
               <div className="space-y-2">
-                <h1 className="text-3xl font-bold text-gray-900">Team Leader Dashboard</h1>
-                <p className="text-gray-700">
+                <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Team Leader Dashboard</h1>
+                <p className="text-sm sm:text-base text-gray-700">
                   Comprehensive analytics and performance insights for your team
                 </p>
-                <div className="flex items-center space-x-4 mt-3">
-                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800">
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800 text-xs">
                     <Users className="h-3 w-3 mr-1" />
                     {assignedPS.length} PS Members
                   </Badge>
-                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800">
+                  <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800 text-xs">
                     <Calendar className="h-3 w-3 mr-1" />
                     {dateFilterType === 'today' ? 'Today' : 
                      dateFilterType === 'all_time' ? 'All Time' :
@@ -3888,9 +3888,9 @@ export default function TeamLeaderDashboard() {
                   </Badge>
                 </div>
               </div>
-              <div className="flex space-x-3">
+              <div className="flex flex-wrap gap-3 w-full sm:w-auto">
                 {/* Unified Date Filter Selector */}
-                <div className="w-48">
+                <div className="w-full sm:w-48">
                   <select 
                     value={dateFilterType} 
                     onChange={(e) => {
@@ -3919,28 +3919,28 @@ export default function TeamLeaderDashboard() {
                 {/* Custom Date Range (only show when date_range is selected) */}
                 {dateFilterType === 'date_range' && (
                   <>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 w-full sm:w-auto">
                       <label className="text-sm text-gray-600 whitespace-nowrap">From:</label>
                       <input
                         type="date"
                         value={customStartDate}
                         onChange={(e) => setCustomStartDate(e.target.value)}
-                        className="px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        className="flex-1 px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                       />
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 w-full sm:w-auto">
                       <label className="text-sm text-gray-600 whitespace-nowrap">To:</label>
                       <input
                         type="date"
                         value={customEndDate}
                         onChange={(e) => setCustomEndDate(e.target.value)}
-                        className="px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        className="flex-1 px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                       />
                     </div>
                   </>
                 )}
                 <Select value={selectedPS} onValueChange={setSelectedPS}>
-                  <SelectTrigger className="w-52 bg-white shadow-sm border-orange-200">
+                  <SelectTrigger className="w-full sm:w-52 bg-white shadow-sm border-orange-200">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -3958,8 +3958,8 @@ export default function TeamLeaderDashboard() {
 
           {/* Tab Navigation */}
           <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
-            <div className="px-6 py-4">
-              <div className="flex flex-wrap gap-2">
+            <div className="px-2 sm:px-6 py-2 sm:py-4">
+              <div className="flex flex-wrap gap-1 sm:gap-2 overflow-x-auto">
                 {tabs.map((tab) => {
                   const Icon = tab.icon
                   const isActive = activeTab === tab.id
@@ -3968,14 +3968,14 @@ export default function TeamLeaderDashboard() {
                       key={tab.id}
                       onClick={() => handleTabChange(tab.id)}
                       className={`
-                        flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-200
+                        flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition-all duration-200
                         ${isActive 
                           ? 'bg-blue-500 text-white shadow-md' 
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                         }
                       `}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-3 w-3 sm:h-4 sm:w-4" />
                       <span>{tab.label}</span>
                     </button>
                   )
@@ -4003,29 +4003,29 @@ export default function TeamLeaderDashboard() {
                 </div>
 
                 {/* KPI Cards Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 gap-3 sm:gap-6">
                   {/* Total Leads Assigned Card */}
                   <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2 px-3 py-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium text-blue-700">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-blue-700">
                           Total Leads Assigned
                 </CardTitle>
                         <button
                           className="text-blue-600 hover:text-blue-800"
                           title="Total unique leads assigned to your PS team within the selected date range"
                         >
-                          <Info className="h-4 w-4" />
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
                         </button>
                       </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-3 py-2">
                       {analyticsLoading ? (
                         <div className="animate-pulse">
-                          <div className="h-10 bg-blue-200 rounded w-24 mb-2"></div>
+                          <div className="h-8 bg-blue-200 rounded w-16 mb-2"></div>
           </div>
                       ) : (
-                        <div className="text-4xl font-bold text-blue-900">
+                        <div className="text-2xl sm:text-4xl font-bold text-blue-900">
                           {analyticsData.totalLeadsAssigned.toLocaleString()}
                   </div>
                         )}
@@ -4034,26 +4034,26 @@ export default function TeamLeaderDashboard() {
 
                   {/* Open Leads Card */}
                   <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2 px-3 py-2">
                 <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium text-orange-700">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-orange-700">
                           Open Leads
                   </CardTitle>
                         <button
                           className="text-orange-600 hover:text-orange-800"
                           title="Leads with status 'Pending' within the selected date range"
                         >
-                          <Info className="h-4 w-4" />
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
                         </button>
                       </div>
                     </CardHeader>
-                      <CardContent>
+                      <CardContent className="px-3 py-2">
                       {analyticsLoading ? (
                         <div className="animate-pulse">
-                          <div className="h-10 bg-orange-200 rounded w-24 mb-2"></div>
+                          <div className="h-8 bg-orange-200 rounded w-16 mb-2"></div>
                       </div>
                         ) : (
-                        <div className="text-4xl font-bold text-orange-900">
+                        <div className="text-2xl sm:text-4xl font-bold text-orange-900">
                           {analyticsData.openLeads.toLocaleString()}
                 </div>
               )}
@@ -4062,26 +4062,26 @@ export default function TeamLeaderDashboard() {
 
                   {/* Won Leads Card */}
                   <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2 px-3 py-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium text-green-700">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-green-700">
                           Won Leads
                 </CardTitle>
                         <button
                           className="text-green-600 hover:text-green-800"
                           title="Leads with status 'Won' filtered by won timestamp"
                         >
-                          <Info className="h-4 w-4" />
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
                         </button>
                       </div>
               </CardHeader>
-                      <CardContent>
+                      <CardContent className="px-3 py-2">
                       {analyticsLoading ? (
                         <div className="animate-pulse">
-                          <div className="h-10 bg-green-200 rounded w-24 mb-2"></div>
+                          <div className="h-8 bg-green-200 rounded w-16 mb-2"></div>
                       </div>
                         ) : (
-                        <div className="text-4xl font-bold text-green-900">
+                        <div className="text-2xl sm:text-4xl font-bold text-green-900">
                           {analyticsData.wonLeads.toLocaleString()}
                       </div>
                         )}
@@ -4090,26 +4090,26 @@ export default function TeamLeaderDashboard() {
 
                   {/* Lost Leads Card */}
                   <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2 px-3 py-2">
                         <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium text-red-700">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-red-700">
                           Lost Leads
                         </CardTitle>
                         <button
                           className="text-red-600 hover:text-red-800"
                           title="Leads with status 'Lost' filtered by lost timestamp"
                         >
-                          <Info className="h-4 w-4" />
+                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
                         </button>
                                   </div>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="px-3 py-2">
                       {analyticsLoading ? (
                         <div className="animate-pulse">
-                          <div className="h-10 bg-red-200 rounded w-24 mb-2"></div>
+                          <div className="h-8 bg-red-200 rounded w-16 mb-2"></div>
                                     </div>
                         ) : (
-                        <div className="text-4xl font-bold text-red-900">
+                        <div className="text-2xl sm:text-4xl font-bold text-red-900">
                           {analyticsData.lostLeads.toLocaleString()}
                           </div>
                         )}

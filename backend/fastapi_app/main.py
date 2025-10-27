@@ -3176,6 +3176,15 @@ async def get_fresh_leads(
         deduplicated_leads.sort(key=lambda x: x.get('ps_assigned_at', x.get('created_at', '')), reverse=True)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -3183,9 +3192,8 @@ async def get_fresh_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             enriched_lead = {
                 **lead,
@@ -3346,6 +3354,15 @@ async def get_todays_followup(
         deduplicated_leads.sort(key=sort_key)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -3353,9 +3370,8 @@ async def get_todays_followup(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number and overdue status
             follow_up_date = lead.get('follow_up_date')
@@ -3515,6 +3531,15 @@ async def get_open_leads(
         deduplicated_leads.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -3522,9 +3547,8 @@ async def get_open_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number
             next_call_number = 1
@@ -3685,6 +3709,15 @@ async def get_waiting_approval_leads(
         deduplicated_leads.sort(key=sort_key)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -3692,9 +3725,8 @@ async def get_waiting_approval_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number and overdue status
             follow_up_date = lead.get('follow_up_date')
@@ -3855,6 +3887,15 @@ async def get_booked_leads(
         deduplicated_leads.sort(key=lambda x: (x.get('ps_assigned_at', ''), x.get('customer_name', '')), reverse=True)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -3862,9 +3903,8 @@ async def get_booked_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number and overdue status
             follow_up_date = lead.get('follow_up_date')
@@ -4025,6 +4065,15 @@ async def get_retailed_leads(
         deduplicated_leads.sort(key=lambda x: (x.get('ps_assigned_at', ''), x.get('customer_name', '')), reverse=True)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -4032,9 +4081,8 @@ async def get_retailed_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number and overdue status
             follow_up_date = lead.get('follow_up_date')
@@ -4195,6 +4243,15 @@ async def get_lost_leads(
         deduplicated_leads.sort(key=lambda x: (x.get('ps_assigned_at', ''), x.get('customer_name', '')), reverse=True)
         leads = deduplicated_leads[offset:offset + limit]
         
+        # OPTIMIZATION: Fetch all qualified_leads data in one query (prevents N+1 query problem)
+        lead_uids = [lead.get('lead_uid') for lead in leads if lead.get('lead_uid')]
+        qualified_data_map = {}
+        if lead_uids:
+            qualified_response = supabase.table('qualified_leads').select('lead_uid, icrop_id, model_interested, variant').in_('lead_uid', lead_uids).execute()
+            # Build lookup map
+            for ql in qualified_response.data or []:
+                qualified_data_map[ql['lead_uid']] = ql
+        
         # Enrich leads with PS member names and other details
         enriched_leads = []
         for lead in leads:
@@ -4202,9 +4259,8 @@ async def get_lost_leads(
             ps_name = ps_member_names.get(ps_id, 'Unknown')
             ps_branch = ps_member_branches.get(ps_id, 'Unknown')
             
-            # Get additional details from qualified_leads if available
-            qualified_response = supabase.table('qualified_leads').select('icrop_id, model_interested, variant').eq('lead_uid', lead['lead_uid']).execute()
-            qualified_data = qualified_response.data[0] if qualified_response.data else {}
+            # Get additional details from qualified_leads lookup map (already fetched in bulk above)
+            qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
             
             # Calculate next call number and overdue status
             follow_up_date = lead.get('follow_up_date')
@@ -4339,31 +4395,37 @@ async def get_analytics_kpi(
         total_assigned = len(unique_leads)
         
         # Open Leads: COUNT(*) where final_status='Pending' with ps_assigned_at filter
-        open_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Pending')
+        # DEDUPLICATION: Count DISTINCT lead_uid to match the open-leads tab logic
+        open_query = supabase.table('ps_followup_master').select('lead_uid').in_('ps_id', ps_ids).eq('final_status', 'Pending')
         if start_date:
             open_query = open_query.gte('ps_assigned_at', start_date)
         if end_date:
             open_query = open_query.lte('ps_assigned_at', end_date)
         open_response = open_query.execute()
-        open_leads = len(open_response.data or [])
+        # Deduplicate by lead_uid
+        open_leads = len(set([lead.get('lead_uid') for lead in open_response.data or [] if lead.get('lead_uid')]))
         
         # Won Leads: COUNT(*) where final_status='Won' filtered by won_timestamp
-        won_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Won')
+        # DEDUPLICATION: Count DISTINCT lead_uid to match the booked/retailed tab logic
+        won_query = supabase.table('ps_followup_master').select('lead_uid').in_('ps_id', ps_ids).eq('final_status', 'Won')
         if start_date:
             won_query = won_query.gte('won_timestamp', start_date)
         if end_date:
             won_query = won_query.lte('won_timestamp', end_date)
         won_response = won_query.execute()
-        won_leads = len(won_response.data or [])
+        # Deduplicate by lead_uid
+        won_leads = len(set([lead.get('lead_uid') for lead in won_response.data or [] if lead.get('lead_uid')]))
         
         # Lost Leads: COUNT(*) where final_status='Lost' filtered by lost_timestamp
-        lost_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Lost')
+        # DEDUPLICATION: Count DISTINCT lead_uid to match the lost tab logic
+        lost_query = supabase.table('ps_followup_master').select('lead_uid').in_('ps_id', ps_ids).eq('final_status', 'Lost')
         if start_date:
             lost_query = lost_query.gte('lost_timestamp', start_date)
         if end_date:
             lost_query = lost_query.lte('lost_timestamp', end_date)
         lost_response = lost_query.execute()
-        lost_leads = len(lost_response.data or [])
+        # Deduplicate by lead_uid
+        lost_leads = len(set([lead.get('lead_uid') for lead in lost_response.data or [] if lead.get('lead_uid')]))
         
         return {
             "total_assigned": total_assigned,
