@@ -4284,7 +4284,10 @@ export default function TeamLeaderDashboard() {
                               PS Name
                             </th>
                             <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
-                              Untouched (F1)
+                              Untouched
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F1
                             </th>
                             <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
                               F2
@@ -4318,7 +4321,7 @@ export default function TeamLeaderDashboard() {
                         <tbody className="divide-y divide-gray-200">
                           {pendingFollowupLoading ? (
                             <tr>
-                              <td colSpan={11} className="px-4 py-8 text-center">
+                              <td colSpan={12} className="px-4 py-8 text-center">
                                 <div className="flex items-center justify-center space-x-2">
                                   <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
                                   <span className="text-gray-600">Loading pending follow-up data...</span>
@@ -4346,7 +4349,10 @@ export default function TeamLeaderDashboard() {
                                       </div>
                                   </td>
                                   <td className="px-4 py-3 text-center text-sm text-gray-900">
-                                    {item.untouched_f1?.toLocaleString() || 0}
+                                    {item.untouched?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f1?.toLocaleString() || 0}
                                   </td>
                                   <td className="px-4 py-3 text-center text-sm text-gray-900">
                                     {item.f2?.toLocaleString() || 0}
@@ -4382,7 +4388,10 @@ export default function TeamLeaderDashboard() {
                                 <tr className="bg-blue-50 border-t-2 border-blue-200 font-semibold">
                                   <td className="px-4 py-3 text-sm text-blue-900">Total</td>
                                   <td className="px-4 py-3 text-center text-sm text-blue-900">
-                                    {pendingFollowupData.reduce((sum, item) => sum + (item.untouched_f1 || 0), 0).toLocaleString()}
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.untouched || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f1 || 0), 0).toLocaleString()}
                                   </td>
                                   <td className="px-4 py-3 text-center text-sm text-blue-900">
                                     {pendingFollowupData.reduce((sum, item) => sum + (item.f2 || 0), 0).toLocaleString()}

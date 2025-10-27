@@ -4627,7 +4627,8 @@ async def get_pending_followup_summary(
         for ps_id, ps_name in ps_names.items():
             ps_summary[ps_id] = {
                 'ps_name': ps_name,
-                'untouched_f1': set(),  # first_call_date IS NOT NULL AND second_call_date IS NULL
+                'untouched': set(),  # first_call_date IS NULL AND final_status='Pending'
+                'f1': set(),  # first_call_date IS NOT NULL AND second_call_date IS NULL
                 'f2': set(),  # second_call_date IS NOT NULL AND third_call_date IS NULL
                 'f3': set(),  # third_call_date IS NOT NULL AND fourth_call_date IS NULL
                 'f4': set(),
@@ -4658,8 +4659,12 @@ async def get_pending_followup_summary(
             tenth_call = lead.get('tenth_call_date')
             
             # Categorize based on follow-up stage
-            if first_call and not second_call:
-                ps_summary[ps_id]['untouched_f1'].add(lead_uid)
+            if not first_call:
+                # Untouched: first_call_date IS NULL
+                ps_summary[ps_id]['untouched'].add(lead_uid)
+            elif first_call and not second_call:
+                # F1: first_call_date IS NOT NULL AND second_call_date IS NULL
+                ps_summary[ps_id]['f1'].add(lead_uid)
             elif second_call and not third_call:
                 ps_summary[ps_id]['f2'].add(lead_uid)
             elif third_call and not fourth_call:
@@ -4684,7 +4689,8 @@ async def get_pending_followup_summary(
         for ps_id, data in ps_summary.items():
             summary.append({
                 'ps_name': data['ps_name'],
-                'untouched_f1': len(data['untouched_f1']),
+                'untouched': len(data['untouched']),
+                'f1': len(data['f1']),
                 'f2': len(data['f2']),
                 'f3': len(data['f3']),
                 'f4': len(data['f4']),
