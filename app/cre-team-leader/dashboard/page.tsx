@@ -285,22 +285,7 @@ export default function CRETeamLeaderDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
       
-      // First assign branch, then assign PS
-      const branchResponse = await fetch('/api/qualified-leads/assign-branch', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ lead_id: leadId, branch: lead.branch }),
-      })
-
-      if (!branchResponse.ok) {
-        toast.error('Failed to assign branch')
-        return
-      }
-
-      // Then assign PS
+      // Assign PS with branch info in one call
       const response = await fetch('/api/qualified-leads/assign', {
         method: 'POST',
         headers: {
@@ -311,7 +296,8 @@ export default function CRETeamLeaderDashboard() {
           lead_ids: [leadId],
           ps_id: gemUser.id,
           ps_name: gemUser.name,
-          ps_branch: gemUser.branch
+          ps_branch: gemUser.branch,
+          branch: lead.branch  // Include the selected branch
         }),
       })
 
@@ -379,8 +365,8 @@ export default function CRETeamLeaderDashboard() {
   }
 
   const handleBulkAssignment = async () => {
-    if (selectedLeads.length === 0 || !selectedGem) {
-      toast.error('Please select leads and a GEM user')
+    if (selectedLeads.length === 0 || !selectedGem || !selectedBranch) {
+      toast.error('Please select leads, branch, and a GEM user')
       return
     }
 
@@ -404,7 +390,8 @@ export default function CRETeamLeaderDashboard() {
           lead_ids: selectedLeads,
           ps_id: selectedGem,
           ps_name: selectedGemUser.name,
-          ps_branch: selectedGemUser.branch
+          ps_branch: selectedGemUser.branch,
+          branch: selectedBranch  // Include the selected branch
         }),
       })
 
