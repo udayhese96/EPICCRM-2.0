@@ -2,17 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('[Pending Followup Summary] Starting request')
+    
     const searchParams = request.nextUrl.searchParams
     const teamLeaderId = searchParams.get('team_leader_id')
-    const search = searchParams.get('search') || ''
     const dateRange = searchParams.get('date_range') || '30'
-    const psMember = searchParams.get('ps_member') || 'all'
-    const limit = searchParams.get('limit') || '50'
-    const offset = searchParams.get('offset') || '0'
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    console.log('[Booked] Params:', { teamLeaderId, dateRange, psMember, startDate, endDate })
+    console.log('[Pending Followup Summary] Params:', { teamLeaderId, dateRange, startDate, endDate })
 
     if (!teamLeaderId) {
       return NextResponse.json(
@@ -21,28 +19,28 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get the access token from cookies
+    // Get access token from cookies
     const accessToken = request.cookies.get('access_token')?.value
 
     if (!accessToken) {
       return NextResponse.json(
-        { error: 'Authentication required' },
+        { error: 'Access token is required' },
         { status: 401 }
       )
     }
 
     // Calculate date range
-    let startDateObj: Date | null = null
-    let endDateObj: Date | null = null
-
+    let startDateObj: Date
+    let endDateObj: Date
+    
     if (startDate && endDate) {
       // Use custom date range
       startDateObj = new Date(startDate)
       endDateObj = new Date(endDate)
     } else if (dateRange === 'all') {
       // All time - no date filtering
-      startDateObj = null
-      endDateObj = null
+      startDateObj = null as any
+      endDateObj = null as any
     } else if (dateRange === 'today') {
       // Today only
       const now = new Date()
@@ -59,71 +57,56 @@ export async function GET(request: NextRequest) {
       endDateObj.setHours(23, 59, 59, 999)
     }
 
-    // Build query parameters for the backend
-    const backendParams = new URLSearchParams({
-      team_leader_id: teamLeaderId,
-      date_range: dateRange,
-      limit,
-      offset,
-    })
+    // Build the base URL for the backend API
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    if (search) {
-      backendParams.append('search', search)
-    }
+    console.log('[Pending Followup Summary] Fetching from backend:', `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`)
 
-    if (psMember !== 'all') {
-      backendParams.append('ps_member', psMember)
-    }
-
-    // Add date parameters if calculated
+    // Prepare request body
+    const requestBody: any = {}
+    
+    // Add date parameters if not "all time"
     if (startDateObj && endDateObj) {
-      backendParams.append('start_date', startDateObj.toISOString())
-      backendParams.append('end_date', endDateObj.toISOString())
+      requestBody.start_date = startDateObj.toISOString()
+      requestBody.end_date = endDateObj.toISOString()
     }
 
-    // Call the FastAPI backend
-    const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000'
+    console.log('[Pending Followup Summary] Request body:', requestBody)
+
+    // Fetch pending followup summary data from backend
     const response = await fetch(
-      `${backendUrl}/api/team-leader/booked?${backendParams.toString()}`,
+      `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`,
       {
-        method: 'GET',
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
         },
-        cache: 'no-store',
+        body: JSON.stringify(requestBody),
       }
     )
 
+    console.log('[Pending Followup Summary] Backend response status:', response.status)
+
     if (!response.ok) {
       const errorText = await response.text()
-      console.error('[Booked API] Backend error:', response.status, errorText)
-
+      console.error('[Pending Followup Summary] Backend error:', errorText)
       return NextResponse.json(
-        {
-          error: 'Failed to fetch booked leads data',
-          details: errorText
-        },
+        { error: 'Failed to fetch pending followup summary data', details: errorText },
         { status: response.status }
       )
     }
 
     const data = await response.json()
+    console.log('[Pending Followup Summary] Data received:', data)
 
-    return NextResponse.json(data, {
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
-      },
-    })
-
+    return NextResponse.json(data)
   } catch (error) {
-    console.error('[Booked API] Error:', error)
+    console.error('[Pending Followup Summary] Error:', error)
     return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     )
   }
 }
+

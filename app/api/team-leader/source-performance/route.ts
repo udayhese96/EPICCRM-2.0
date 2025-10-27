@@ -8,8 +8,10 @@ export async function GET(request: NextRequest) {
     const teamLeaderId = searchParams.get('team_leader_id')
     const dateRange = searchParams.get('date_range') || '30'
     const psMember = searchParams.get('ps_member') || 'all'
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
 
-    console.log('[Source Performance] Params:', { teamLeaderId, dateRange, psMember })
+    console.log('[Source Performance] Params:', { teamLeaderId, dateRange, psMember, startDate, endDate })
 
     if (!teamLeaderId) {
       return NextResponse.json(
@@ -30,13 +32,32 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate date range
-    const now = new Date()
-    const startDate = new Date()
-    startDate.setDate(now.getDate() - parseInt(dateRange))
+    let startDateObj: Date
+    let endDateObj: Date
     
-    // Set end date to end of current day to include all leads assigned today
-    const endDate = new Date()
-    endDate.setHours(23, 59, 59, 999) // End of current day
+    if (startDate && endDate) {
+      // Use custom date range
+      startDateObj = new Date(startDate)
+      endDateObj = new Date(endDate)
+    } else if (dateRange === 'all') {
+      // All time - no date filtering
+      startDateObj = null as any
+      endDateObj = null as any
+    } else if (dateRange === 'today') {
+      // Today only
+      const now = new Date()
+      startDateObj = new Date(now)
+      startDateObj.setHours(0, 0, 0, 0)
+      endDateObj = new Date(now)
+      endDateObj.setHours(23, 59, 59, 999)
+    } else {
+      // Last X days (default behavior)
+      const now = new Date()
+      startDateObj = new Date()
+      startDateObj.setDate(now.getDate() - parseInt(dateRange))
+      endDateObj = new Date()
+      endDateObj.setHours(23, 59, 59, 999)
+    }
 
     // Build the base URL for the backend API
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -94,8 +115,12 @@ export async function GET(request: NextRequest) {
     // Prepare request body
     const requestBody: any = {
       ps_ids: targetPsIds,
-      start_date: startDate.toISOString(),
-      end_date: endDate.toISOString(),
+    }
+    
+    // Add date parameters if not "all time"
+    if (startDateObj && endDateObj) {
+      requestBody.start_date = startDateObj.toISOString()
+      requestBody.end_date = endDateObj.toISOString()
     }
     
     // Add ps_name if filtering by specific PS

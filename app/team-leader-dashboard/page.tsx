@@ -123,6 +123,20 @@ interface SourcePerformanceData {
   is_sub_source?: boolean
 }
 
+interface PendingFollowupData {
+  ps_name: string
+  untouched_f1: number
+  f2: number
+  f3: number
+  f4: number
+  f5: number
+  f6: number
+  f7: number
+  f8: number
+  f9: number
+  f10: number
+}
+
 // Tab-specific data cache interface
 interface TabDataCache {
   [tabId: string]: {
@@ -131,6 +145,9 @@ interface TabDataCache {
     filters: {
       dateRange: string
       selectedPS: string
+      dateFilterType: string
+      customStartDate?: string
+      customEndDate?: string
     }
     isLoading: boolean
     isLoadingMore: boolean
@@ -148,11 +165,120 @@ export default function TeamLeaderDashboard() {
   const [individualPerformance, setIndividualPerformance] = useState<PSIndividualPerformance[]>([])
   const [selectedPS, setSelectedPS] = useState<string>('all')
   const [dateRange, setDateRange] = useState<string>('30')
+  const [dateFilterType, setDateFilterType] = useState<string>('last_30')
+  const [customStartDate, setCustomStartDate] = useState<string>('')
+  const [customEndDate, setCustomEndDate] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>('analytics')
+  
+  // Helper function to get date parameters based on filter type
+  const getDateParameters = () => {
+    const now = new Date()
+    
+    switch (dateFilterType) {
+      case 'today':
+        const todayStart = new Date(now)
+        todayStart.setHours(0, 0, 0, 0)
+        const todayEnd = new Date(now)
+        todayEnd.setHours(23, 59, 59, 999)
+        return {
+          dateRange: 'today',
+          startDate: todayStart.toISOString(),
+          endDate: todayEnd.toISOString()
+        }
+      
+      case 'all_time':
+        return {
+          dateRange: 'all',
+          startDate: null,
+          endDate: null
+        }
+      
+      case 'date_range':
+        if (!customStartDate || !customEndDate) {
+          // Fallback to last 30 days if custom dates not set
+          const startDate = new Date(now)
+          startDate.setDate(now.getDate() - 30)
+          const endDate = new Date(now)
+          endDate.setHours(23, 59, 59, 999)
+          return {
+            dateRange: '30',
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString()
+          }
+        }
+        
+        const start = new Date(customStartDate)
+        start.setHours(0, 0, 0, 0)
+        const end = new Date(customEndDate)
+        end.setHours(23, 59, 59, 999)
+        
+        return {
+          dateRange: 'custom',
+          startDate: start.toISOString(),
+          endDate: end.toISOString()
+        }
+      
+      case 'last_7':
+        const start7 = new Date(now)
+        start7.setDate(now.getDate() - 7)
+        const end7 = new Date(now)
+        end7.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '7',
+          startDate: start7.toISOString(),
+          endDate: end7.toISOString()
+        }
+      
+      case 'last_30':
+        const start30 = new Date(now)
+        start30.setDate(now.getDate() - 30)
+        const end30 = new Date(now)
+        end30.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '30',
+          startDate: start30.toISOString(),
+          endDate: end30.toISOString()
+        }
+      
+      case 'last_90':
+        const start90 = new Date(now)
+        start90.setDate(now.getDate() - 90)
+        const end90 = new Date(now)
+        end90.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '90',
+          startDate: start90.toISOString(),
+          endDate: end90.toISOString()
+        }
+      
+      case 'last_365':
+        const start365 = new Date(now)
+        start365.setDate(now.getDate() - 365)
+        const end365 = new Date(now)
+        end365.setHours(23, 59, 59, 999)
+        return {
+          dateRange: '365',
+          startDate: start365.toISOString(),
+          endDate: end365.toISOString()
+        }
+      
+      case 'last_days':
+      default:
+        const startDate = new Date(now)
+        startDate.setDate(now.getDate() - parseInt(dateRange))
+        const endDate = new Date(now)
+        endDate.setHours(23, 59, 59, 999)
+        return {
+          dateRange: dateRange,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
+        }
+    }
+  }
   
   // Tab-specific data cache
   const [tabDataCache, setTabDataCache] = useState<TabDataCache>({})
@@ -185,6 +311,10 @@ export default function TeamLeaderDashboard() {
   const [sourcePerformanceData, setSourcePerformanceData] = useState<SourcePerformanceData[]>([])
   const [sourcePerformanceLoading, setSourcePerformanceLoading] = useState(false)
   const [sourcePerformanceSearch, setSourcePerformanceSearch] = useState('')
+
+  // Pending Follow-up Summary data
+  const [pendingFollowupData, setPendingFollowupData] = useState<any[]>([])
+  const [pendingFollowupLoading, setPendingFollowupLoading] = useState(false)
 
   const [isAuthChecking, setIsAuthChecking] = useState(true)
 
@@ -364,7 +494,13 @@ export default function TeamLeaderDashboard() {
   const fetchTabData = useCallback(async (tabId: string, forceRefresh = false) => {
     if (!currentUserId) return
 
-    const currentFilters = { dateRange, selectedPS }
+    const currentFilters = {
+      dateRange,
+      selectedPS,
+      dateFilterType,
+      customStartDate,
+      customEndDate
+    }
     const cachedData = tabDataCache[tabId]
     
     // Check if we need to fetch data
@@ -372,6 +508,9 @@ export default function TeamLeaderDashboard() {
       !cachedData || 
       cachedData.filters.dateRange !== dateRange || 
       cachedData.filters.selectedPS !== selectedPS ||
+      cachedData.filters.dateFilterType !== dateFilterType ||
+      cachedData.filters.customStartDate !== customStartDate ||
+      cachedData.filters.customEndDate !== customEndDate ||
       (Date.now() - cachedData.lastFetched) > 300000 // 5 minutes cache
 
     if (!shouldFetch) return cachedData.data
@@ -447,7 +586,7 @@ export default function TeamLeaderDashboard() {
       }))
       return null
     }
-  }, [currentUserId, dateRange, selectedPS])
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate])
 
   // Global authenticated fetch wrapper
   const authenticatedFetch = useCallback(async (url: string, options: RequestInit = {}) => {
@@ -486,13 +625,28 @@ export default function TeamLeaderDashboard() {
     console.log('[Frontend] Setting source performance loading to true')
     setSourcePerformanceLoading(true)
     try {
+      const dateParams = getDateParameters()
       const params = new URLSearchParams({
         team_leader_id: currentUserId,
-        date_range: dateRange,
+        date_range: dateParams.dateRange,
         ps_member: selectedPS
       })
 
-      console.log('[Frontend] Fetching source performance data with params:', { team_leader_id: currentUserId, date_range: dateRange, ps_member: selectedPS })
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
+      }
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
+      }
+
+      console.log('[Frontend] Fetching source performance data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange, 
+        ps_member: selectedPS,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
 
       const response = await authenticatedFetch(`/api/team-leader/source-performance?${params.toString()}`)
 
@@ -509,7 +663,56 @@ export default function TeamLeaderDashboard() {
       console.log('[Frontend] Setting source performance loading to false')
       setSourcePerformanceLoading(false)
     }
-  }, [currentUserId, dateRange, selectedPS])
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate])
+
+  // Fetch Pending Follow-up Summary Data
+  const fetchPendingFollowupData = useCallback(async () => {
+    console.log('[Frontend] fetchPendingFollowupData called')
+    if (!currentUserId) {
+      console.log('[Frontend] No currentUserId, returning')
+      return
+    }
+
+    console.log('[Frontend] Setting pending followup loading to true')
+    setPendingFollowupLoading(true)
+    try {
+      const dateParams = getDateParameters()
+      const params = new URLSearchParams({
+        team_leader_id: currentUserId,
+        date_range: dateParams.dateRange
+      })
+
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
+      }
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
+      }
+
+      console.log('[Frontend] Fetching pending followup data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
+
+      const response = await authenticatedFetch(`/api/team-leader/pending-followup-summary?${params.toString()}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[Frontend] Pending followup data received:', data)
+        setPendingFollowupData(data.summary || [])
+      } else {
+        console.error('Failed to fetch pending followup data')
+      }
+    } catch (error) {
+      console.error('Error fetching pending followup data:', error)
+    } finally {
+      console.log('[Frontend] Setting pending followup loading to false')
+      setPendingFollowupLoading(false)
+    }
+  }, [currentUserId, dateRange, dateFilterType, customStartDate, customEndDate])
 
   // Fetch Analytics KPI Data
   const fetchAnalyticsData = useCallback(async () => {
@@ -517,13 +720,28 @@ export default function TeamLeaderDashboard() {
 
     setAnalyticsLoading(true)
     try {
+      const dateParams = getDateParameters()
       const params = new URLSearchParams({
         team_leader_id: currentUserId,
-        date_range: dateRange,
+        date_range: dateParams.dateRange,
         ps_member: selectedPS
       })
 
-      console.log('[Frontend] Fetching analytics data with params:', { team_leader_id: currentUserId, date_range: dateRange, ps_member: selectedPS })
+      // Add custom date parameters if using date range
+      if (dateParams.startDate) {
+        params.append('start_date', dateParams.startDate)
+      }
+      if (dateParams.endDate) {
+        params.append('end_date', dateParams.endDate)
+      }
+
+      console.log('[Frontend] Fetching analytics data with params:', { 
+        team_leader_id: currentUserId, 
+        date_range: dateParams.dateRange, 
+        ps_member: selectedPS,
+        start_date: dateParams.startDate,
+        end_date: dateParams.endDate
+      })
 
       const response = await authenticatedFetch(`/api/team-leader/analytics-summary?${params.toString()}`)
 
@@ -544,21 +762,31 @@ export default function TeamLeaderDashboard() {
       setAnalyticsLoading(false)
     }
     
-    // Also fetch source performance data
+    // Also fetch source performance data and pending follow-up data
     await fetchSourcePerformanceData()
-  }, [currentUserId, dateRange, selectedPS])
+    await fetchPendingFollowupData()
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchSourcePerformanceData, fetchPendingFollowupData])
 
 
   // Individual tab data fetchers
   const fetchFreshLeadsData = useCallback(async (offset = 0, limit = 100) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/fresh-leads?${params.toString()}`, {
       credentials: 'include'
@@ -569,17 +797,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchTodaysFollowupData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/todays-followup?${params.toString()}`, {
       credentials: 'include'
@@ -590,17 +827,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchOpenLeadsData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/open-leads?${params.toString()}`, {
       credentials: 'include'
@@ -611,17 +857,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchWaitingApprovalData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/waiting-approval?${params.toString()}`, {
       credentials: 'include'
@@ -632,17 +887,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchBookedData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/booked?${params.toString()}`, {
       credentials: 'include'
@@ -653,17 +917,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchRetailedData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/retailed?${params.toString()}`, {
       credentials: 'include'
@@ -674,17 +947,26 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   const fetchLostData = useCallback(async (offset = 0, limit = 200) => {
+    const dateParams = getDateParameters()
     const params = new URLSearchParams({
       team_leader_id: currentUserId!,
       search: '',
       ps_member: selectedPS,
-      date_range: dateRange,
+      date_range: dateParams.dateRange,
       limit: limit.toString(),
       offset: offset.toString()
     })
+
+    // Add custom date parameters if using date range
+    if (dateParams.startDate) {
+      params.append('start_date', dateParams.startDate)
+    }
+    if (dateParams.endDate) {
+      params.append('end_date', dateParams.endDate)
+    }
     
     const response = await fetch(`/api/team-leader/lost?${params.toString()}`, {
       credentials: 'include'
@@ -695,13 +977,19 @@ export default function TeamLeaderDashboard() {
       return data
     }
     return { leads: [], total: 0 }
-  }, [currentUserId, selectedPS, dateRange])
+  }, [currentUserId, selectedPS, dateRange, dateFilterType, customStartDate, customEndDate])
 
   // Refresh function for individual tabs
   const refreshTabData = useCallback(async (tabId: string) => {
     if (!currentUserId) return
 
-    const currentFilters = { dateRange, selectedPS }
+    const currentFilters = { 
+      dateRange, 
+      selectedPS, 
+      dateFilterType, 
+      customStartDate, 
+      customEndDate 
+    }
     
     // Set loading state for this tab
     setTabDataCache(prev => ({
@@ -771,7 +1059,7 @@ export default function TeamLeaderDashboard() {
       }))
       return null
     }
-  }, [currentUserId, dateRange, selectedPS, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchFreshLeadsData, fetchTodaysFollowupData, fetchOpenLeadsData, fetchWaitingApprovalData, fetchBookedData, fetchRetailedData, fetchLostData])
 
   // Load more data for pagination
   const loadMoreData = useCallback(async (tabId: string) => {
@@ -902,7 +1190,7 @@ export default function TeamLeaderDashboard() {
       fetchTabData(activeTab, true) // Force refresh when filters change
     }
     }
-  }, [activeTab, dateRange, selectedPS, currentUserId, fetchAnalyticsData, fetchTabData])
+  }, [activeTab, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, currentUserId, fetchAnalyticsData, fetchTabData])
 
   // Tab configuration
   const tabs = [
@@ -3588,22 +3876,69 @@ export default function TeamLeaderDashboard() {
                   </Badge>
                   <Badge variant="outline" className="bg-white/80 border-orange-200 text-orange-800">
                     <Calendar className="h-3 w-3 mr-1" />
-                    Last {dateRange} days
+                    {dateFilterType === 'today' ? 'Today' : 
+                     dateFilterType === 'all_time' ? 'All Time' :
+                     dateFilterType === 'date_range' ? 'Custom Range' :
+                     dateFilterType === 'last_days' ? `Last ${dateRange} days` :
+                     dateFilterType === 'last_7' ? 'Last 7 days' :
+                     dateFilterType === 'last_30' ? 'Last 30 days' :
+                     dateFilterType === 'last_90' ? 'Last 90 days' :
+                     dateFilterType === 'last_365' ? 'Last year' :
+                     `Last ${dateRange} days`}
                   </Badge>
                 </div>
               </div>
               <div className="flex space-x-3">
-                <Select value={dateRange} onValueChange={setDateRange}>
-                  <SelectTrigger className="w-40 bg-white shadow-sm border-orange-200">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">Last 7 days</SelectItem>
-                    <SelectItem value="30">Last 30 days</SelectItem>
-                    <SelectItem value="90">Last 90 days</SelectItem>
-                    <SelectItem value="365">Last year</SelectItem>
-                  </SelectContent>
-                </Select>
+                {/* Unified Date Filter Selector */}
+                <div className="w-48">
+                  <select 
+                    value={dateFilterType} 
+                    onChange={(e) => {
+                      e.preventDefault()
+                      const value = e.target.value
+                      console.log('[Date Filter] Selected value:', value)
+                      if (value.startsWith('last_')) {
+                        setDateFilterType(value) // Keep the original value like 'last_7', 'last_30'
+                        setDateRange(value.replace('last_', ''))
+                      } else {
+                        setDateFilterType(value)
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-orange-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="today">Today</option>
+                    <option value="last_7">Last 7 days</option>
+                    <option value="last_30">Last 30 days</option>
+                    <option value="last_90">Last 90 days</option>
+                    <option value="last_365">Last year</option>
+                    <option value="date_range">Date Range</option>
+                    <option value="all_time">All Time</option>
+                  </select>
+                </div>
+
+                {/* Custom Date Range (only show when date_range is selected) */}
+                {dateFilterType === 'date_range' && (
+                  <>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">From:</label>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">To:</label>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="px-3 py-2 border border-orange-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  </>
+                )}
                 <Select value={selectedPS} onValueChange={setSelectedPS}>
                   <SelectTrigger className="w-52 bg-white shadow-sm border-orange-200">
                     <SelectValue />
@@ -3916,10 +4251,178 @@ export default function TeamLeaderDashboard() {
                           </tbody>
                         </table>
                                   </div>
+                      </CardContent>
+                    </Card>
+
+              {/* Pending Leads Follow-up Summary Table */}
+              <div className="space-y-6 mt-6">
+                {/* Header with Refresh */}
+                <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                                      <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Pending Leads – Follow-up Summary</h3>
+                    <p className="text-sm text-gray-600 mt-1">Follow-up stages for pending leads across all PS members</p>
+                                      </div>
+                  <Button 
+                    onClick={fetchPendingFollowupData}
+                    disabled={pendingFollowupLoading}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${pendingFollowupLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                                  </div>
+                                  
+                {/* Pending Follow-up Table Card */}
+                <Card className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b sticky top-0 z-10">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 min-w-[150px]">
+                              PS Name
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[100px]">
+                              Untouched (F1)
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F2
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F3
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F4
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F5
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F6
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F7
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F8
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F9
+                            </th>
+                            <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
+                              F10
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {pendingFollowupLoading ? (
+                            <tr>
+                              <td colSpan={11} className="px-4 py-8 text-center">
+                                <div className="flex items-center justify-center space-x-2">
+                                  <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+                                  <span className="text-gray-600">Loading pending follow-up data...</span>
+                                    </div>
+                              </td>
+                            </tr>
+                          ) : pendingFollowupData.length === 0 ? (
+                            <tr>
+                              <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
+                                No pending follow-up data available
+                              </td>
+                            </tr>
+                          ) : (
+                            <>
+                              {pendingFollowupData.map((item, index) => (
+                                <tr
+                                  key={`${item.ps_name}-${index}`}
+                                  className={`hover:bg-gray-50 transition-colors ${
+                                    index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                                  }`}
+                                >
+                                  <td className="px-4 py-3 text-sm">
+                                    <div className="font-medium text-gray-900">
+                                      {item.ps_name}
+                                      </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.untouched_f1?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f2?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f3?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f4?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f5?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f6?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f7?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f8?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f9?.toLocaleString() || 0}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-gray-900">
+                                    {item.f10?.toLocaleString() || 0}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Summary Row */}
+                              {pendingFollowupData.length > 0 && (
+                                <tr className="bg-blue-50 border-t-2 border-blue-200 font-semibold">
+                                  <td className="px-4 py-3 text-sm text-blue-900">Total</td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.untouched_f1 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f2 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f3 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f4 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f5 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f6 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f7 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f8 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f9 || 0), 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                    {pendingFollowupData.reduce((sum, item) => sum + (item.f10 || 0), 0).toLocaleString()}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )}
+                        </tbody>
+                      </table>
+                                  </div>
                                 </CardContent>
                               </Card>
                           </div>
                   </div>
+                </div>
             )}
 
             {/* Fresh Leads Tab Content */}

@@ -3,9 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import uvicorn
 import time
+import asyncio
+from datetime import datetime, timedelta
 # Import Supabase with error handling
 try:
     from supabase import create_client, Client
@@ -118,7 +120,6 @@ from .models import (UserCreate, UserUpdate, UserResponse, LoginRequest, LoginRe
                     LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, ActivityCreate, ActivityResponse,
                     BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics, PSAssignmentCreate, 
                     PSAssignmentResponse, PSAssignmentUpdate)
-from .optimized_endpoints import router as optimized_router
 from .redis_cache import (cache, cache_leads, get_cached_leads, cache_users, get_cached_users, 
                          cache_lead_stats, get_cached_lead_stats, invalidate_on_lead_change)
 from .background_tasks import (create_lead_async, update_lead_async, bulk_update_leads_async, 
@@ -3065,6 +3066,8 @@ async def get_fresh_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3100,12 +3103,22 @@ async def get_fresh_leads(
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Pending').is_('first_call_date', 'null').limit(1000)
         
         # Apply date range filter based on ps_assigned_at
-        if date_range and date_range != 'all':
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('ps_assigned_at', start_date).lte('ps_assigned_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=days)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=days)
                 
                 # Convert to ISO format for Supabase
                 start_iso = start_date.isoformat()
@@ -3204,6 +3217,8 @@ async def get_todays_followup(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3236,21 +3251,30 @@ async def get_todays_followup(
         today = datetime.now().date()
         today_str = today.isoformat()
         
-        # Apply date range filter if provided (maps to ps_assigned_at)
-        if date_range and date_range != 'all':
+        # Start with base query
+        query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str).limit(1000)
+
+        # Apply date range filter based on ps_assigned_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('ps_assigned_at', start_date).lte('ps_assigned_at', end_date)
+        elif date_range and date_range != 'all':
             try:
-                days = int(date_range)
-                if days > 0:
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).gte('ps_assigned_at', start_date_str).lte('follow_up_date', today_str).limit(1000)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
                 else:
-                    query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str).limit(1000)
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('ps_assigned_at', start_dt.isoformat())
             except ValueError:
-                query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str).limit(1000)
-        else:
-            # Default: show today and overdue follow-ups
-            query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).lte('follow_up_date', today_str).limit(1000)
+                pass
         
         # Execute query
         response = query.execute()
@@ -3391,6 +3415,8 @@ async def get_open_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3418,16 +3444,26 @@ async def get_open_leads(
         # Query open leads from ps_followup_master table with final_status = 'Pending'
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Pending').limit(1000)
         
-        # Apply date range filter if provided (maps to ps_assigned_at)
-        if date_range and date_range != 'all':
+        # Apply date range filter based on ps_assigned_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('ps_assigned_at', start_date).lte('ps_assigned_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                if days > 0:
-                    today = datetime.now().date()
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = query.gte('ps_assigned_at', start_date_str)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('ps_assigned_at', start_dt.isoformat())
             except ValueError:
                 pass
         
@@ -3534,6 +3570,8 @@ async def get_waiting_approval_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3561,16 +3599,26 @@ async def get_waiting_approval_leads(
         # Query waiting for approval leads from ps_followup_master table
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Waiting for Approval').limit(1000)
         
-        # Apply date range filter if provided (maps to ps_assigned_at)
-        if date_range and date_range != 'all':
+        # Apply date range filter based on ps_assigned_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('ps_assigned_at', start_date).lte('ps_assigned_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                if days > 0:
-                    today = datetime.now().date()
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = query.gte('ps_assigned_at', start_date_str)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('ps_assigned_at', start_dt.isoformat())
             except ValueError:
                 pass
         
@@ -3707,6 +3755,8 @@ async def get_booked_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3734,16 +3784,26 @@ async def get_booked_leads(
         # Query booked leads from ps_followup_master table
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Booked').limit(1000)
         
-        # Apply date range filter if provided (maps to ps_assigned_at)
-        if date_range and date_range != 'all':
+        # Apply date range filter based on ps_assigned_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('ps_assigned_at', start_date).lte('ps_assigned_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                if days > 0:
-                    today = datetime.now().date()
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = query.gte('ps_assigned_at', start_date_str)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('ps_assigned_at', start_dt.isoformat())
             except ValueError:
                 pass
         
@@ -3865,6 +3925,8 @@ async def get_retailed_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -3892,16 +3954,26 @@ async def get_retailed_leads(
         # Query retailed leads from ps_followup_master table
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Won').limit(1000)
         
-        # Apply date range filter if provided (maps to won_timestamp)
-        if date_range and date_range != 'all':
+        # Apply date range filter based on updated_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('updated_at', start_date).lte('updated_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                if days > 0:
-                    today = datetime.now().date()
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = query.gte('won_timestamp', start_date_str)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('updated_at', start_dt.isoformat()).lte('updated_at', end_dt.isoformat())
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('updated_at', start_dt.isoformat())
             except ValueError:
                 pass
         
@@ -4023,6 +4095,8 @@ async def get_lost_leads(
     search: Optional[str] = None,
     ps_member: Optional[str] = None,
     date_range: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     current_user=Depends(get_current_user)
@@ -4050,16 +4124,26 @@ async def get_lost_leads(
         # Query lost leads from ps_followup_master table
         query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_member_ids).eq('final_status', 'Lost').limit(1000)
         
-        # Apply date range filter if provided (maps to lost_timestamp)
-        if date_range and date_range != 'all':
+        # Apply date range filter based on updated_at
+        if start_date and end_date:
+            # Use custom date range
+            query = query.gte('updated_at', start_date).lte('updated_at', end_date)
+        elif date_range and date_range != 'all':
             from datetime import datetime, timedelta
             try:
-                days = int(date_range)
-                if days > 0:
-                    today = datetime.now().date()
-                    start_date = today - timedelta(days=days)
-                    start_date_str = start_date.isoformat()
-                    query = query.gte('lost_timestamp', start_date_str)
+                if date_range == 'today':
+                    # Today only
+                    now = datetime.now()
+                    start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    query = query.gte('updated_at', start_dt.isoformat()).lte('updated_at', end_dt.isoformat())
+                else:
+                    # Last X days
+                    days = int(date_range)
+                    if days > 0:
+                        today = datetime.now().date()
+                        start_dt = today - timedelta(days=days)
+                        query = query.gte('updated_at', start_dt.isoformat())
             except ValueError:
                 pass
         
@@ -4421,6 +4505,146 @@ async def get_source_performance(
         
     except Exception as e:
         print(f"Error in source-performance endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/team-leader/{team_leader_id}/pending-followup-summary")
+async def get_pending_followup_summary(
+    team_leader_id: str,
+    request: Request,
+    current_user=Depends(get_current_user)
+):
+    """Get pending leads follow-up summary for Team Leaders - grouped by PS name"""
+    try:
+        print(f"[Pending Followup Summary] Starting request for team leader: {team_leader_id}")
+        
+        # Check if user has team leader permissions
+        if current_user.role not in ['team_leader', 'admin', 'branch_head']:
+            raise HTTPException(status_code=403, detail="Access denied. Team leader role required.")
+        
+        # Verify the team leader ID matches the current user
+        if current_user.role == 'team_leader' and current_user.id != team_leader_id:
+            raise HTTPException(status_code=403, detail="Access denied. Can only view your own team's data.")
+        
+        # Parse request body
+        body = await request.json()
+        start_date = body.get('start_date')
+        end_date = body.get('end_date')
+        
+        print(f"[Pending Followup Summary] Start: {start_date}, End: {end_date}")
+        
+        # Get all PS users under this team leader
+        ps_response = supabase.table('users').select('id, full_name').eq('team_leader_id', team_leader_id).eq('role', 'ps').eq('is_active', True).execute()
+        ps_users = ps_response.data or []
+        
+        if not ps_users:
+            return {"summary": []}
+        
+        ps_ids = [ps['id'] for ps in ps_users]
+        ps_names = {ps['id']: ps['full_name'] for ps in ps_users}
+        
+        print(f"[Pending Followup Summary] Found {len(ps_users)} PS users")
+        
+        # Get all pending leads for these PS users
+        base_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids).eq('final_status', 'Pending')
+        
+        # Apply date range filter for ps_assigned_at
+        if start_date:
+            base_query = base_query.gte('ps_assigned_at', start_date)
+        if end_date:
+            base_query = base_query.lte('ps_assigned_at', end_date)
+        
+        response = base_query.execute()
+        all_leads = response.data or []
+        
+        print(f"[Pending Followup Summary] Found {len(all_leads)} pending leads")
+        
+        # Group leads by PS and categorize by follow-up stage
+        ps_summary = {}
+        
+        for ps_id, ps_name in ps_names.items():
+            ps_summary[ps_id] = {
+                'ps_name': ps_name,
+                'untouched_f1': set(),  # first_call_date IS NOT NULL AND second_call_date IS NULL
+                'f2': set(),  # second_call_date IS NOT NULL AND third_call_date IS NULL
+                'f3': set(),  # third_call_date IS NOT NULL AND fourth_call_date IS NULL
+                'f4': set(),
+                'f5': set(),
+                'f6': set(),
+                'f7': set(),
+                'f8': set(),
+                'f9': set(),
+                'f10': set()  # tenth_call_date IS NOT NULL
+            }
+        
+        # Categorize each lead by follow-up stage
+        for lead in all_leads:
+            ps_id = lead.get('ps_id')
+            if ps_id not in ps_summary:
+                continue
+            
+            lead_uid = lead.get('lead_uid')
+            first_call = lead.get('first_call_date')
+            second_call = lead.get('second_call_date')
+            third_call = lead.get('third_call_date')
+            fourth_call = lead.get('fourth_call_date')
+            fifth_call = lead.get('fifth_call_date')
+            sixth_call = lead.get('sixth_call_date')
+            seventh_call = lead.get('seventh_call_date')
+            eighth_call = lead.get('eighth_call_date')
+            ninth_call = lead.get('ninth_call_date')
+            tenth_call = lead.get('tenth_call_date')
+            
+            # Categorize based on follow-up stage
+            if first_call and not second_call:
+                ps_summary[ps_id]['untouched_f1'].add(lead_uid)
+            elif second_call and not third_call:
+                ps_summary[ps_id]['f2'].add(lead_uid)
+            elif third_call and not fourth_call:
+                ps_summary[ps_id]['f3'].add(lead_uid)
+            elif fourth_call and not fifth_call:
+                ps_summary[ps_id]['f4'].add(lead_uid)
+            elif fifth_call and not sixth_call:
+                ps_summary[ps_id]['f5'].add(lead_uid)
+            elif sixth_call and not seventh_call:
+                ps_summary[ps_id]['f6'].add(lead_uid)
+            elif seventh_call and not eighth_call:
+                ps_summary[ps_id]['f7'].add(lead_uid)
+            elif eighth_call and not ninth_call:
+                ps_summary[ps_id]['f8'].add(lead_uid)
+            elif ninth_call and not tenth_call:
+                ps_summary[ps_id]['f9'].add(lead_uid)
+            elif tenth_call:
+                ps_summary[ps_id]['f10'].add(lead_uid)
+        
+        # Build response
+        summary = []
+        for ps_id, data in ps_summary.items():
+            summary.append({
+                'ps_name': data['ps_name'],
+                'untouched_f1': len(data['untouched_f1']),
+                'f2': len(data['f2']),
+                'f3': len(data['f3']),
+                'f4': len(data['f4']),
+                'f5': len(data['f5']),
+                'f6': len(data['f6']),
+                'f7': len(data['f7']),
+                'f8': len(data['f8']),
+                'f9': len(data['f9']),
+                'f10': len(data['f10'])
+            })
+        
+        # Sort by PS name
+        summary.sort(key=lambda x: x['ps_name'])
+        
+        print(f"[Pending Followup Summary] Returning summary for {len(summary)} PS users")
+        
+        return {
+            "summary": summary
+        }
+        
+    except Exception as e:
+        print(f"[Pending Followup Summary] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/debug/cre-call-history")
@@ -5657,7 +5881,6 @@ class PSFollowUpUpdate(BaseModel):
     lost_timestamp: Optional[str] = None
     variant: Optional[str] = None
     buying_plan: Optional[str] = None
-    finance_option: Optional[str] = None
     icrop_id: Optional[str] = None
     booking_id: Optional[str] = None
     retailed_id: Optional[str] = None
@@ -7629,7 +7852,7 @@ async def get_queue_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 # Include optimized endpoints
-app.include_router(optimized_router)
+# app.include_router(optimized_router)  # Commented out - optimized_router not defined
 
 # ========================================
 # WACTO WHATSAPP WEBHOOK ENDPOINTS
