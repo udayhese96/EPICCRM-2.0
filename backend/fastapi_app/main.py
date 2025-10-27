@@ -3826,6 +3826,7 @@ async def get_qualified_leads(
 async def get_cre_team_leader_qualified_leads(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(100, ge=1, le=2000, description="Number of records per page"),
+    search: Optional[str] = Query(None, description="Search term for global search"),
     current_user=Depends(get_current_user)
 ):
     """Get qualified leads from qualified_leads table for CRE Team Leader dashboard with pagination - MIXED LEADS WITH UNASSIGNED FIRST"""
@@ -3839,13 +3840,16 @@ async def get_cre_team_leader_qualified_leads(
             'branch_id': getattr(current_user, 'branch_id', None),
             'endpoint': 'cre-team-leader',
             'page': page,
-            'limit': limit
+            'limit': limit,
+            'search': search  # Include search in cache key to get fresh results
         }
         
-        # Try to get from cache first
-        cached_leads = get_cached_leads(cache_params)
-        if cached_leads is not None:
-            return cached_leads
+        # Skip cache when search is active to get real-time results
+        if not search or not search.strip():
+            # Try to get from cache first only when not searching
+            cached_leads = get_cached_leads(cache_params)
+            if cached_leads is not None:
+                return cached_leads
         
         # Get total count first
         count_response = (
@@ -3889,6 +3893,25 @@ async def get_cre_team_leader_qualified_leads(
         
         # Sort all leads: unassigned first (ps_name is null), then by created_at desc
         all_leads = response.data or []
+        
+        # Apply search filter if provided
+        if search and search.strip():
+            search_term = search.strip().lower()
+            print(f"[Search] Filtering {len(all_leads)} leads with search term: '{search_term}'")
+            all_leads = [lead for lead in all_leads if (
+                search_term in (lead.get('customer_name', '') or '').lower() or
+                search_term in (lead.get('customer_mobile_number', '') or '') or
+                search_term in (lead.get('lead_uid', '') or '').lower() or
+                search_term in (lead.get('ps_name', '') or '').lower() or
+                search_term in (lead.get('icrop_id', '') or '').lower()
+            )]
+            print(f"[Search] Filtered down to {len(all_leads)} matching leads")
+            
+            # Recalculate counts for searched results
+            total_count = len(all_leads)
+            unassigned_count = len([lead for lead in all_leads if not lead.get('ps_name')])
+            total_pages = (total_count + limit - 1) // limit
+        
         all_leads.sort(key=lambda x: (
             x.get('ps_name') is not None,  # False (unassigned) comes before True (assigned)
             x.get('created_at', '')  # Then by created_at desc
@@ -3898,7 +3921,7 @@ async def get_cre_team_leader_qualified_leads(
         leads = all_leads[offset:offset + limit]
         has_more = page < total_pages
         
-        print(f"[GET Qualified Leads] Page {page}: Returning {len(leads)} leads (Total: {total_count}, Unassigned: {unassigned_count})")
+        print(f"[GET Qualified Leads] Page {page}: Returning {len(leads)} leads (Total: {total_count}, Unassigned: {unassigned_count}, Search: {search if search else 'none'})")
         
         result = {
             "leads": leads,
@@ -4269,11 +4292,39 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                                 ps_phone = ps_user_response.data[0]['phone']
                                 ps_full_name = ps_user_response.data[0].get('full_name', assignment.ps_name)
                                 
-                                # Send WhatsApp notification
-                                notification_result = whatsapp_service.send_lead_assignment_notification(
-                                    ps_phone_number=ps_phone,
-                                    ps_name=ps_full_name,
-                                    lead_data=lead_data
+                                # Prepare template parameters
+                                customer_name = lead_data.get('customer_name', 'Unknown')
+                                customer_phone = lead_data.get('customer_mobile_number', 'Unknown')
+                                source = lead_data.get('source', 'Unknown')
+                                sub_source = lead_data.get('sub_source', '')
+                                cre_name = lead_data.get('cre_name', '')
+                                qualification_remark = lead_data.get('first_remark', '')
+                                
+                                # Mask phone number (last 5 digits)
+                                if customer_phone and len(customer_phone) >= 5:
+                                    phone_display = customer_phone[-5:].rjust(10, 'x')
+                                else:
+                                    phone_display = customer_phone
+                                
+                                full_source = f"{source} - {sub_source}" if sub_source else source
+                                
+                                # Prepare parameters for template: [PS name, Customer name, Phone, Lead UID, Source, CRE name, Remark]
+                                template_parameters = [
+                                    ps_full_name,
+                                    customer_name,
+                                    phone_display,
+                                    lead_uid,
+                                    full_source,
+                                    cre_name if cre_name else '-',
+                                    qualification_remark if qualification_remark else '-'
+                                ]
+                                
+                                # Send WhatsApp template message
+                                notification_result = whatsapp_service.send_template_message(
+                                    to_phone_number=ps_phone,
+                                    template_name='epic_lead_assignment',
+                                    language='en',
+                                    parameters=template_parameters
                                 )
                                 
                                 if notification_result['success']:

@@ -1,49 +1,47 @@
 import requests
-import os
-from typing import Dict, Optional
+from typing import Dict
 import logging
 from decouple import config
+import os
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppService:
-    """WhatsApp service for sending notifications via DoubleTick API"""
-    
     def __init__(self):
-        self.api_url = "https://public.doubletick.io/whatsapp/message/text"
-        self.from_number = config('WHATSAPP_FROM_NUMBER', default='+919500087672')
-        self.auth_key = config('WHATSAPP_AUTH_KEY', default='')
+        self.template_api_url = "https://public.doubletick.io/whatsapp/message/template"
+        # Try to get auth key from config, fall back to environment variable, then hardcoded test key
+        self.auth_key = config('WHATSAPP_AUTH_KEY', default='') or os.getenv('WHATSAPP_AUTH_KEY', '')
         
+        # Fallback to test key if not set - REPLACE THIS IN PRODUCTION
         if not self.auth_key:
-            logger.warning("WHATSAPP_AUTH_KEY not found in environment variables")
-    
-    def send_message(self, to_phone_number: str, message: str) -> Dict[str, any]:
-        """
-        Send WhatsApp message to a user
+            self.auth_key = "key_krQnEjbvJeueh3YPEtG6sIaOt8a0e2zFUZENBq45MkW3AOuICErP3PR2jpIyyT09ns2VH4BPGoN4sKRGPQLb4c3E4SjnYcqNbrRcEn9zKwIo9i86JtxjexPW1TooOymJMDLFJzQuAmVmLIkHc25duDjUN9ODTF6ZtH4Ddm1qPCMw4waQ24nVq0TqCIl7pYhY2mOqk9dFZTId6d72mcvFyJpB8f8Qp9YTGZ9QjR1mfCNmsOmhs1M9QG4oA26J"
+            logger.warning("WHATSAPP_AUTH_KEY not configured, using default test key")
         
-        Args:
-            to_phone_number: Recipient's phone number (with country code)
-            message: Message content to send
-            
-        Returns:
-            Dict with success status and message/error
-        """
+        self.template_name = config('WHATSAPP_TEMPLATE_NAME', default='epic_lead_assignment')
+        
+        print(f"[WhatsApp Service] Initialized with template: {self.template_name}")
+        print(f"[WhatsApp Service] Template API URL: {self.template_api_url}")
+
+    def send_template_message(self, to_phone_number: str, template_name: str, language: str, parameters: list) -> Dict:
         try:
             if not self.auth_key:
-                return {
-                    "success": False,
-                    "error": "WhatsApp API key not configured"
-                }
+                return {"success": False, "error": "API key not configured"}
             
-            # Format phone number to ensure it has country code
-            formatted_phone_number = self._format_phone_number(to_phone_number)
+            formatted_phone = self._format_phone_number(to_phone_number)
             
             payload = {
-                "content": {
-                    "text": message
-                },
-                "from": self.from_number,
-                "to": formatted_phone_number
+                "messages": [{
+                    "to": formatted_phone,
+                    "content": {
+                        "templateName": template_name,
+                        "language": language,
+                        "templateData": {
+                            "body": {
+                                "placeholders": [str(p) for p in parameters]
+                            }
+                        }
+                    }
+                }]
             }
             
             headers = {
@@ -52,114 +50,45 @@ class WhatsAppService:
                 "Authorization": self.auth_key
             }
             
-            logger.info(f"[WhatsApp] Sending message to {formatted_phone_number}")
+            print(f"[WhatsApp Template] Sending to {formatted_phone}, template: {template_name}")
+            print(f"[WhatsApp Template] Parameters: {parameters}")
+            print(f"[WhatsApp Template] Auth Key: {self.auth_key[:50]}...")
             
-            response = requests.post(self.api_url, json=payload, headers=headers)
+            response = requests.post(self.template_api_url, json=payload, headers=headers)
+            
+            print(f"[WhatsApp Template] Status: {response.status_code}, Body: {response.text}")
             
             if response.status_code == 200:
-                logger.info(f"[WhatsApp] Message sent successfully to {formatted_phone_number}")
-                return {
-                    "success": True,
-                    "message": "Message sent successfully"
-                }
+                print("[WhatsApp Template] Template sent successfully")
+                response_data = response.json()
+                print(f"[WhatsApp Template] Response: {response_data}")
+                # Extract messageId and status if available
+                message_info = {}
+                if 'messages' in response_data and len(response_data['messages']) > 0:
+                    message_info = {
+                        'messageId': response_data['messages'][0].get('messageId'),
+                        'status': response_data['messages'][0].get('status')
+                    }
+                return {"success": True, "message": "Template sent successfully", "details": message_info}
             else:
-                logger.error(f"[WhatsApp] Failed to send message. Status: {response.status_code}")
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}: {response.text}"
-                }
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
                 
         except Exception as e:
-            logger.error(f"[WhatsApp] Error sending message: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def send_lead_assignment_notification(
-        self, 
-        ps_phone_number: str, 
-        ps_name: str, 
-        lead_data: Dict[str, any]
-    ) -> Dict[str, any]:
-        """
-        Send lead assignment notification to PS user
-        
-        Args:
-            ps_phone_number: PS user's phone number
-            ps_name: PS user's name
-            lead_data: Lead information dictionary
-            
-        Returns:
-            Dict with success status and message/error
-        """
-        message = self._build_lead_assignment_message(ps_name, lead_data)
-        return self.send_message(ps_phone_number, message)
-    
-    def _build_lead_assignment_message(self, ps_name: str, lead_data: Dict[str, any]) -> str:
-        """Build the lead assignment notification message"""
-        customer_name = lead_data.get('customer_name', 'Unknown')
-        customer_phone = lead_data.get('customer_mobile_number', 'Unknown')
-        lead_uid = lead_data.get('lead_uid', 'Unknown')
-        source = lead_data.get('source', 'Unknown')
-        sub_source = lead_data.get('sub_source', '')
-        cre_name = lead_data.get('cre_name', '')
-        qualification_remark = lead_data.get('first_remark', '')
-        
-        # Format phone number to show only last 5 digits
-        if customer_phone and len(customer_phone) >= 5:
-            phone_display = customer_phone[-5:].rjust(10, 'x')
-        else:
-            phone_display = customer_phone
-        
-        message = f"Hi {ps_name},\n\n"
-        message += f"Customer Name: {customer_name}\n"
-        message += f"Phone Number: {phone_display}\n"
-        message += f"Lead ID: {lead_uid}\n"
-        message += f"Source: {source}"
-        
-        if sub_source:
-            message += f" - {sub_source}"
-        
-        if cre_name:
-            message += f"\nCRE: {cre_name}"
-        
-        if qualification_remark:
-            message += f"\nQualification Remark: {qualification_remark}"
-        
-        message += f"\n\nPlease log in to your GEM dashboard to view full details.\n"
-        message += f"Link: https://toyota.epicleads.in/\n\n"
-        message += f"Best regards,\nEPIC CRM Team"
-        
-        return message
-    
+            print(f"[WhatsApp Template] Error: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def _format_phone_number(self, phone_number: str) -> str:
-        """
-        Format phone number to ensure it has country code
-        
-        Args:
-            phone_number: Phone number to format
-            
-        Returns:
-            Formatted phone number
-        """
-        # Remove any non-digit characters
         cleaned = ''.join(filter(str.isdigit, phone_number))
         
-        # If it starts with 91, return as is
         if cleaned.startswith('91'):
             return f"+{cleaned}"
         
-        # If it's a 10-digit number, assume it's Indian and add +91
         if len(cleaned) == 10:
             return f"+91{cleaned}"
         
-        # If it's already formatted with +, return as is
         if phone_number.startswith('+'):
             return phone_number
         
-        # Default: add +91 prefix
         return f"+91{cleaned}"
 
-# Export singleton instance
 whatsapp_service = WhatsAppService()
