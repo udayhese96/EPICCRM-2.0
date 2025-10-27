@@ -15,11 +15,18 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const page = searchParams.get('page') || '1'
     const limit = searchParams.get('limit') || '100'
+    const search = searchParams.get('search') || ''
     const timestamp = searchParams.get('_t') || Date.now().toString()
     
-    console.log(`[NextJS API] Forwarding request: page=${page}, limit=${limit}`)
+    // Build API URL with search parameter if provided
+    let apiUrl = `${FASTAPI_URL}/api/cre-team-leader/qualified-leads?page=${page}&limit=${limit}&_t=${timestamp}`
+    if (search && search.trim()) {
+      apiUrl += `&search=${encodeURIComponent(search.trim())}`
+    }
     
-    const response = await fetch(`${FASTAPI_URL}/api/cre-team-leader/qualified-leads?page=${page}&limit=${limit}&_t=${timestamp}`, {
+    console.log(`[NextJS API] Forwarding request: page=${page}, limit=${limit}, search=${search}`)
+    
+    const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Authorization': token ? `Bearer ${token}` : '',

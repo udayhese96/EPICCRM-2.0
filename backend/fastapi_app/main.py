@@ -6,6 +6,23 @@ from pydantic import BaseModel, ValidationError
 from typing import List, Optional, Dict
 import uvicorn
 import time
+import logging
+
+# Import WhatsApp service
+try:
+    from fastapi_app.whatsapp_service import whatsapp_service
+    WHATSAPP_AVAILABLE = True
+    print(f"[Startup] WhatsApp service imported successfully")
+except ImportError as e:
+    print(f"Warning: WhatsApp service import failed: {e}")
+    WHATSAPP_AVAILABLE = False
+    whatsapp_service = None
+except Exception as e:
+    print(f"Warning: WhatsApp service import failed with exception: {e}")
+    import traceback
+    traceback.print_exc()
+    WHATSAPP_AVAILABLE = False
+    whatsapp_service = None
 # Import Supabase with error handling
 try:
     from supabase import create_client, Client
@@ -3578,6 +3595,39 @@ async def assign_lead_to_ps(lead_uid: str, ps_data: dict, current_user=Depends(a
         
         followup_response = supabase.table('ps_follow_up_master').insert(followup_data).execute()
         
+        # Send WhatsApp notification to PS user
+        if WHATSAPP_AVAILABLE and whatsapp_service:
+            try:
+                # Get PS user details from users table
+                ps_user_response = supabase.table('users').select('phone, full_name').eq('id', ps_data["ps_id"]).execute()
+                if ps_user_response.data and ps_user_response.data[0].get('phone'):
+                    ps_phone = ps_user_response.data[0]['phone']
+                    ps_full_name = ps_user_response.data[0].get('full_name', ps_data["ps_name"])
+                    
+                    # Get lead data for notification
+                    lead_data_response = supabase.table('lead_master').select('*').eq('uid', lead_uid).execute()
+                    if lead_data_response.data:
+                        lead_data = lead_data_response.data[0]
+                        
+                        # Send WhatsApp notification
+                        notification_result = whatsapp_service.send_lead_assignment_notification(
+                            ps_phone_number=ps_phone,
+                            ps_name=ps_full_name,
+                            lead_data=lead_data
+                        )
+                        
+                        if notification_result['success']:
+                            print(f"[WhatsApp] Successfully sent notification to {ps_full_name} ({ps_phone})")
+                        else:
+                            print(f"[WhatsApp] Failed to send notification to {ps_full_name}: {notification_result.get('error', 'Unknown error')}")
+                    else:
+                        print(f"[WhatsApp] Could not fetch lead data for notification")
+                else:
+                    print(f"[WhatsApp] PS user {ps_data['ps_name']} (ID: {ps_data['ps_id']}) has no phone number configured")
+            except Exception as whatsapp_error:
+                print(f"[WhatsApp] Error sending notification: {str(whatsapp_error)}")
+                # Don't fail the assignment if WhatsApp fails
+        
         return {"message": "Lead assigned to PS successfully", "followup": followup_response.data[0] if followup_response.data else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3776,6 +3826,7 @@ async def get_qualified_leads(
 async def get_cre_team_leader_qualified_leads(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(100, ge=1, le=2000, description="Number of records per page"),
+    search: Optional[str] = Query(None, description="Search term for global search"),
     current_user=Depends(get_current_user)
 ):
     """Get qualified leads from qualified_leads table for CRE Team Leader dashboard with pagination - MIXED LEADS WITH UNASSIGNED FIRST"""
@@ -3789,13 +3840,16 @@ async def get_cre_team_leader_qualified_leads(
             'branch_id': getattr(current_user, 'branch_id', None),
             'endpoint': 'cre-team-leader',
             'page': page,
-            'limit': limit
+            'limit': limit,
+            'search': search  # Include search in cache key to get fresh results
         }
         
-        # Try to get from cache first
-        cached_leads = get_cached_leads(cache_params)
-        if cached_leads is not None:
-            return cached_leads
+        # Skip cache when search is active to get real-time results
+        if not search or not search.strip():
+            # Try to get from cache first only when not searching
+            cached_leads = get_cached_leads(cache_params)
+            if cached_leads is not None:
+                return cached_leads
         
         # Get total count first
         count_response = (
@@ -3839,6 +3893,25 @@ async def get_cre_team_leader_qualified_leads(
         
         # Sort all leads: unassigned first (ps_name is null), then by created_at desc
         all_leads = response.data or []
+        
+        # Apply search filter if provided
+        if search and search.strip():
+            search_term = search.strip().lower()
+            print(f"[Search] Filtering {len(all_leads)} leads with search term: '{search_term}'")
+            all_leads = [lead for lead in all_leads if (
+                search_term in (lead.get('customer_name', '') or '').lower() or
+                search_term in (lead.get('customer_mobile_number', '') or '') or
+                search_term in (lead.get('lead_uid', '') or '').lower() or
+                search_term in (lead.get('ps_name', '') or '').lower() or
+                search_term in (lead.get('icrop_id', '') or '').lower()
+            )]
+            print(f"[Search] Filtered down to {len(all_leads)} matching leads")
+            
+            # Recalculate counts for searched results
+            total_count = len(all_leads)
+            unassigned_count = len([lead for lead in all_leads if not lead.get('ps_name')])
+            total_pages = (total_count + limit - 1) // limit
+        
         all_leads.sort(key=lambda x: (
             x.get('ps_name') is not None,  # False (unassigned) comes before True (assigned)
             x.get('created_at', '')  # Then by created_at desc
@@ -3848,7 +3921,7 @@ async def get_cre_team_leader_qualified_leads(
         leads = all_leads[offset:offset + limit]
         has_more = page < total_pages
         
-        print(f"[GET Qualified Leads] Page {page}: Returning {len(leads)} leads (Total: {total_count}, Unassigned: {unassigned_count})")
+        print(f"[GET Qualified Leads] Page {page}: Returning {len(leads)} leads (Total: {total_count}, Unassigned: {unassigned_count}, Search: {search if search else 'none'})")
         
         result = {
             "leads": leads,
@@ -4108,6 +4181,36 @@ async def deassign_qualified_lead(deassignment: dict, current_user=Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class WhatsAppTestRequest(BaseModel):
+    phone_number: str
+    message: Optional[str] = None
+
+@app.post("/api/whatsapp/test")
+async def test_whatsapp_notification(
+    request: WhatsAppTestRequest,
+    current_user=Depends(get_current_user)
+):
+    """Test WhatsApp notification service"""
+    try:
+        # Allow admin and cre_team_leader roles to test
+        if current_user.role not in ['admin', 'cre_team_leader']:
+            raise HTTPException(status_code=403, detail="Insufficient permissions - Admin or CRE Team Leader role required")
+        
+        if not WHATSAPP_AVAILABLE or not whatsapp_service:
+            raise HTTPException(status_code=503, detail="WhatsApp service not available")
+        
+        test_message = request.message or "Test message from EPIC CRM - WhatsApp integration is working!"
+        
+        result = whatsapp_service.send_message(request.phone_number, test_message)
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Test completed"),
+            "error": result.get("error") if not result["success"] else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/qualified-leads/assign")
 async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_user=Depends(get_current_user)):
     """Assign qualified leads to PS users"""
@@ -4179,6 +4282,63 @@ async def assign_qualified_leads(assignment: QualifiedLeadAssignment, current_us
                     print(f"[Assign] Inserting into ps_followup_master for lead_uid: {lead_uid}")
                     supabase.table('ps_followup_master').insert(followup_data).execute()
                     print(f"[Assign] Successfully inserted into ps_followup_master for lead_uid: {lead_uid}")
+                    
+                    # Send WhatsApp notification to PS user
+                    if WHATSAPP_AVAILABLE and whatsapp_service:
+                        try:
+                            # Get PS user details from users table
+                            ps_user_response = supabase.table('users').select('phone, full_name').eq('id', assignment.ps_id).execute()
+                            if ps_user_response.data and ps_user_response.data[0].get('phone'):
+                                ps_phone = ps_user_response.data[0]['phone']
+                                ps_full_name = ps_user_response.data[0].get('full_name', assignment.ps_name)
+                                
+                                # Prepare template parameters
+                                customer_name = lead_data.get('customer_name', 'Unknown')
+                                customer_phone = lead_data.get('customer_mobile_number', 'Unknown')
+                                source = lead_data.get('source', 'Unknown')
+                                sub_source = lead_data.get('sub_source', '')
+                                cre_name = lead_data.get('cre_name', '')
+                                qualification_remark = lead_data.get('first_remark', '')
+                                
+                                # Mask phone number (last 5 digits)
+                                if customer_phone and len(customer_phone) >= 5:
+                                    phone_display = customer_phone[-5:].rjust(10, 'x')
+                                else:
+                                    phone_display = customer_phone
+                                
+                                full_source = f"{source} - {sub_source}" if sub_source else source
+                                
+                                # Prepare parameters for template: [PS name, Customer name, Phone, Lead UID, Source, CRE name, Remark]
+                                template_parameters = [
+                                    ps_full_name,
+                                    customer_name,
+                                    phone_display,
+                                    lead_uid,
+                                    full_source,
+                                    cre_name if cre_name else '-',
+                                    qualification_remark if qualification_remark else '-'
+                                ]
+                                
+                                # Send WhatsApp template message
+                                notification_result = whatsapp_service.send_template_message(
+                                    to_phone_number=ps_phone,
+                                    template_name='epic_lead_assignment',
+                                    language='en',
+                                    parameters=template_parameters
+                                )
+                                
+                                if notification_result['success']:
+                                    print(f"[WhatsApp] Successfully sent notification to {ps_full_name} ({ps_phone})")
+                                else:
+                                    print(f"[WhatsApp] Failed to send notification to {ps_full_name}: {notification_result.get('error', 'Unknown error')}")
+                            else:
+                                print(f"[WhatsApp] PS user {assignment.ps_name} (ID: {assignment.ps_id}) has no phone number configured")
+                        except Exception as whatsapp_error:
+                            print(f"[WhatsApp] Error sending notification: {str(whatsapp_error)}")
+                            # Don't fail the assignment if WhatsApp fails
+                    else:
+                        print(f"[WhatsApp] WhatsApp service not available - WHATSAPP_AVAILABLE: {WHATSAPP_AVAILABLE}, whatsapp_service: {whatsapp_service}")
+                    
                     assigned_count += 1
                 else:
                     print(f"[Assign] Warning: No data found for lead_id {lead_id} in qualified_leads")
@@ -6624,36 +6784,43 @@ def process_ps_performance_data(raw_data):
     ps_map = {}
     
     for row in raw_data:
-        ps_name = row['ps_name']
-        if ps_name not in ps_map:
-            ps_map[ps_name] = {
-                'ps_name': ps_name,
-                'lead_count': 0,
-                'unattended': 0,
-                'open_leads': 0,
-                'lost_leads': 0,
-                'approval_pending': 0,
-                'booked': 0,
-                'retailed': 0
-            }
-        
-        ps_data = ps_map[ps_name]
-        ps_data['lead_count'] += 1
-        
-        if not row['first_call_date']:
-            ps_data['unattended'] += 1
-        elif row['final_status'] == 'Lost':
-            ps_data['lost_leads'] += 1
-        elif row['final_status'] == 'Waiting for Approval':
-            ps_data['approval_pending'] += 1
-        elif row['final_status'] == 'Booked':
-            ps_data['booked'] += 1
-        elif row['final_status'] == 'Won':
-            ps_data['retailed'] += 1
-        
-        if (row['first_call_date'] and 
-            row['final_status'] in ['Waiting for Approval', 'Pending']):
-            ps_data['open_leads'] += 1
+        try:
+            ps_name = row.get('ps_name', 'Unknown')
+            first_call_date = row.get('first_call_date')
+            final_status = row.get('final_status', 'Pending')
+            
+            if ps_name not in ps_map:
+                ps_map[ps_name] = {
+                    'ps_name': ps_name,
+                    'lead_count': 0,
+                    'unattended': 0,
+                    'open_leads': 0,
+                    'lost_leads': 0,
+                    'approval_pending': 0,
+                    'booked': 0,
+                    'retailed': 0
+                }
+            
+            ps_data = ps_map[ps_name]
+            ps_data['lead_count'] += 1
+            
+            if not first_call_date:
+                ps_data['unattended'] += 1
+            elif final_status == 'Lost':
+                ps_data['lost_leads'] += 1
+            elif final_status == 'Waiting for Approval':
+                ps_data['approval_pending'] += 1
+            elif final_status == 'Booked':
+                ps_data['booked'] += 1
+            elif final_status == 'Won':
+                ps_data['retailed'] += 1
+            
+            if (first_call_date and 
+                final_status in ['Waiting for Approval', 'Pending']):
+                ps_data['open_leads'] += 1
+        except Exception as e:
+            print(f"Error processing PS performance row: {str(e)}, row data: {row}")
+            continue
     
     # Convert to list and add totals
     ps_list = list(ps_map.values())
@@ -7209,41 +7376,47 @@ def process_tl_performance_data(raw_data, ps_to_tl_map, team_leaders_data):
 
     # Process PS data and assign to team leaders
     for row in raw_data:
-        ps_name = row['ps_name']
-        team_leader = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
-        
-        print(f"DEBUG: Processing PS '{ps_name}' -> Team Leader: '{team_leader}'")
-        
-        # If team leader not in our list, add them
-        if team_leader not in tl_map:
-            tl_map[team_leader] = {
-                'tl_name': team_leader,
-                'lead_count': 0,
-                'unattended': 0,
-                'open_leads': 0,
-                'lost_leads': 0,
-                'approval_pending': 0,
-                'booked': 0,
-                'retailed': 0
-            }
+        try:
+            ps_name = row.get('ps_name', 'Unknown')
+            team_leader = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
+            first_call_date = row.get('first_call_date')
+            final_status = row.get('final_status', 'Pending')
+            
+            print(f"DEBUG: Processing PS '{ps_name}' -> Team Leader: '{team_leader}'")
+            
+            # If team leader not in our list, add them
+            if team_leader not in tl_map:
+                tl_map[team_leader] = {
+                    'tl_name': team_leader,
+                    'lead_count': 0,
+                    'unattended': 0,
+                    'open_leads': 0,
+                    'lost_leads': 0,
+                    'approval_pending': 0,
+                    'booked': 0,
+                    'retailed': 0
+                }
 
-        tl_data = tl_map[team_leader]
-        tl_data['lead_count'] += 1
+            tl_data = tl_map[team_leader]
+            tl_data['lead_count'] += 1
 
-        if not row['first_call_date']:
-            tl_data['unattended'] += 1
-        elif row['final_status'] == 'Lost':
-            tl_data['lost_leads'] += 1
-        elif row['final_status'] == 'Waiting for Approval':
-            tl_data['approval_pending'] += 1
-        elif row['final_status'] == 'Booked':
-            tl_data['booked'] += 1
-        elif row['final_status'] == 'Won':
-            tl_data['retailed'] += 1
+            if not first_call_date:
+                tl_data['unattended'] += 1
+            elif final_status == 'Lost':
+                tl_data['lost_leads'] += 1
+            elif final_status == 'Waiting for Approval':
+                tl_data['approval_pending'] += 1
+            elif final_status == 'Booked':
+                tl_data['booked'] += 1
+            elif final_status == 'Won':
+                tl_data['retailed'] += 1
 
-        if (row['first_call_date'] and
-            row['final_status'] in ['Waiting for Approval', 'Pending']):
-            tl_data['open_leads'] += 1
+            if (first_call_date and
+                final_status in ['Waiting for Approval', 'Pending']):
+                tl_data['open_leads'] += 1
+        except Exception as e:
+            print(f"Error processing TL performance row: {str(e)}, row data: {row}")
+            continue
 
     # Convert to list and add totals
     tl_list = list(tl_map.values())

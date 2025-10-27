@@ -239,29 +239,35 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
             variant="outline"
             size="sm"
             disabled={exporting || data.length === 0}
+            className="px-2 sm:px-3"
           >
-            <Download className="h-4 w-4 mr-2" />
-            {exporting ? 'Exporting...' : 'Export CSV'}
+            <Download className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
           </Button>
-          <Button onClick={fetchTlPerformanceData} variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+          <Button 
+            onClick={fetchTlPerformanceData} 
+            variant="outline" 
+            size="sm"
+            className="px-2 sm:px-3"
+          >
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
-          <Table className="table-fixed text-xs border-collapse">
+        <div className="overflow-hidden">
+          <Table className="w-full text-xs">
             <TableHeader>
               <TableRow>
-                <TableHead className="font-semibold w-2/5 pr-0">Team Leader</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Total</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Unattended</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Open</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Lost</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Pending</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Booked</TableHead>
-                <TableHead className="text-right font-semibold w-1/8 pl-0">Retailed</TableHead>
+                <TableHead className="font-semibold text-left w-24">Team Leader</TableHead>
+                <TableHead className="text-center font-semibold w-12">Total</TableHead>
+                <TableHead className="text-center font-semibold w-16">Unattended</TableHead>
+                <TableHead className="text-center font-semibold w-12">Open</TableHead>
+                <TableHead className="text-center font-semibold w-12">Lost</TableHead>
+                <TableHead className="text-center font-semibold w-16">Pending</TableHead>
+                <TableHead className="text-center font-semibold w-12">Booked</TableHead>
+                <TableHead className="text-center font-semibold w-12">Retailed</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -270,39 +276,39 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
                   key={row.tl_name} 
                   className={row.tl_name === 'TOTAL' ? 'font-bold bg-gray-50' : ''}
                 >
-                  <TableCell className="pr-0 break-words max-w-0">
-                    <div className="whitespace-normal break-words">
+                  <TableCell className="text-left">
+                    <div className="truncate max-w-20" title={row.tl_name}>
                       {row.tl_name}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right pl-0 pr-0">{row.lead_count}</TableCell>
-                  <TableCell className="text-right pl-0 pr-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Unattended', row.unattended)}>
+                  <TableCell className="text-center">{row.lead_count}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Unattended', row.unattended)} text-xs px-1 py-0`}>
                       {row.unattended}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right pl-0 pr-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Open Leads', row.open_leads)}>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Open Leads', row.open_leads)} text-xs px-1 py-0`}>
                       {row.open_leads}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right pl-0 pr-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Lost', row.lost_leads)}>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Lost', row.lost_leads)} text-xs px-1 py-0`}>
                       {row.lost_leads}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right pl-0 pr-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Waiting for Approval', row.approval_pending)}>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Waiting for Approval', row.approval_pending)} text-xs px-1 py-0`}>
                       {row.approval_pending}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right pl-0 pr-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Booked', row.booked)}>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Booked', row.booked)} text-xs px-1 py-0`}>
                       {row.booked}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right pl-0">
-                    <Badge variant="outline" className={getStatusBadgeColor('Won', row.retailed)}>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`${getStatusBadgeColor('Won', row.retailed)} text-xs px-1 py-0`}>
                       {row.retailed}
                     </Badge>
                   </TableCell>

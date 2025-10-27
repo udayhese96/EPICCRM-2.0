@@ -72,15 +72,15 @@ const KpiCards: React.FC<KpiCardsProps> = ({ kpiCards }) => {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+    <div className="grid grid-cols-5 gap-2 mb-4">
       {Object.entries(kpiCards).map(([key, card]) => (
-        <Card key={key} className={`${getCardColor(key)} transition-all hover:shadow-sm p-3`}>
+        <Card key={key} className={`${getCardColor(key)} transition-all hover:shadow-lg hover:scale-105 duration-300 p-2 border-0 shadow-md`}>
           <div className="space-y-1">
-            <div className="text-xs font-medium text-gray-600">
+            <div className="text-xs font-medium text-gray-600 truncate">
               {card.label}
             </div>
-            <div className="flex items-baseline gap-1">
-              <div className={`text-lg font-bold ${getValueColor(key)}`}>
+            <div className="flex flex-col">
+              <div className={`text-sm font-bold ${getValueColor(key)} drop-shadow-sm`}>
                 {card.value.toLocaleString()}
               </div>
               {card.percentage !== undefined && (

@@ -43,9 +43,10 @@ interface PsRankingData {
 
 interface PsPerformanceTableProps {
   branch?: string
+  showKpiCards?: boolean
 }
 
-const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch }) => {
+const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpiCards = true }) => {
   const [data, setData] = useState<PsPerformanceData[]>([])
   const [kpiCards, setKpiCards] = useState<KpiCardsData | null>(null)
   const [psRankings, setPsRankings] = useState<PsRankingData[]>([])
@@ -251,7 +252,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch }) => {
     return (
       <div className="space-y-6">
         {/* KPI Cards - show even in error state if available */}
-        {kpiCards && <KpiCards kpiCards={kpiCards} />}
+        {showKpiCards && kpiCards && <KpiCards kpiCards={kpiCards} />}
         
         {/* Error Card and Rankings */}
         <div className="flex flex-col lg:flex-row gap-6">
@@ -265,13 +266,19 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch }) => {
                     variant="outline" 
                     size="sm"
                     disabled={exporting || data.length === 0}
+                    className="px-2 sm:px-3"
                   >
-                    <Download className="h-4 w-4 mr-2" />
-                    {exporting ? 'Exporting...' : 'Export CSV'}
+                    <Download className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
                   </Button>
-                  <Button onClick={fetchPsPerformanceData} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Retry
+                  <Button 
+                    onClick={fetchPsPerformanceData} 
+                    variant="outline" 
+                    size="sm"
+                    className="px-2 sm:px-3"
+                  >
+                    <RefreshCw className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Retry</span>
                   </Button>
                 </div>
               </CardHeader>
@@ -295,7 +302,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch }) => {
   return (
     <div className="space-y-6">
       {/* KPI Cards */}
-      {kpiCards && <KpiCards kpiCards={kpiCards} />}
+      {showKpiCards && kpiCards && <KpiCards kpiCards={kpiCards} />}
       
       {/* PS Performance Table and Rankings */}
       <div className="flex flex-col lg:flex-row gap-6">
@@ -310,13 +317,19 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch }) => {
                   variant="outline" 
                   size="sm"
                   disabled={exporting || data.length === 0}
+                  className="px-2 sm:px-3"
                 >
-                  <Download className="h-4 w-4 mr-2" />
-                  {exporting ? 'Exporting...' : 'Export CSV'}
+                  <Download className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
                 </Button>
-                <Button onClick={fetchPsPerformanceData} variant="outline" size="sm">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh
+                <Button 
+                  onClick={fetchPsPerformanceData} 
+                  variant="outline" 
+                  size="sm"
+                  className="px-2 sm:px-3"
+                >
+                  <RefreshCw className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Refresh</span>
                 </Button>
               </div>
             </CardHeader>

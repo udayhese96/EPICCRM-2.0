@@ -92,6 +92,11 @@ export default function CRETeamLeaderDashboard() {
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<QualifiedLead | null>(null)
   const [callHistory, setCallHistory] = useState<any[]>([])
   const [tradeInDetails, setTradeInDetails] = useState<any>(null)
+  
+  // Loading states for assignments
+  const [assigningLeads, setAssigningLeads] = useState<Set<string>>(new Set())
+  const [deassigningLeads, setDeassigningLeads] = useState<Set<string>>(new Set())
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false)
 
   useEffect(() => {
     const supabaseUser = localStorage.getItem("supabase_user")
@@ -115,22 +120,33 @@ export default function CRETeamLeaderDashboard() {
     }
   }, [selectedBranch, gemUsers])
 
+  // Trigger search when searchTerm changes
   useEffect(() => {
-    // Only apply frontend filtering if there are active filters
-    const hasActiveFilters = searchTerm.trim() || startDate || endDate || (sourceFilter !== 'all')
+    const searchTimeout = setTimeout(() => {
+      if (searchTerm.trim()) {
+        loadData(1, searchTerm)
+      } else {
+        loadData(currentPage)
+      }
+    }, 300) // Debounce for 300ms for real-time search
+    
+    return () => clearTimeout(searchTimeout)
+  }, [searchTerm])
+
+  useEffect(() => {
+    // If search is active, the API has already filtered the results
+    // Only apply frontend filtering for date and source filters
+    if (searchTerm.trim()) {
+      // Search results are already from API, just use them as-is
+      setFilteredLeads(qualifiedLeads)
+      return
+    }
+    
+    // Apply frontend filtering only for date and source (not search)
+    const hasActiveFilters = startDate || endDate || (sourceFilter !== 'all')
     
     if (hasActiveFilters) {
       let filtered = qualifiedLeads
-
-      if (searchTerm.trim()) {
-        filtered = filtered.filter(lead => 
-          lead.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          lead.customer_mobile_number?.includes(searchTerm) ||
-          lead.lead_uid?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          lead.ps_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          lead.icrop_id?.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      }
 
       if (startDate || endDate) {
         filtered = filtered.filter(lead => {
@@ -165,11 +181,14 @@ export default function CRETeamLeaderDashboard() {
     }
   }, [searchTerm, qualifiedLeads, startDate, endDate, sourceFilter])
 
-  const loadData = async (page: number = currentPage) => {
+  const loadData = async (page: number = currentPage, search?: string) => {
     setIsLoading(true)
     try {
       const timestamp = Date.now()
-      const apiUrl = `/api/cre-team-leader/qualified-leads?page=${page}&limit=100&_t=${timestamp}`
+      let apiUrl = `/api/cre-team-leader/qualified-leads?page=${page}&limit=100&_t=${timestamp}`
+      if (search && search.trim()) {
+        apiUrl += `&search=${encodeURIComponent(search.trim())}&limit=1000`
+      }
       
       const [leadsResponse, gemResponse, branchesResponse] = await Promise.all([
         fetch(apiUrl, {
@@ -243,6 +262,9 @@ export default function CRETeamLeaderDashboard() {
   }
 
   const handleIndividualAssignment = async (leadId: string) => {
+    // Add loading state
+    setAssigningLeads(prev => new Set(prev).add(leadId))
+    
     try {
       const lead = qualifiedLeads.find(l => l.id === leadId)
       if (!lead?.branch) {
@@ -308,10 +330,19 @@ export default function CRETeamLeaderDashboard() {
       }
     } catch (error) {
       toast.error('Failed to assign lead')
+    } finally {
+      setAssigningLeads(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(leadId)
+        return newSet
+      })
     }
   }
 
   const handleDeassignment = async (leadId: string) => {
+    // Add loading state
+    setDeassigningLeads(prev => new Set(prev).add(leadId))
+    
     try {
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
@@ -338,6 +369,12 @@ export default function CRETeamLeaderDashboard() {
     } catch (error) {
       console.error('Error deassigning lead:', error)
       toast.error('Failed to deassign lead')
+    } finally {
+      setDeassigningLeads(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(leadId)
+        return newSet
+      })
     }
   }
 
@@ -346,6 +383,8 @@ export default function CRETeamLeaderDashboard() {
       toast.error('Please select leads and a GEM user')
       return
     }
+
+    setIsBulkAssigning(true)
 
     try {
       const selectedGemUser = gemUsers.find(gem => gem.id === selectedGem)
@@ -380,6 +419,8 @@ export default function CRETeamLeaderDashboard() {
       }
     } catch (error) {
       toast.error('Failed to assign leads')
+    } finally {
+      setIsBulkAssigning(false)
     }
   }
 
@@ -543,7 +584,16 @@ export default function CRETeamLeaderDashboard() {
                         </div>
                         <div className="flex justify-end gap-3">
                           <Button variant="outline" onClick={() => setAssignmentDialog(false)}>Cancel</Button>
-                          <Button onClick={handleBulkAssignment}>Assign {selectedLeads.length} Leads</Button>
+                          <Button onClick={handleBulkAssignment} disabled={isBulkAssigning}>
+                            {isBulkAssigning ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Assigning...
+                              </>
+                            ) : (
+                              <>Assign {selectedLeads.length} Leads</>
+                            )}
+                          </Button>
                         </div>
                       </div>
                     </DialogContent>
@@ -797,20 +847,29 @@ export default function CRETeamLeaderDashboard() {
                                 <Button
                                   size="sm"
                                   onClick={() => handleIndividualAssignment(lead.id)}
-                                  disabled={!lead.branch || !selectedGems[lead.id]}
+                                  disabled={!lead.branch || !selectedGems[lead.id] || assigningLeads.has(lead.id)}
                                   className="bg-green-600 hover:bg-green-700 text-white text-xs h-7 px-3"
                                 >
-                                  <UserCheck className="w-3 h-3 mr-1" />
-                                  Assign
+                                  {assigningLeads.has(lead.id) ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <UserCheck className="w-3 h-3 mr-1" />
+                                  )}
+                                  {assigningLeads.has(lead.id) ? 'Assigning...' : 'Assign'}
                                 </Button>
                               ) : (
                                 <Button
                                   size="sm"
                                   onClick={() => handleDeassignment(lead.id)}
+                                  disabled={deassigningLeads.has(lead.id)}
                                   className="bg-red-600 hover:bg-red-700 text-white text-xs h-7 px-3"
                                 >
-                                  <UserX className="w-3 h-3 mr-1" />
-                                  Deassign
+                                  {deassigningLeads.has(lead.id) ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <UserX className="w-3 h-3 mr-1" />
+                                  )}
+                                  {deassigningLeads.has(lead.id) ? 'Deassigning...' : 'Deassign'}
                                 </Button>
                               )}
                             </div>
