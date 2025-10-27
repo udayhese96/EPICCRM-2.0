@@ -191,13 +191,19 @@ const SourceAnalyticsTable: React.FC<SourceAnalyticsTableProps> = ({ branch }) =
               variant="outline"
               size="sm"
               disabled={exporting || data.length === 0}
+              className="px-2 sm:px-3"
             >
-              <Download className="h-4 w-4 mr-2" />
-              {exporting ? 'Exporting...' : 'Export CSV'}
+              <Download className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
             </Button>
-            <Button onClick={fetchSourceAnalyticsData} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Retry
+            <Button 
+              onClick={fetchSourceAnalyticsData} 
+              variant="outline" 
+              size="sm"
+              className="px-2 sm:px-3"
+            >
+              <RefreshCw className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Retry</span>
             </Button>
           </div>
         </CardHeader>
@@ -211,66 +217,71 @@ const SourceAnalyticsTable: React.FC<SourceAnalyticsTableProps> = ({ branch }) =
   }
 
   return (
-    <div className="w-3/5">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Source Analytics</CardTitle>
-          <div className="flex gap-2">
-            <Button
-              onClick={exportToCSV}
-              variant="outline"
-              size="sm"
-              disabled={exporting || data.length === 0}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              {exporting ? 'Exporting...' : 'Export CSV'}
-            </Button>
-            <Button onClick={fetchSourceAnalyticsData} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table className="table-fixed text-xs border-collapse">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="font-semibold w-2/5 pr-0">Source</TableHead>
-                  <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Total</TableHead>
-                  <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Won</TableHead>
-                  <TableHead className="text-right font-semibold w-1/8 pl-0 pr-0">Conv%</TableHead>
-                  <TableHead className="text-center font-semibold w-1/8 pl-0">Type</TableHead>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Source Analytics</CardTitle>
+        <div className="flex gap-2">
+          <Button
+            onClick={exportToCSV}
+            variant="outline"
+            size="sm"
+            disabled={exporting || data.length === 0}
+            className="px-2 sm:px-3"
+          >
+            <Download className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
+          </Button>
+          <Button 
+            onClick={fetchSourceAnalyticsData} 
+            variant="outline" 
+            size="sm"
+            className="px-2 sm:px-3"
+          >
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-hidden">
+          <Table className="w-full text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="font-semibold text-left w-32">Source</TableHead>
+                <TableHead className="text-center font-semibold w-12">Total</TableHead>
+                <TableHead className="text-center font-semibold w-12">Won</TableHead>
+                <TableHead className="text-center font-semibold w-16">Conv%</TableHead>
+                <TableHead className="text-center font-semibold w-12">Type</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((row, index) => (
+                <TableRow 
+                  key={`${row.source}-${index}`} 
+                  className={row.is_main_source ? 'font-semibold bg-blue-50' : 'pl-2'}
+                >
+                  <TableCell className="text-left">
+                    <div className="truncate max-w-28" title={row.is_main_source ? row.source : `└─ ${row.source}`}>
+                      {row.is_main_source ? row.source : `└─ ${row.source}`}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">{row.count}</TableCell>
+                  <TableCell className="text-center">{row.won}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`text-xs px-1 py-0 ${getConversionBadgeColor(row.conversion_percentage)}`}>
+                      {row.conversion_percentage}%
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant="outline" className={`text-xs px-1 py-0 ${getSourceTypeBadgeColor(row.is_main_source)}`}>
+                      {row.is_main_source ? 'Main' : 'Sub'}
+                    </Badge>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((row, index) => (
-                  <TableRow 
-                    key={`${row.source}-${index}`} 
-                    className={row.is_main_source ? 'font-semibold bg-blue-50' : 'pl-2'}
-                  >
-                    <TableCell className="pr-0 break-words max-w-0">
-                      <div className="whitespace-normal break-words">
-                        {row.is_main_source ? row.source : `└─ ${row.source}`}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right pl-0 pr-0">{row.count}</TableCell>
-                    <TableCell className="text-right pl-0 pr-0">{row.won}</TableCell>
-                    <TableCell className="text-right pl-0 pr-0">
-                      <Badge variant="outline" className={`text-xs ${getConversionBadgeColor(row.conversion_percentage)}`}>
-                        {row.conversion_percentage}%
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-center pl-0">
-                      <Badge variant="outline" className={`text-xs ${getSourceTypeBadgeColor(row.is_main_source)}`}>
-                        {row.is_main_source ? 'Main' : 'Sub'}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
 
           {data.length === 0 && (
             <div className="text-center py-8 text-gray-500">
@@ -279,7 +290,6 @@ const SourceAnalyticsTable: React.FC<SourceAnalyticsTableProps> = ({ branch }) =
           )}
         </CardContent>
       </Card>
-    </div>
   )
 }
 
