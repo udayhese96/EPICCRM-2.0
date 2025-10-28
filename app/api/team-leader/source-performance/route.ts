@@ -60,13 +60,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Build the base URL for the backend API
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
-    console.log('[Source Performance] Fetching PS members from:', `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`)
+    console.log('[Source Performance] Fetching PS members from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`)
 
     // Fetch PS members for this team leader
     const psResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`,
       {
         headers: {
           'Content-Type': 'application/json',
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    console.log('[Source Performance] Fetching source performance data from:', `${backendUrl}/api/team-leader/${teamLeaderId}/source-performance`)
+    console.log('[Source Performance] Fetching source performance data from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/source-performance`)
 
     // Prepare request body
     const requestBody: any = {
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch source performance data from backend
     const sourcePerformanceResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/source-performance`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/source-performance`,
       {
         method: 'POST',
         headers: {

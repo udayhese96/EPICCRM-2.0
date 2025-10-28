@@ -58,9 +58,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Build the base URL for the backend API
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
-    console.log('[Pending Followup Summary] Fetching from backend:', `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`)
+    console.log('[Pending Followup Summary] Fetching from backend:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/pending-followup-summary`)
 
     // Prepare request body
     const requestBody: any = {}
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch pending followup summary data from backend
     const response = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/pending-followup-summary`,
       {
         method: 'POST',
         headers: {

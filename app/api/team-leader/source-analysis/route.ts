@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || 'http://localhost:8000'
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     if (toDate) queryParams.append('to_date', toDate)
     
     const queryString = queryParams.toString()
-    const fastApiUrl = `${FASTAPI_URL}/api/team-leader/source-analysis${queryString ? `?${queryString}` : ''}`
+    const fastApiUrl = `${FASTAPI_BASE_URL}/api/team-leader/source-analysis${queryString ? `?${queryString}` : ''}`
     
     console.log('[TL Analytics] Proxying Source Analysis request to:', fastApiUrl)
     
