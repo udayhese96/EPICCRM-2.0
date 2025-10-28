@@ -79,7 +79,6 @@ export function DashboardLayoutFullBleed({ children }: DashboardLayoutFullBleedP
       admin: [
         { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/analytics' },
-        { icon: Settings, label: 'Admin', href: '/admin' },
       ],
       cre: [
         { icon: Home, label: 'CRE Dashboard', href: '/cre/dashboard' },

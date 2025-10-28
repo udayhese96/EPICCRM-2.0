@@ -14,8 +14,6 @@ import {
   Copy, 
   ArrowRightLeft,
   BarChart3,
-  Shield,
-  Rocket,
   Building2,
   LogOut,
   Zap,
@@ -249,7 +247,7 @@ export default function AdminDashboard() {
                 cardId="manage-cre-tl"
                 title="Manage CRE TL"
                 desc="Configure CRE Team Leaders"
-                icon={Shield}
+                icon={Users}
                 accent="purple"
                 onClick={() => router.push("/admin/manage-cre-team-leader")}
               />
@@ -276,7 +274,7 @@ export default function AdminDashboard() {
                 cardId="manage-team-leaders"
                 title="Manage Team Leaders"
                 desc="Configure Team Leaders and PS assignments"
-                icon={Shield}
+                icon={Users}
                 accent="cyan"
                 onClick={() => router.push("/admin/manage-team-leaders")}
               />
@@ -314,20 +312,6 @@ export default function AdminDashboard() {
                 icon={BarChart3}
                 accent="blue"
                 onClick={() => router.push("/admin/analytics")}
-              />
-              <QuickCard
-                cardId="analytics-2"
-                title="Analytics 2.0"
-                desc="Open Streamlit dashboard in a new tab"
-                icon={Rocket}
-                accent="red"
-              />
-              <QuickCard
-                cardId="security-audit"
-                title="Security Audit"
-                desc="System security and access logs"
-                icon={Shield}
-                accent="red"
               />
             </div>
           </section>

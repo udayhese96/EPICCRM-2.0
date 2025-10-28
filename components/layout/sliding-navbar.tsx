@@ -39,7 +39,6 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       admin: [
         { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/admin/analytics' },
-        { icon: Settings, label: 'Admin', href: '/admin' },
       ],
       cre: [
         { icon: Home, label: 'CRE Dashboard', href: '/cre/dashboard' },
