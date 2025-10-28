@@ -406,8 +406,8 @@ async def test_tradein_table():
             "message": str(e)
         }
 
-@app.get("/api/leads", response_model=List[LeadListResponse])
-async def get_leads(
+@app.get("/api/leads/legacy", response_model=List[LeadListResponse])
+async def get_leads_legacy(
     status: Optional[str] = None,
     source: Optional[str] = None,
     assigned_to: Optional[str] = None,
@@ -416,7 +416,7 @@ async def get_leads(
     offset: int = 0,
     current_user=Depends(get_current_user)
 ):
-    """Get leads with filtering and pagination"""
+    """Get leads with filtering and pagination (Legacy endpoint - kept for compatibility)"""
     try:
         query = supabase.table('lead_master').select('*')
         
@@ -1223,27 +1223,43 @@ async def update_user(
 # LEAD MANAGEMENT ENDPOINTS
 # ========================================
 
-@app.get("/api/leads", response_model=List[LeadResponse])
+@app.get("/api/leads")
 async def get_leads(
     status: Optional[str] = None,
     assigned_to: Optional[str] = None,
+    trade_in: Optional[str] = None,
+    branch: Optional[str] = None,
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    source: Optional[str] = None,
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
     current_user=Depends(can_manage_leads)
 ):
     """Get leads based on user role and filters - ULTRA FAST with Redis caching"""
     try:
+        print(f"[FastAPI Leads] Request params - status: {status}, assigned_to: {assigned_to}, trade_in: {trade_in}, branch: {branch}, category: {category}, source: {source}, q: {q}, from_date: {from_date}, to_date: {to_date}")
+        print(f"[FastAPI Leads] User: {current_user.username} (role: {current_user.role})")
         # Create cache key
         cache_params = {
             'role': current_user.role,
             'username': current_user.username,
             'branch_id': getattr(current_user, 'branch_id', None),
             'status': status,
-            'assigned_to': assigned_to
+            'assigned_to': assigned_to,
+            'trade_in': trade_in,
+            'branch': branch,
+            'category': category,
+            'source': source,
+            'q': q,
+            'from_date': from_date,
+            'to_date': to_date
         }
         
         # Try to get from cache first
         cached_leads = get_cached_leads(cache_params)
         if cached_leads is not None:
-            return [LeadResponse(**lead) for lead in cached_leads]
+            return cached_leads
         
         # If not in cache, fetch from database
         query = supabase.table('lead_master').select('*')
@@ -1258,10 +1274,33 @@ async def get_leads(
         
         # Apply additional filters
         if status:
-            query = query.eq('final_status', status)
+            # Filter by both lead_status and final_status to catch all matches
+            query = query.or_(f'lead_status.eq.{status},final_status.eq.{status}')
         if assigned_to:
             if current_user.role in ['admin', 'branch_head']:
                 query = query.eq('cre_name', assigned_to)
+        
+        # Add new filter parameters
+        if trade_in:
+            query = query.eq('trade_in', trade_in)
+        if branch:
+            query = query.eq('branch', branch)
+        if category:
+            query = query.eq('lead_category', category)
+        if source:
+            query = query.eq('source', source)
+        if q:
+            query = query.or_(f'uid.ilike.%{q}%,customer_name.ilike.%{q}%,customer_mobile_number.ilike.%{q}%')
+        if from_date:
+            query = query.gte('created_at', from_date)
+        if to_date:
+            try:
+                from datetime import datetime
+                end_date = datetime.fromisoformat(to_date.replace('Z', ''))
+                end_date = end_date.replace(hour=23, minute=59, second=59)
+                query = query.lte('created_at', end_date.isoformat())
+            except:
+                pass
         
         response = query.order('created_at', desc=True).execute()
         leads = response.data or []
@@ -1269,7 +1308,7 @@ async def get_leads(
         # Cache the results
         cache_leads(cache_params, leads, ttl=180)  # 3 minutes cache
         
-        return [LeadResponse(**lead) for lead in leads]
+        return leads
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

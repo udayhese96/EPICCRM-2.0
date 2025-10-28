@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { logout } from "@/lib/auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { 
@@ -142,10 +143,13 @@ export default function AdminDashboard() {
                     size="sm"
                     onClick={async () => {
                       setLoggingOut(true)
-                      // preserve existing behavior; implement actual logout where appropriate
-                      setTimeout(() => {
+                      try {
+                        // Perform actual logout
+                        logout()
+                      } catch (error) {
+                        console.error('Logout error:', error)
                         setLoggingOut(false)
-                      }, 800)
+                      }
                     }}
                     className="rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/30"
                   >
