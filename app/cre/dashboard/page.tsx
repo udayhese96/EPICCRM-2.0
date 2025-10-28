@@ -74,7 +74,11 @@ const computeCountsSnapshot = (leads: any[]) => {
   const fresh = untouched + called + followUp
   
   const qualified = leads.filter(l => (l?.lead_status === 'Qualified') && ((l?.final_status || '').toString().toLowerCase() === 'pending') && !isFinalizedWon(l)).length
-  const pending = leads.filter(l => ((l?.final_status || '').toString().toLowerCase() === 'pending') && !!(l?.first_call_date) && !isFinalizedWon(l)).length
+  const pending = leads.filter(l => 
+    ((l?.final_status || '').toString().toLowerCase() === 'pending') && 
+    (!!(l?.first_call_date) || (l?.pending_reasons && l.pending_reasons.length > 0)) && 
+    !isFinalizedWon(l)
+  ).length
   return { total: leads.length, fresh, called, followUp, qualified, pending }
 }
 
@@ -984,7 +988,7 @@ export default function CREDashboard() {
         }
         break
       case "pending":
-        // Pending = final_status Pending AND first call done
+        // Pending = final_status Pending AND (first call done OR has pending reasons)
         if (process.env.NODE_ENV === 'development') {
           console.log('Filtering pending leads:', leads.length, 'total leads')
         }
@@ -992,7 +996,8 @@ export default function CREDashboard() {
           const fs = (lead?.final_status ?? "").toString().toLowerCase()
           const ls = (lead?.lead_status ?? "").toString().toLowerCase()
           const isLostish = fs === 'lost' || fs === 'lost requested' || ls === 'lost'
-          return fs === "pending" && !!(lead?.first_call_date) && !isFinalizedWon(lead) && !isLostish
+          const hasCallOrReason = !!(lead?.first_call_date) || (lead?.pending_reasons && lead.pending_reasons.length > 0)
+          return fs === "pending" && hasCallOrReason && !isFinalizedWon(lead) && !isLostish
         })
         if (process.env.NODE_ENV === 'development') {
           console.log('Pending candidates:', pendingCandidates.length, pendingCandidates.map(l => ({ uid: l.uid, lead_status: l.lead_status, final_status: l.final_status, first_call_date: l.first_call_date })))
@@ -1231,8 +1236,12 @@ export default function CREDashboard() {
           : lead.follow_up_date
         return followUpDate <= today && !isFinalizedWon(lead) && !isLostOrUnqualified(lead)
       }).length,
-      // Pending = final_status Pending AND first call done
-      pending: leads.filter(lead => ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !!(lead?.first_call_date) && !isFinalizedWon(lead)).length,
+      // Pending = final_status Pending AND (first call done OR has pending reasons)
+      pending: leads.filter(lead => 
+        ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && 
+        (!!(lead?.first_call_date) || (lead?.pending_reasons && lead.pending_reasons.length > 0)) && 
+        !isFinalizedWon(lead)
+      ).length,
       // Qualified = lead_status Qualified AND final_status Pending
       qualified: leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
       wonlost: leads.filter(lead => {

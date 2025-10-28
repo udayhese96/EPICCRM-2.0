@@ -4,11 +4,17 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+const FASTAPI_URL = process.env.FASTAPI_URL || process.env.NEXT_PUBLIC_FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${FASTAPI_URL}/api/cre-users`, {
+    console.log('[NextJS API] CRE Users - FASTAPI_URL:', FASTAPI_URL)
+    console.log('[NextJS API] CRE Users - NODE_ENV:', process.env.NODE_ENV)
+    
+    const fullUrl = `${FASTAPI_URL}/api/cre-users`
+    console.log('[NextJS API] CRE Users - Full URL:', fullUrl)
+    
+    const response = await fetch(fullUrl, {
       method: 'GET',
       headers: {
         'Authorization': request.headers.get('Authorization') || '',
@@ -16,9 +22,17 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    console.log('[NextJS API] CRE Users - FastAPI response status:', response.status)
     if (!response.ok) {
+      const error = await response.text()
+      console.log('[NextJS API] CRE Users - FastAPI error:', error)
       return NextResponse.json(
-        { error: 'Failed to fetch CRE users' },
+        { 
+          error: 'Failed to fetch CRE users',
+          details: error,
+          url: fullUrl,
+          status: response.status
+        },
         { status: response.status }
       )
     }
@@ -30,9 +44,18 @@ export async function GET(request: NextRequest) {
     nextResponse.headers.set('Expires', '0')
     return nextResponse
   } catch (error) {
-    console.error('Error fetching CRE users:', error)
+    console.error('[NextJS API] CRE Users - Error:', error)
+    console.error('[NextJS API] CRE Users - Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    })
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      },
       { status: 500 }
     )
   }
