@@ -39,7 +39,6 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       admin: [
         { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/admin/analytics' },
-        { icon: Settings, label: 'Admin', href: '/admin' },
       ],
       cre: [
         { icon: Home, label: 'CRE Dashboard', href: '/cre/dashboard' },
@@ -47,10 +46,6 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       ps: [
         { icon: Home, label: 'PS Dashboard', href: '/ps/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/admin/analytics' },
-      ],
-      cre_team_leader: [
-        { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },
-        { icon: Users, label: 'Teams', href: '/teams' },
       ],
       cre_icrop: [
         { icon: Home, label: 'CRE ICROP Dashboard', href: '/cre-icrop/dashboard' },
@@ -67,7 +62,6 @@ export default function SlidingNavbar({ userRole, userName, isMobile = false, on
       ],
       cre_team_leader: [
         { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },
-        { icon: Users, label: 'Teams', href: '/teams' },
         { icon: UserCheck, label: 'Walk-in CRE Assignment', href: '/cre-team-leader/assign-walkin-cre' },
       ]
     }

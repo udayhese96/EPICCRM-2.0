@@ -80,7 +80,8 @@ interface PSUser {
 
 // Source options for digital leads
 const SOURCE_OPTIONS: { [key: string]: string[] } = {
-  "Google": ["Web", "Tele In", "GMB Tele In"],
+  "Google": ["Telein"],
+  "Telein": ["Web", "Telein", "GMB Telein"],
   "WhatsApp": ["Tele In", "Bulk Message"],
   "Car Dekho": ["CD B", "CD G"],
   "Car Wale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],

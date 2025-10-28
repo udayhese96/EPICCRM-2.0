@@ -30,7 +30,8 @@ interface AddLeadModalProps {
 
 // Source/Subsource mapping as per requirements
 const SOURCE_OPTIONS: { [key: string]: string[] } = {
-  "Google": ["Web", "Tele In", "GMB Tele In"],
+  "Google": ["Telein"],
+  "Telein": ["Web", "Telein", "GMB Telein"],
   "WhatsApp": ["Tele In", "Bulk Message"],
   "CarDekho": ["CD B", "CD G"],
   "CarWale": ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],

@@ -15,7 +15,8 @@ import Link from "next/link"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 const SOURCE_OPTIONS = {
-  Google: ["Web", "Tele In", "GMB Tele In"],
+  Google: ["Telein"],
+  Telein: ["Web", "Telein", "GMB Telein"],
   WhatsApp: ["Tele In", "Bulk Message"],
   CarDekho: ["CD B", "CD G"],
   CarWale: ["CWA", "CWB", "CWC", "CWG", "CWH", "CWK"],
