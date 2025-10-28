@@ -43,11 +43,6 @@ const getNavigationForRole = (role: string) => {
           icon: ArrowRightLeft,
         },
         {
-          name: "All Leads",
-          href: "/leads",
-          icon: Contact,
-        },
-        {
           name: "Manage CRE",
           href: "/admin/manage-cre",
           icon: Users,
@@ -66,16 +61,6 @@ const getNavigationForRole = (role: string) => {
           name: "Manage Team Leaders",
           href: "/admin/manage-team-leaders",
           icon: Users,
-        },
-        {
-          name: "Users",
-          href: "/admin/users",
-          icon: UsersIcon,
-        },
-        {
-          name: "Branches",
-          href: "/admin/branches",
-          icon: Building2,
         },
         {
           name: "Analytics",

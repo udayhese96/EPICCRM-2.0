@@ -79,7 +79,6 @@ export function DashboardLayoutFullBleed({ children }: DashboardLayoutFullBleedP
       admin: [
         { icon: Home, label: 'Dashboard', href: '/admin/dashboard' },
         { icon: BarChart3, label: 'Analytics', href: '/analytics' },
-        { icon: Settings, label: 'Admin', href: '/admin' },
       ],
       cre: [
         { icon: Home, label: 'CRE Dashboard', href: '/cre/dashboard' },
@@ -89,7 +88,6 @@ export function DashboardLayoutFullBleed({ children }: DashboardLayoutFullBleedP
       ],
       cre_team_leader: [
         { icon: Home, label: 'CRE TL Dashboard', href: '/cre-team-leader/dashboard' },
-        { icon: Users, label: 'Teams', href: '/teams' },
       ],
       cre_icrop: [
         { icon: Home, label: 'CRE ICROP Dashboard', href: '/cre-icrop/dashboard' },
