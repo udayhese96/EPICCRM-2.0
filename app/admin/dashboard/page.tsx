@@ -205,6 +205,7 @@ export default function AdminDashboard() {
                 desc="Identify and manage duplicate entries"
                 icon={Copy}
                 accent="pink"
+                onClick={() => router.push("/admin/manage-duplicates")}
               />
               <QuickCard
                 cardId="lead-transfer"

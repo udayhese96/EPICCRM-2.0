@@ -1603,6 +1603,46 @@ async def upload_leads_bulk(
         print(f"[Bulk Upload] Fatal error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/admin/leads/duplicate-is-dup")
+async def get_leads_with_is_dup(
+    limit: int = Query(100, ge=1, le=1000, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    current_user=Depends(admin_required)
+):
+    """Get leads from lead_master where is_dup column has non-null values"""
+    try:
+        # Query leads where is_dup is not null using Supabase filter
+        query = (
+            supabase
+                .table('lead_master')
+                .select('*', count='exact')
+                .not_.is_('is_dup', 'null')
+                .order('created_at', desc=True)
+                .range(offset, offset + limit - 1)
+        )
+        
+        result = query.execute()
+        
+        # Get total count from the count parameter
+        total_count = result.count if hasattr(result, 'count') and result.count is not None else len(result.data or [])
+        
+        leads = result.data or []
+        
+        return {
+            "success": True,
+            "leads": leads,
+            "count": len(leads),
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(leads) < total_count
+        }
+    except Exception as e:
+        print(f"[get_leads_with_is_dup] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch leads with is_dup: {str(e)}")
+
 @app.post("/api/cre/leads", response_model=dict)
 async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_current_user)):
     """Create a new lead for CRE users with background processing for qualified_leads and trade_in_master"""
