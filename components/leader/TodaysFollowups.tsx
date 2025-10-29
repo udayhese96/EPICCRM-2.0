@@ -58,6 +58,7 @@ interface TodaysFollowupsProps {
 export function TodaysFollowups({ teamLeaderId }: TodaysFollowupsProps) {
   const [leads, setLeads] = useState<FollowupLead[]>([])
   const [filteredLeads, setFilteredLeads] = useState<FollowupLead[]>([])
+  const [tfuTab, setTfuTab] = useState<'today' | 'overdue'>('today')
   const [kpis, setKpis] = useState<KPIData>({
     total_due_today: 0,
     overdue: 0,
@@ -156,8 +157,9 @@ export function TodaysFollowups({ teamLeaderId }: TodaysFollowupsProps) {
   }
 
   // Pagination logic
-  const totalPages = Math.ceil(filteredLeads.length / itemsPerPage)
-  const paginatedLeads = filteredLeads.slice(
+  const segmentLeads = tfuTab === 'overdue' ? filteredLeads.filter(l => l.is_overdue) : filteredLeads.filter(l => !l.is_overdue)
+  const totalPages = Math.ceil(segmentLeads.length / itemsPerPage)
+  const paginatedLeads = segmentLeads.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   )
@@ -211,6 +213,25 @@ export function TodaysFollowups({ teamLeaderId }: TodaysFollowupsProps) {
       </CardHeader>
 
       <CardContent className="pt-6">
+        {/* Segment Tabs */}
+        <div className="flex items-center gap-2 mb-4">
+          <Button
+            variant={tfuTab === 'today' ? 'default' : 'outline'}
+            size="sm"
+            className={tfuTab === 'today' ? 'bg-orange-500 hover:bg-orange-600 text-white' : ''}
+            onClick={() => { setTfuTab('today'); setCurrentPage(1) }}
+          >
+            Due Today
+          </Button>
+          <Button
+            variant={tfuTab === 'overdue' ? 'default' : 'outline'}
+            size="sm"
+            className={tfuTab === 'overdue' ? 'bg-red-600 hover:bg-red-700 text-white' : ''}
+            onClick={() => { setTfuTab('overdue'); setCurrentPage(1) }}
+          >
+            Overdue Today
+          </Button>
+        </div>
         {/* KPI Chips */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center space-x-3">
