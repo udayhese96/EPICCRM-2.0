@@ -26,9 +26,14 @@ export async function GET(_request: NextRequest) {
       return Array.from(new Set(values.map(v => String(v).trim()))).filter(Boolean)
     }
 
-    const [leadStatuses, finalStatuses, categories, branches, tradeIn, models, sources] = await Promise.all([
+    const [leadStatuses, finalStatuses, secondCallStatuses, thirdCallStatuses, fourthCallStatuses, fifthCallStatuses, sixthCallStatuses, categories, branches, tradeIn, models, sources] = await Promise.all([
       distinct('lead_status'),
       distinct('final_status'),
+      distinct('second_call_lead_status'),
+      distinct('third_call_lead_status'),
+      distinct('fourth_call_lead_status'),
+      distinct('fifth_call_lead_status'),
+      distinct('sixth_call_lead_status'),
       distinct('lead_category'),
       distinct('branch'),
       distinct('trade_in'),
@@ -36,8 +41,16 @@ export async function GET(_request: NextRequest) {
       distinct('source')
     ])
 
-    // Merge status sets for a single dropdown
-    const statusSet = Array.from(new Set([...leadStatuses, ...finalStatuses]))
+    // Merge ALL status sets including all call status fields
+    const statusSet = Array.from(new Set([
+      ...leadStatuses, 
+      ...finalStatuses,
+      ...secondCallStatuses,
+      ...thirdCallStatuses,
+      ...fourthCallStatuses,
+      ...fifthCallStatuses,
+      ...sixthCallStatuses
+    ].filter(Boolean)))
 
     return NextResponse.json({
       status: statusSet,

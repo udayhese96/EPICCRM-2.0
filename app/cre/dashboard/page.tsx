@@ -49,7 +49,7 @@ const normalizeStatus = (s?: string | null) => (s || "").toString().trim().toLow
 const computeCountsSnapshot = (leads: any[]) => {
   const isFinalizedWon = (l: any) => {
     const fs = (l?.final_status || '').toString().toLowerCase()
-    return fs === 'booked' || fs === 'retailed'
+    return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won')
   }
   const calledSet = new Set(["rnr","dnd","not reachable","switched off","busy","disconnecting the call","temporary out of service","incoming call facility not available","out of network","plan postponed","interested"]) 
   
@@ -152,6 +152,8 @@ export default function CREDashboard() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [lostRequests, setLostRequests] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<string>("fresh")
+  const [wonLostSubTab, setWonLostSubTab] = useState<'all' | 'won' | 'lost'>('all')
+  const [followupSubTab, setFollowupSubTab] = useState<'today' | 'overdue' | 'all'>('all')
   const [activeStatus, setActiveStatus] = useState<string>("Fresh")
   const [searchTerm, setSearchTerm] = useState("")
   const [pendingCategory, setPendingCategory] = useState<"all" | "Hot" | "Warm" | "Cold">("all")
@@ -914,7 +916,7 @@ export default function CREDashboard() {
 
     const isFinalizedWon = (lead: any) => {
       const fs = (lead?.final_status || '').toString().toLowerCase()
-      return fs === 'booked' || fs === 'retailed'
+      return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won')
     }
     
     const isLostOrUnqualified = (lead: any) => {
@@ -1030,7 +1032,8 @@ export default function CREDashboard() {
           const isLostRequested = fs === 'lost requested'
           const isBooked = fs === 'booked'
           const isRetailed = fs === 'retailed'
-          return isLost || isLostRequested || isBooked || isRetailed
+          const isWon = fs === 'won' || fs.includes('won') || (lead?.lead_status || '').toString().toLowerCase() === 'won'
+          return isLost || isLostRequested || isBooked || isRetailed || isWon
         }).filter(withinDateFilter)
         break
       case "lostconfirm":
@@ -1107,10 +1110,15 @@ export default function CREDashboard() {
           (lead.customer_mobile_number || '').includes(searchTerm)
         )
         
-        // Search in status fields
+        // Search in ALL status fields (including all call statuses)
         const statusMatch = (
           (lead.lead_status || '').toLowerCase().includes(searchLower) ||
-          (lead.final_status || '').toLowerCase().includes(searchLower)
+          (lead.final_status || '').toLowerCase().includes(searchLower) ||
+          (lead.second_call_lead_status || '').toLowerCase().includes(searchLower) ||
+          (lead.third_call_lead_status || '').toLowerCase().includes(searchLower) ||
+          (lead.fourth_call_lead_status || '').toLowerCase().includes(searchLower) ||
+          (lead.fifth_call_lead_status || '').toLowerCase().includes(searchLower) ||
+          (lead.sixth_call_lead_status || '').toLowerCase().includes(searchLower)
         )
         
         // Search in other relevant fields
@@ -1125,12 +1133,20 @@ export default function CREDashboard() {
       })
     }
 
-    // Filter by status if not "all"
+    // Filter by status if not "all" - check ALL call status fields
     if (statusFilter && statusFilter !== "all") {
-      filteredLeads = filteredLeads.filter(lead => 
-        (lead.lead_status || '').toString().trim() === statusFilter ||
-        (lead.final_status || '').toString().trim() === statusFilter
-      )
+      filteredLeads = filteredLeads.filter(lead => {
+        const statusTrim = statusFilter.trim()
+        return (
+          (lead.lead_status || '').toString().trim() === statusTrim ||
+          (lead.final_status || '').toString().trim() === statusTrim ||
+          (lead.second_call_lead_status || '').toString().trim() === statusTrim ||
+          (lead.third_call_lead_status || '').toString().trim() === statusTrim ||
+          (lead.fourth_call_lead_status || '').toString().trim() === statusTrim ||
+          (lead.fifth_call_lead_status || '').toString().trim() === statusTrim ||
+          (lead.sixth_call_lead_status || '').toString().trim() === statusTrim
+        )
+      })
     }
 
     // Filter by call outcome if status is "Qualified" and call outcome is not "all"
@@ -1179,7 +1195,7 @@ export default function CREDashboard() {
       const today = new Date().toISOString().slice(0,10)
     const isFinalizedWon = (l: Lead) => {
       const fs = (l?.final_status || '').toString().toLowerCase()
-      return fs === 'booked' || fs === 'retailed'
+      return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won')
     }
     
     const isLostOrUnqualified = (lead: any) => {
@@ -1246,16 +1262,19 @@ export default function CREDashboard() {
       qualified: leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
       wonlost: leads.filter(lead => {
         const fs = (lead?.final_status || '').toString().toLowerCase()
-        const isLost = fs === 'lost' || lead?.lead_status === 'Lost'
+        const ls = (lead?.lead_status || '').toString().toLowerCase()
+        const isLost = fs === 'lost' || ls === 'lost'
         const isLostRequested = fs === 'lost requested'
         const isBooked = fs === 'booked'
         const isRetailed = fs === 'retailed'
-        return isLost || isLostRequested || isBooked || isRetailed
+        const isWon = fs === 'won' || fs.includes('won') || ls === 'won'
+        return isLost || isLostRequested || isBooked || isRetailed || isWon
       }).length,
-      // Fixed: Won leads should show final_status = 'booked' or 'retailed'
+      // Fixed: Won leads should show final_status = 'booked', 'retailed', or 'won'
       won: leads.filter(lead => {
         const fs = (lead?.final_status || '').toString().toLowerCase()
-        return fs === 'booked' || fs === 'retailed'
+        const ls = (lead?.lead_status || '').toString().toLowerCase()
+        return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won') || ls === 'won'
       }).length,
       // Fixed: Lost leads should show final_status = 'lost' (not lead_status)
       lost: leads.filter(lead => {
@@ -1320,7 +1339,29 @@ export default function CREDashboard() {
   
   const filteredLeads = useMemo(() => {
     try {
-      return getFilteredLeads()
+      let result = getFilteredLeads()
+      if (activeTab === 'wonlost') {
+        if (wonLostSubTab === 'won') {
+          result = result.filter(l => {
+            const fs = (l?.final_status || '').toString().toLowerCase()
+            const ls = (l?.lead_status || '').toString().toLowerCase()
+            return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won') || ls === 'won'
+          })
+        } else if (wonLostSubTab === 'lost') {
+          result = result.filter(l => (l?.final_status || '').toString().toLowerCase() === 'lost')
+        }
+      } else if (activeTab === 'followup' && followupSubTab !== 'all') {
+        const todayIso = new Date().toISOString().slice(0,10)
+        result = result.filter(l => {
+          const f = (l?.follow_up_date || '').toString()
+          const d = f.includes('T') ? f.slice(0,10) : f
+          if (!d) return false
+          if (followupSubTab === 'today') return d === todayIso
+          if (followupSubTab === 'overdue') return d < todayIso
+          return true
+        })
+      }
+      return result
     } catch (error) {
       console.error('Error in filteredLeads useMemo:', error)
       if (process.env.NODE_ENV === 'development') {
@@ -1328,7 +1369,7 @@ export default function CREDashboard() {
       }
       return []
     }
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter, sourceFilter])
+  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter, sourceFilter, wonLostSubTab, followupSubTab])
   
   const tabCounts = useMemo(() => {
     try {
@@ -1363,10 +1404,51 @@ export default function CREDashboard() {
     }
   }, [leads])
 
+  // Dynamic statuses for Qualified and Pending tab filters (from lead_master)
+  const [globalStatuses, setGlobalStatuses] = useState<string[]>([])
+  const [loadingGlobalStatuses, setLoadingGlobalStatuses] = useState<boolean>(false)
+
+  useEffect(() => {
+    const loadStatusesOnce = async () => {
+      // Load when Qualified/Pending tabs are active
+      if (!['qualified', 'pending'].includes(activeTab)) return
+      try {
+        setLoadingGlobalStatuses(true)
+        // First call: distinct statuses from lead_master (includes ALL call statuses)
+        const resp1 = await fetch(`/api/leads/distinct?_t=${Date.now()}`)
+        const data1 = resp1.ok ? await resp1.json() : { status: [] }
+        const baseStatuses: string[] = Array.isArray(data1?.status) ? data1.status : []
+
+        // Second call: dynamic detection (superset, merged)
+        const resp2 = await fetch(`/api/analytics/dynamic-status?period=all&_t=${Date.now()}`)
+        const data2 = resp2.ok ? await resp2.json() : { statusAnalysis: {} }
+        const dynamicLeadStatuses: string[] = Array.isArray(data2?.statusAnalysis?.leadStatuses) ? data2.statusAnalysis.leadStatuses : []
+        const dynamicFinalStatuses: string[] = Array.isArray(data2?.statusAnalysis?.finalStatuses) ? data2.statusAnalysis.finalStatuses : []
+
+        const merged = Array.from(new Set([
+          ...baseStatuses,
+          ...dynamicLeadStatuses,
+          ...dynamicFinalStatuses
+        ].map((s: any) => (s ?? '').toString().trim()).filter(Boolean)))
+
+        setGlobalStatuses(merged.sort())
+      } catch (e) {
+        console.error('Failed to load global statuses', e)
+      } finally {
+        setLoadingGlobalStatuses(false)
+      }
+    }
+    loadStatusesOnce()
+  }, [activeTab])
+
   // Get available statuses for current tab (tab-specific)
   const getAvailableStatuses = () => {
     try {
       if (!leads || leads.length === 0) return []
+      // For Qualified/Pending tabs, prefer preloaded dynamic statuses list
+      if ((activeTab === 'qualified' || activeTab === 'pending') && globalStatuses.length > 0) {
+        return globalStatuses
+      }
       
       const statusSet = new Set<string>()
       
@@ -1395,7 +1477,7 @@ export default function CREDashboard() {
     }
   }
 
-  const availableStatuses = useMemo(() => getAvailableStatuses(), [leads, activeTab, activeStatus])
+  const availableStatuses = useMemo(() => getAvailableStatuses(), [leads, activeTab, activeStatus, globalStatuses])
 
   // Get available call outcomes for qualified leads
   const getAvailableCallOutcomes = () => {
@@ -2154,7 +2236,76 @@ export default function CREDashboard() {
 
 
               {activeTab === "wonlost" && (
-                <></>
+                <div className="flex items-center gap-2">
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      wonLostSubTab === 'all'
+                        ? 'bg-slate-100 text-slate-800 border-slate-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setWonLostSubTab('all')}
+                    aria-label="View all"
+                  >
+                    All
+                  </button>
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      wonLostSubTab === 'won'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setWonLostSubTab('won')}
+                    aria-label="View won"
+                  >
+                    Won
+                  </button>
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      wonLostSubTab === 'lost'
+                        ? 'bg-red-100 text-red-800 border-red-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setWonLostSubTab('lost')}
+                    aria-label="View lost"
+                  >
+                    Lost
+                  </button>
+                </div>
+              )}
+
+              {activeTab === "followup" && (
+                <div className="flex items-center gap-2">
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      followupSubTab === 'all'
+                        ? 'bg-gray-100 text-gray-800 border-gray-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setFollowupSubTab('all')}
+                  >
+                    All
+                  </button>
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      followupSubTab === 'today'
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setFollowupSubTab('today')}
+                  >
+                    Today
+                  </button>
+                  <button
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
+                      followupSubTab === 'overdue'
+                        ? 'bg-red-100 text-red-800 border-red-300'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setFollowupSubTab('overdue')}
+                  >
+                    Overdue
+                  </button>
+                </div>
               )}
 
               {/* Subtle Refreshing Indicator */}
@@ -2230,7 +2381,26 @@ export default function CREDashboard() {
                         >
                           <td className="p-3">
                             <div className="flex gap-2">
-                              {activeTab === "lostconfirm" ? (
+                              {activeTab === 'wonlost' ? (
+                                <>
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full ${
+                                      ((lead?.final_status || '').toString().toLowerCase() === 'booked' || 
+                                       (lead?.final_status || '').toString().toLowerCase() === 'retailed' ||
+                                       (lead?.final_status || '').toString().toLowerCase() === 'won' ||
+                                       (lead?.final_status || '').toString().toLowerCase().includes('won') ||
+                                       (lead?.lead_status || '').toString().toLowerCase() === 'won')
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : (lead?.final_status || '').toString().toLowerCase() === 'lost'
+                                        ? 'bg-red-100 text-red-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                    }`}
+                                  >
+                                    {(lead?.final_status || lead?.lead_status || '—')}
+                                  </Badge>
+                                </>
+                              ) : activeTab === "lostconfirm" ? (
                                 <>
                                   <Button 
                                     size="sm" 
