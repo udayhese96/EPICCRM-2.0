@@ -61,6 +61,8 @@ interface LeadDetails {
 }
 
 const SalesManagerDashboard = () => {
+  const FASTAPI_BASE_URL = process.env.FASTAPI_URL || process.env.NEXT_PUBLIC_FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+  console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null)
@@ -131,7 +133,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
+      const response = await fetch(`${FASTAPI_BASE_URL}/api/qualified-leads/approve?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -172,7 +174,7 @@ const SalesManagerDashboard = () => {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      const response = await fetch(`/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
+      const response = await fetch(`${FASTAPI_BASE_URL}/api/qualified-leads/reject?lead_uid=${selectedRequest.lead_uid}&approval_type=${selectedRequest.request_type}&_t=${Date.now()}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
