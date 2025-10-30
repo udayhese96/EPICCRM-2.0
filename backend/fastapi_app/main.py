@@ -121,7 +121,7 @@ except Exception as e:
 import os
 from decouple import config
 from .auth import get_current_user, admin_required, admin_or_branch_head, can_manage_leads, CurrentUser
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 try:
     from zoneinfo import ZoneInfo
     ZONEINFO_AVAILABLE = True
@@ -138,11 +138,20 @@ from .models import (UserCreate, UserUpdate, UserResponse, LoginRequest, LoginRe
                     BulkAssignRequest, BulkStatusUpdateRequest, LeadStatistics, PSAssignmentCreate, 
                     PSAssignmentResponse, PSAssignmentUpdate)
 from .redis_cache import (cache, cache_leads, get_cached_leads, cache_users, get_cached_users, 
-                         cache_lead_stats, get_cached_lead_stats, invalidate_on_lead_change)
+                         cache_lead_stats, get_cached_lead_stats, invalidate_on_lead_change, invalidate_cre_cache)
 from .background_tasks import (create_lead_async, update_lead_async, bulk_update_leads_async, 
                               qualify_lead_async, background_processor)
 import logging
 logger = logging.getLogger(__name__)
+
+# Basic cache stats for visibility
+cre_cache_stats = {"hits": 0, "misses": 0}
+
+def json_serial(obj):
+    """JSON serializer for datetime/date objects"""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
 
 app = FastAPI(title="EPIC CRM 2.0 API", version="2.0.0")
 
@@ -1380,6 +1389,13 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
         
         response = supabase.table('lead_master').insert(insert_data).execute()
         if response.data:
+            # Invalidate CRE cache if assigned during creation
+            try:
+                cre_name = response.data[0].get('cre_name') or lead_data.assigned_cre_name
+                if cre_name:
+                    await invalidate_cre_cache(cre_name)
+            except Exception:
+                pass
             return {"message": "Lead created successfully", "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
@@ -1732,6 +1748,11 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
                 except Exception as fallback_error:
                     print(f"Warning: Failed to process qualified leads and trade-in: {fallback_error}")
             
+            # Invalidate CRE cache for the creator
+            try:
+                await invalidate_cre_cache(lead_data.cre_name)
+            except Exception:
+                pass
             return {"message": "Lead created successfully", "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
@@ -1899,6 +1920,17 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
             raise HTTPException(status_code=500, detail="Failed to update lead_master")
         
         print(f"✅ [Direct API] Lead master updated successfully: {lead_id}")
+
+        # Invalidate CRE cache (old and new)
+        try:
+            old_cre = existing_lead.get('cre_name')
+            new_cre = update_data.get('cre_name') or old_cre
+            if old_cre:
+                await invalidate_cre_cache(old_cre)
+            if new_cre and new_cre != old_cre:
+                await invalidate_cre_cache(new_cre)
+        except Exception:
+            pass
         
         # Trigger background worker for qualified_leads and tradein_master
         print(f"🔄 [Background Worker] Triggering background processing for qualified_leads and tradein_master")
@@ -2140,6 +2172,14 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
             
             if response.data:
                 print(f"✅ [FastAPI] Lead_master updated successfully: {uid}")
+                # Invalidate CRE cache for current owner
+                try:
+                    current = supabase.table('lead_master').select('cre_name').eq('uid', uid).limit(1).execute()
+                    cre_name = (current.data[0].get('cre_name') if current.data else None)
+                    if cre_name:
+                        await invalidate_cre_cache(cre_name)
+                except Exception:
+                    pass
                 result = {
                     'success': True,
                     'lead_id': uid,
@@ -4785,38 +4825,77 @@ async def debug_cre_call_history():
 
 # Public endpoint to fetch leads assigned to a specific CRE username
 @app.get("/api/public/cre-assigned/{username}")
-async def get_public_cre_assigned(username: str, name: Optional[str] = None):
+async def get_public_cre_assigned(username: str, name: Optional[str] = None, _t: Optional[str] = None):
     try:
         print(f"Fetching leads for username: {username}, name: {name}")
 
         # Prefer full name if provided; otherwise use username
+        import json
         clean_user = (username or '').strip()
         clean_name = (name or '').strip()
         search_term = clean_name or clean_user
         
         if not search_term:
             return []
-        
-        # Optimized single query with proper filtering
-        query = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes').eq('cre_name', search_term)
-        
-        # Execute single optimized query
-        response = query.order('created_at', desc=True).execute()
-        found_leads = response.data or []
-        
-        # If no exact matches, try case-insensitive (fallback)
-        if not found_leads:
+
+        # Redis caching: key = "cre_leads:{cre_name_lowercase}", TTL = 300s
+        try:
+            from .redis_cache import cache  # local import to avoid circulars at module load
+        except Exception:
+            cache = None
+        cached = None
+        normalized_term = (search_term or '').strip().lower()
+        cache_key = f"cre_leads:{normalized_term}"
+        try:
+            if cache and getattr(cache, 'redis_client', None):
+                raw = cache.redis_client.get(cache_key)
+                if raw:
+                    cached = json.loads(raw)
+        except Exception as e:
+            print(f"Redis get error for {cache_key}: {e}")
+
+        # Return cached data unless explicitly bypassed with _t parameter
+        if cached is not None and _t is None:
+            cre_cache_stats["hits"] += 1
             try:
-                all_leads_response = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes').execute()
-                if all_leads_response.data:
-                    found_leads = [
-                            lead for lead in all_leads_response.data 
-                        if lead.get('cre_name', '').lower() == search_term.lower()
-                        ]
-            except Exception as e:
-                print(f"Error with case-insensitive match: {e}")
+                total = cre_cache_stats['hits'] + cre_cache_stats['misses']
+                print(f"Cache HIT for {normalized_term} | Rate: {cre_cache_stats['hits']/total*100:.1f}%")
+            except Exception:
+                pass
+            return cached
+        else:
+            cre_cache_stats["misses"] += 1
         
-        # Flatten trade-in data efficiently
+        # Optimized query: select only required columns, case-insensitive match, limit 2000
+        select_cols = (
+            'uid,id,customer_name,customer_mobile_number,alternate_mobile_number,source,sub_source,campaign,created_at,updated_at,'
+            'lead_status,final_status,lead_category,follow_up_date,first_call_date,'
+            'branch,ps_name,ps_id,icrop_id,first_remark,pending_reasons,customer_location,'
+            'model_interested,variant,buying_plan,finance_option,trade_in,'
+            'test_drive_type,profession,second_call_date,second_remark,third_call_date,third_remark,fourth_call_date,fourth_remark,'
+            'fifth_call_date,fifth_remark,sixth_call_date,sixth_remark,second_call_lead_status,third_call_lead_status,fourth_call_lead_status,fifth_call_lead_status,sixth_call_lead_status,'
+            'cre_name,assigned,trade_in_master(trade_in_make,trade_in_model,trade_in_year,trade_in_km,trade_in_ownership)'
+        )
+
+        query = (
+            supabase
+                .table('lead_master')
+                .select(select_cols)
+                .eq('assigned', 'Yes')
+                .ilike('cre_name', normalized_term)
+                .order('created_at', desc=True)
+                .limit(2000)
+        )
+
+        # Execute with timeout protection (25s)
+        import asyncio
+        try:
+            response = await asyncio.wait_for(asyncio.to_thread(query.execute), timeout=25.0)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Database query timeout")
+        found_leads = response.data or []
+
+        # Flatten trade-in data efficiently (only selected fields are present)
         for lead in found_leads:
             if lead.get('trade_in_master') and isinstance(lead['trade_in_master'], list) and len(lead['trade_in_master']) > 0:
                 trade_in_data = lead['trade_in_master'][0]
@@ -4829,8 +4908,15 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None):
                 del lead['trade_in_master']
             elif 'trade_in_master' in lead:
                 del lead['trade_in_master']
+
+        # Store in Redis cache for 5 minutes
+        try:
+            if cache and getattr(cache, 'redis_client', None):
+                cache.redis_client.setex(cache_key, 300, json.dumps(found_leads, default=json_serial))
+        except Exception as e:
+            print(f"Redis set error for {cache_key}: {e}")
         
-        print(f"Found {len(found_leads)} leads for CRE")
+        print(f"Found {len(found_leads)} leads for CRE (cached under {cache_key})")
         return found_leads
     except Exception as e:
         # Minimal logging to server stdout for debugging 500s
