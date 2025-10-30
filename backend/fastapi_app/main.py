@@ -1351,6 +1351,72 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
     try:
         import uuid
         
+        # 1) Check for duplicate by customer_mobile_number
+        try:
+            existing_q = (
+                supabase
+                    .table('lead_master')
+                    .select('id, uid, is_dup')
+                    .eq('customer_mobile_number', lead_data.customer_mobile_number)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            existing_res = existing_q.execute()
+            existing = existing_res.data[0] if existing_res.data else None
+        except Exception as e:
+            existing = None
+
+        if existing:
+            # Build duplicate entry and append to is_dup JSON
+            current_is_dup = existing.get('is_dup')
+            # Normalize to list form for consistency
+            if isinstance(current_is_dup, list):
+                attempt_base = len(current_is_dup)
+                history = current_is_dup
+            elif isinstance(current_is_dup, dict):
+                attempt_base = 1
+                history = [current_is_dup]
+            else:
+                attempt_base = 0
+                history = []
+
+            dup_entry = {
+                "attempt": attempt_base + 1,
+                "timestamp": now_ist_iso(),
+                "source": getattr(lead_data, 'source', None) or "",
+                "sub_source": getattr(lead_data, 'sub_source', None) or "",
+            }
+
+            new_history = history + [dup_entry]
+
+            update_payload = {
+                "is_dup": new_history,
+                "updated_at": now_ist_iso(),
+            }
+
+            # If CRE is assigned in this attempt, we can optionally record that assignment timing as well
+            if getattr(lead_data, 'assigned_cre_id', None) and getattr(lead_data, 'assigned_cre_name', None):
+                update_payload["assigned"] = "Yes"
+                update_payload["cre_id"] = lead_data.assigned_cre_id
+                update_payload["cre_name"] = lead_data.assigned_cre_name
+                update_payload["cre_assigned_at"] = now_ist_iso()
+
+            updated = (
+                supabase
+                    .table('lead_master')
+                    .update(update_payload)
+                    .eq('id', existing['id'])
+                    .execute()
+            )
+
+            updated_row = updated.data[0] if updated.data else existing
+            return {
+                "message": "Mobile number already exists. Lead updated.",
+                "duplicate": True,
+                "lead": updated_row,
+            }
+
+        # 2) If not duplicate, proceed with normal insert
         # Generate unique UID
         lead_uid = f"LD{str(uuid.uuid4())[:8].upper()}"
         
@@ -1380,7 +1446,7 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
         
         response = supabase.table('lead_master').insert(insert_data).execute()
         if response.data:
-            return {"message": "Lead created successfully", "lead": response.data[0]}
+            return {"message": "Lead created successfully", "duplicate": False, "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
             
