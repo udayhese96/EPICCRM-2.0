@@ -211,3 +211,20 @@ def invalidate_on_user_change(user_id: str, operation: str = "update"):
     """Invalidate cache when user changes"""
     cache.invalidate_user_cache(user_id)
     logger.info(f"Cache invalidated for user {user_id} operation: {operation}")
+
+# CRE-specific cache invalidation
+async def invalidate_cre_cache(cre_name: str):
+    """Invalidate Redis cache for a specific CRE when their leads change"""
+    try:
+        if not cre_name:
+            return
+        key = f"cre_leads:{cre_name.strip().lower()}"
+        if cache and getattr(cache, 'redis_client', None):
+            try:
+                cache.redis_client.delete(key)
+                logger.info(f"Invalidated cache for CRE: {cre_name}")
+            except Exception as e:
+                logger.warning(f"Failed to invalidate CRE cache for {cre_name}: {e}")
+    except Exception:
+        # Best-effort invalidation; swallow errors
+        pass
