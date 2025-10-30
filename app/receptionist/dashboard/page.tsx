@@ -324,7 +324,11 @@ export default function ReceptionistDashboard() {
 
       if (response.ok) {
         const result = await response.json()
-        toast.success(`Lead captured successfully! Lead ID: ${result.lead_uid}`)
+        if (result?.duplicate) {
+          toast.info(`Mobile number already exists. Lead updated.${result.lead_uid ? ` Lead ID: ${result.lead_uid}` : ''}`)
+        } else {
+          toast.success(`Lead captured successfully! Lead ID: ${result.lead_uid}`)
+        }
 
         // Reset form
         setFormData({
