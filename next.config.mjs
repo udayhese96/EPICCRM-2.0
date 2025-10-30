@@ -8,6 +8,11 @@ const nextConfig = {
     optimizePackageImports: ['@vercel/analytics'],
   },
   
+  // Strip console.* in production builds except errors
+  compiler: {
+    removeConsole: { exclude: ['error'] },
+  },
+  
   // Ignore TypeScript and ESLint errors during build
   typescript: {
     ignoreBuildErrors: true,
