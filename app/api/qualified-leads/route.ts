@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Force this route to be dynamic
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const runtime = 'nodejs'
+export const dynamic = 'auto'
 
-const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+if (process.env.NODE_ENV === 'development') {
+  console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,12 +15,14 @@ export async function GET(request: NextRequest) {
 
     const bearer = request.headers.get('Authorization') || (request.cookies.get('access_token') ? `Bearer ${request.cookies.get('access_token')!.value}` : '')
     
-    const response = await fetch(`${FASTAPI_URL}/api/qualified-leads${queryString ? `?${queryString}` : ''}`, {
+    const response = await fetch(`${FASTAPI_BASE_URL}/api/qualified-leads${queryString ? `?${queryString}` : ''}`, {
       method: 'GET',
       headers: {
         'Authorization': bearer,
         'Content-Type': 'application/json',
+        'Accept-Encoding': 'gzip, br',
       },
+      next: { revalidate: 30 },
     })
 
     if (!response.ok) {
@@ -29,7 +33,11 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'public, max-age=0, s-maxage=30, stale-while-revalidate=30',
+      },
+    })
   } catch (error) {
     console.error('Error fetching qualified leads:', error)
     return NextResponse.json(
@@ -44,13 +52,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const bearer = request.headers.get('Authorization') || (request.cookies.get('access_token') ? `Bearer ${request.cookies.get('access_token')!.value}` : '')
 
-    const response = await fetch(`${FASTAPI_URL}/api/qualified-leads`, {
+    const response = await fetch(`${FASTAPI_BASE_URL}/api/qualified-leads`, {
       method: 'POST',
       headers: {
         'Authorization': bearer,
         'Content-Type': 'application/json',
+        'Accept-Encoding': 'gzip, br',
       },
       body: JSON.stringify(body),
+      // no caching on mutations
     })
 
     if (!response.ok) {
@@ -62,7 +72,11 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json()
-    return NextResponse.json(data)
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    })
   } catch (error) {
     console.error('Error creating qualified lead:', error)
     return NextResponse.json(

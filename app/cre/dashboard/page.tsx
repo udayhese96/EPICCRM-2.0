@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,7 +28,9 @@ import {
   Thermometer,
   Globe
 } from "lucide-react"
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react"
+import dynamic from 'next/dynamic'
+const List = dynamic(() => import('react-window').then(m => (m as any).FixedSizeList as any), { ssr: false }) as any
 import { createClient } from "@/lib/supabase/client"
 import { LeadUpdateModal } from "./components/lead-update-modal"
 import { AddLeadModal } from "./components/add-lead-modal"
@@ -189,7 +192,7 @@ export default function CREDashboard() {
 
     const run = async () => {
       setIsRefreshing(true)
-      await fetchAssignedLeads(true)
+      await fetchAssignedLeads(true, !!options?.force)
       fetchLostRequests()
       setTimeout(() => setIsRefreshing(false), 900)
     }
@@ -264,32 +267,12 @@ export default function CREDashboard() {
     // Set up real-time subscriptions instead of polling
     const cleanup = setupRealtimeSubscriptions()
     
-    // Primary polling system (more reliable than real-time)
-    const primaryPolling = setInterval(() => {
+    // Conservative fallback polling (real-time handles most updates)
+    const fallbackRefresh = setInterval(() => {
       if (!isLoading && !isRefreshing) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔄 [Primary] Automatic refresh...')
-        }
-        fetchAssignedLeads()
-        fetchLostRequests()
+        fetchAssignedLeads(true)
       }
-    }, 3000) // 3 seconds - even more aggressive polling
-    
-    // Secondary polling for count updates
-    const countPolling = setInterval(() => {
-      if (!isLoading && !isRefreshing) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('📊 [Count] Checking for count updates...')
-        }
-        fetchAssignedLeads()
-        fetchLostRequests()
-      }
-    }, 15000) // 15 seconds - less frequent count checks
-    
-    // Redis worker status check
-    const workerStatusCheck = setInterval(() => {
-      checkRedisWorkerStatus()
-    }, 3000) // Check worker status every 3 seconds
+    }, 60000)
     
     return () => {
       // Cleanup real-time subscriptions
@@ -299,10 +282,8 @@ export default function CREDashboard() {
       // Cleanup CRE-specific event listeners
       window.removeEventListener(creSpecificEventName, immediateRefresh as any)
       window.removeEventListener(creSpecificStatusEventName, handleLeadStatusChange as any)
-      // Cleanup polling intervals
-      clearInterval(primaryPolling)
-      clearInterval(countPolling)
-      clearInterval(workerStatusCheck)
+      // Cleanup fallback interval only
+      clearInterval(fallbackRefresh)
       if (refreshTimerRef.current) {
         clearTimeout(refreshTimerRef.current)
         refreshTimerRef.current = null
@@ -368,7 +349,6 @@ export default function CREDashboard() {
           }
           setCountsUpdating(true)
           requestRefresh({ immediate: true, force: true })
-          setTimeout(() => requestRefresh({ immediate: true, force: true }), 800)
           setTimeout(() => {
             setCountsUpdating(false)
           }, 1200)
@@ -416,7 +396,6 @@ export default function CREDashboard() {
           }
           setCountsUpdating(true)
           requestRefresh({ immediate: true, force: true })
-          setTimeout(() => requestRefresh({ immediate: true, force: true }), 800)
           setTimeout(() => {
             setCountsUpdating(false)
           }, 1200)
@@ -455,7 +434,7 @@ export default function CREDashboard() {
             fetchLostRequests()
           }
           
-          fetchAssignedLeads()
+          requestRefresh({ immediate: true, force: true })
         }
       )
       .subscribe((status) => {
@@ -523,7 +502,7 @@ export default function CREDashboard() {
     }
   }
 
-  const fetchAssignedLeads = async (skipSpinner: boolean = false) => {
+  const fetchAssignedLeads = async (skipSpinner: boolean = false, forceRefresh: boolean = false) => {
     if (!skipSpinner) setIsLoading(true)
     try {
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
@@ -539,21 +518,9 @@ export default function CREDashboard() {
         qs.append('tab', activeTab)
       }
       
-      // Aggressive cache-busting to avoid any intermediate caching layers
-      const cacheBuster = Date.now().toString() + Math.random().toString(36).substr(2, 9)
-      qs.append('_t', cacheBuster)
-      qs.append('_r', Math.random().toString(36).substr(2, 9))
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[CRE fetch] requesting /api/cre-assigned with tab=', activeTab, '_t=', cacheBuster)
-      }
-      const response = await fetch(`/api/cre-assigned?${qs.toString()}`, { 
-        headers: { 
-          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        } 
-      })
+      // Only append refresh flag when explicitly forced by user action
+      const url = `/api/cre-assigned?${qs.toString()}${forceRefresh ? '&refresh=1' : ''}`
+      const response = await fetch(url)
       
       if (response.ok) {
         const raw = await response.json()
@@ -686,15 +653,10 @@ export default function CREDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
 
-      // Add cache-busting to lost requests
-      const cacheBuster = Date.now().toString() + Math.random().toString(36).substr(2, 9)
-      const response = await fetch(`/api/leads/lost-requests?_t=${cacheBuster}&_r=${Math.random().toString(36).substr(2, 9)}`, {
+      const response = await fetch(`/api/leads/lost-requests`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-          'Pragma': 'no-cache',
-          'Expires': '0'
+          'Content-Type': 'application/json'
         }
       })
 
@@ -865,6 +827,7 @@ export default function CREDashboard() {
   const getFilteredLeads = () => {
     try {
       let filteredLeads = leads
+      const currentSearchTerm = deferredSearchTerm
 
     const todayIso = new Date().toISOString().slice(0,10)
     const startOfWeek = (() => {
@@ -1098,16 +1061,16 @@ export default function CREDashboard() {
       }
     }
 
-    // Filter by search term (includes status search)
-    if (searchTerm) {
+    // Filter by search term (includes status search) - deferred
+    if (currentSearchTerm) {
       filteredLeads = filteredLeads.filter(lead => {
-        const searchLower = searchTerm.toLowerCase()
+        const searchLower = currentSearchTerm.toLowerCase()
         
         // Search in basic fields
         const basicMatch = (
           (lead.uid || '').toLowerCase().includes(searchLower) ||
           (lead.customer_name || '').toLowerCase().includes(searchLower) ||
-          (lead.customer_mobile_number || '').includes(searchTerm)
+          (lead.customer_mobile_number || '').includes(currentSearchTerm)
         )
         
         // Search in ALL status fields (including all call statuses)
@@ -1336,6 +1299,9 @@ export default function CREDashboard() {
   }
 
   const userName = user?.first_name || user?.name || user?.username || "Kumari"
+  const deferredSearchTerm = useDeferredValue(searchTerm)
+  const deferredActiveTab = useDeferredValue(activeTab)
+  const deferredActiveStatus = useDeferredValue(activeStatus)
   
   const filteredLeads = useMemo(() => {
     try {
@@ -1369,7 +1335,7 @@ export default function CREDashboard() {
       }
       return []
     }
-  }, [leads, activeTab, activeStatus, searchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter, sourceFilter, wonLostSubTab, followupSubTab])
+  }, [leads, deferredActiveTab, deferredActiveStatus, deferredSearchTerm, pendingCategory, startDate, statusFilter, callOutcomeFilter, sourceFilter, wonLostSubTab, followupSubTab])
   
   const tabCounts = useMemo(() => {
     try {
@@ -1401,6 +1367,24 @@ export default function CREDashboard() {
         called: 0,
         followup: 0
       }
+    }
+  }, [leads])
+
+  // Lightweight stats for header widgets
+  const stats = useMemo(() => {
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const toDate = (d?: string) => (d ? new Date(d.includes('T') ? d : `${d}T00:00:00`) : new Date(0))
+    const isWon = (l: any) => (l.final_status || '').toString().toLowerCase() === 'won' || (l.final_status || '').toString().toLowerCase().includes('retailed') || (l.final_status || '').toString().toLowerCase().includes('booked')
+    const isLost = (l: any) => (l.final_status || '').toString().toLowerCase() === 'lost'
+    return {
+      total: leads.length,
+      today: leads.filter(l => toDate((l as any).date) >= todayStart).length,
+      qualified: leads.filter(l => (l.lead_status || '').toString() === 'Qualified').length,
+      hot: leads.filter(l => (l.lead_category || '').toString().toLowerCase() === 'hot').length,
+      pending: leads.filter(l => (l.lead_status || '').toString() !== 'Qualified' && !isWon(l) && !isLost(l)).length,
+      won: leads.filter(isWon).length,
+      lost: leads.filter(isLost).length,
     }
   }, [leads])
 
@@ -2316,246 +2300,197 @@ export default function CREDashboard() {
                 </div>
               )}
 
-              {/* Leads Table - Optimized with Backend Filtering */}
-              <div className="overflow-auto rounded-2xl max-h-[calc(100vh-300px)]">
-                <table className="w-full border-collapse">
-                  <thead className="sticky top-0 z-10 bg-white shadow-sm">
-                    <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-                      <th className="text-left p-3 font-semibold text-gray-800">ACTION</th>
-                      {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
-                        <th className="text-left p-3 font-semibold text-gray-800">
-                          LEAD STATUS
-                        </th>
-                      )}
-                      <th className="text-left p-3 font-semibold text-gray-800">CUSTOMER NAME</th>
-                      <th className="text-left p-3 font-semibold text-gray-800">MOBILE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800">SOURCE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800">CAMPAIGN</th>
-                      <th className="text-left p-3 font-semibold text-gray-800">BRANCH</th>
-                      {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                        <th className="text-left p-3 font-semibold text-gray-800">ICROP ID</th>
-                      )}
-                      <th className="text-left p-3 font-semibold text-gray-800">GEM</th>
-                      {activeTab === "lostconfirm" && (
-                        <th className="text-left p-3 font-semibold text-gray-800">LOST REASON</th>
-                      )}
-                      <th className="text-left p-3 font-semibold text-gray-800">DATE</th>
-                      <th className="text-left p-3 font-semibold text-gray-800">UID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {isLoading ? (
-                      <tr>
-                        <td colSpan={
-                          (activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 
-                          activeTab === 'wonlost' ? 6 : 
-                          activeTab === 'qualified' ? 7 : 8
-                        } className="p-8 text-center text-gray-500">
-                          Loading leads...
-                        </td>
-                      </tr>
-                    ) : filteredLeads.length > 0 ? (
-                      filteredLeads.map((lead, index) => {
-                        const followUpDate = lead.follow_up_date ? (lead.follow_up_date.includes('T') ? lead.follow_up_date.slice(0,10) : lead.follow_up_date) : ""
-                        const overdueDays = followUpDate && followUpDate < new Date().toISOString().slice(0,10) ? Math.ceil((Date.now() - new Date(followUpDate + 'T00:00:00').getTime())/86400000) : 0
-                        
-                        // Zebra striping with alternating gray and white
+              {/* Virtualized table using react-window */}
+              <div className="overflow-x-auto rounded-2xl border border-gray-200">
+                {/* Static header */}
+                {(() => {
+                  const includeLostReason = activeTab === 'lostconfirm'
+                  // Wider STATUS and sensible widths for readability; enables horizontal scroll usage
+                  const cols = includeLostReason
+                    ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','140px','160px','72px']
+                    : ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','160px','72px']
+                  const template = cols.join(' ')
+                  return (
+                    <div
+                      className="min-w-[1800px] bg-gradient-to-r from-gray-100 to-gray-200 grid gap-2 p-3 pr-12 sticky top-0 z-10 font-semibold text-gray-800 text-sm"
+                      style={{ gridTemplateColumns: template }}
+                    >
+                  {activeTab === 'wonlost' ? (
+                    <div></div>
+                  ) : (
+                    <div>ACTION</div>
+                  )}
+                  <div>{activeTab === 'wonlost' ? 'FINAL STATUS' : 'LEAD STATUS'}</div>
+                  <div>CUSTOMER NAME</div>
+                  <div>MOBILE</div>
+                  <div>DATE</div>
+                  <div>SOURCE</div>
+                  <div>CAMPAIGN</div>
+                  <div>BRANCH</div>
+                  <div>ICROP ID</div>
+                  <div>GEM</div>
+                  {includeLostReason && <div>LOST REASON</div>}
+                  <div>UID</div>
+                  <div></div>
+                    </div>
+                  )
+                })()}
+
+                {isLoading ? (
+                  <div className="p-8 text-center text-gray-500">Loading leads...</div>
+                ) : filteredLeads.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">No leads found</div>
+                ) : (
+                <>
+                {(() => {
+                  const VirtualListOuter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
+                    <div
+                      ref={ref}
+                      {...props}
+                      className={`${props.className || ''}`}
+                      style={{ ...(props.style as any), overflowX: 'hidden', overflowY: 'auto', scrollbarGutter: 'stable both-edges', minWidth: '1800px' }}
+                    />
+                  ))
+                  VirtualListOuter.displayName = 'VirtualListOuter'
+                  return (
+                    <List
+                      height={600}
+                      itemCount={filteredLeads.length}
+                      itemSize={70}
+                      width="100%"
+                      outerElementType={VirtualListOuter}
+                    >
+                      {({ index, style }: any) => {
+                        const lead = filteredLeads[index]
                         const isEvenRow = index % 2 === 0
-                        const baseRowClass = isEvenRow ? 'bg-white' : 'bg-gray-50'
-                        const hoverClass = 'hover:bg-blue-50'
-                        
-                        // Special status highlighting (pastel tints for special cases)
-                        let specialStatusClass = ''
-                        if (overdueDays > 0) {
-                          specialStatusClass = 'bg-red-50 hover:bg-red-100' // Overdue follow-ups
-                        } else if (lead.lead_category === 'Hot') {
-                          specialStatusClass = 'bg-orange-50 hover:bg-orange-100' // High-priority leads
+                        const includeLostReason = activeTab === 'lostconfirm'
+                        const cols = includeLostReason
+                          ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','140px','160px','72px']
+                          : ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','160px','72px']
+                        const template = cols.join(' ')
+                        const getLatestLeadStatus = (l: any) => {
+                          const fields = [
+                            'sixth_call_lead_status',
+                            'fifth_call_lead_status',
+                            'fourth_call_lead_status',
+                            'third_call_lead_status',
+                            'second_call_lead_status',
+                            'lead_status'
+                          ]
+                          for (const f of fields) {
+                            const v = (l?.[f] || '').toString().trim()
+                            if (v) return v
+                          }
+                          return 'N/A'
                         }
-                        
-                        const rowColorClass = specialStatusClass || `${baseRowClass} ${hoverClass}`
-                        
+                        const getLeadStatusBadgeClass = (status: string) => {
+                          const s = (status || '').toLowerCase()
+                          if (!s) return 'bg-gray-100 text-gray-800 border-gray-300'
+                          if (s.includes('qualified')) return 'bg-purple-100 text-purple-800 border-purple-300'
+                          if (s.includes('interested')) return 'bg-green-100 text-green-800 border-green-300'
+                          if (s === 'call me back') return 'bg-blue-100 text-blue-800 border-blue-300'
+                          if (s === 'rnr' || s === 'not reachable') return 'bg-amber-100 text-amber-800 border-amber-300'
+                          if (s === 'busy' || s === 'switched off') return 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                          if (s === 'dnd' || s.includes('disconnect')) return 'bg-slate-100 text-slate-800 border-slate-300'
+                          if (s.includes('lost')) return 'bg-red-100 text-red-800 border-red-300'
+                          if (s.includes('won')) return 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          return 'bg-gray-100 text-gray-800 border-gray-300'
+                        }
                         return (
-                        <tr 
-                          key={lead.id} 
-                          className={`border-b transition-colors duration-200 ${rowColorClass}`}
-                        >
-                          <td className="p-3">
-                            <div className="flex gap-2">
-                              {activeTab === 'wonlost' ? (
+                          <div
+                            style={{ ...style, gridTemplateColumns: template }}
+                            className={`min-w-[1800px] grid gap-2 p-3 pr-12 border-b text-sm transition-colors ${isEvenRow ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50`}
+                          >
+                            {/* ACTION */}
+                            <div className="flex gap-2 items-center">
+                              {activeTab !== 'wonlost' && (
                                 <>
-                                  <Badge
-                                    variant="outline"
-                                    className={`rounded-full ${
-                                      ((lead?.final_status || '').toString().toLowerCase() === 'booked' || 
-                                       (lead?.final_status || '').toString().toLowerCase() === 'retailed' ||
-                                       (lead?.final_status || '').toString().toLowerCase() === 'won' ||
-                                       (lead?.final_status || '').toString().toLowerCase().includes('won') ||
-                                       (lead?.lead_status || '').toString().toLowerCase() === 'won')
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : (lead?.final_status || '').toString().toLowerCase() === 'lost'
-                                        ? 'bg-red-100 text-red-800'
-                                        : 'bg-gray-100 text-gray-800'
-                                    }`}
-                                  >
-                                    {(lead?.final_status || lead?.lead_status || '—')}
-                                  </Badge>
-                                </>
-                              ) : activeTab === "lostconfirm" ? (
-                                <>
-                                  <Button 
-                                    size="sm" 
-                                    className="bg-green-500 hover:bg-green-600 text-white rounded-2xl"
-                                    onClick={() => handleApproveLost(lead.uid)}
-                                  >
-                                    Approve
+                                  <Button size="sm" variant="outline" className="rounded-2xl" onClick={() => openUpdateModal(lead)}>
+                                    <Edit3 className="w-4 h-4" />
                                   </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 rounded-2xl"
-                                    onClick={() => handleRejectLost(lead.uid)}
-                                  >
-                                    Reject
-                                  </Button>
-                                </>
-                              ) : (
-                                <>
-                                  <button 
-                                    className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-300 bg-gradient-to-br from-green-50/90 to-green-100/70 text-green-800 border border-green-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
-                                    onClick={() => openUpdateModal(lead)}
-                                    aria-label={`Update lead ${lead.uid}`}
-                                  >
-                                    {/* Apple Magnus glassy effect layers */}
-                                    <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-green-300/25"></div>
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
-                                    <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
-                                    
-                                    <span className="relative z-10 flex items-center gap-2">
-                                      <div className="p-1 bg-green-100/80 rounded-xl backdrop-blur-sm">
-                                        <Edit3 className="h-3 w-3 text-green-600" />
-                                      </div>
-                                      Update
-                                    </span>
-                                  </button>
-                                  {/* Only show History button for leads that are not fresh/untouched */}
-                                  {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                                    <button 
-                                      className="relative overflow-hidden inline-flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-medium transition-all duration-200 min-h-[40px] transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300 bg-gradient-to-br from-blue-50/90 to-blue-100/70 text-blue-800 border border-blue-200/30 shadow-lg backdrop-blur-[6px] hover:shadow-xl"
-                                      onClick={() => {
-                                        setSelectedLead(lead)
-                                        setIsRemarksSyncOpen(true)
-                                      }}
-                                      aria-label={`View history for lead ${lead.uid}`}
-                                    >
-                                      {/* Apple Magnus glassy effect layers */}
-                                      <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-blue-300/25"></div>
-                                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent"></div>
-                                      <div className="absolute inset-0 backdrop-filter backdrop-blur-[6px]"></div>
-                                      
-                                      <span className="relative z-10 flex items-center gap-2">
-                                        <div className="p-1 bg-blue-100/80 rounded-xl backdrop-blur-sm">
-                                          <Clock className="h-3 w-3 text-blue-600" />
-                                        </div>
-                                        History
-                                      </span>
-                                    </button>
+                                  {!(activeTab === 'fresh' && activeStatus === 'Fresh') && (
+                                    <button className="px-2 py-1 bg-blue-100 text-blue-800 rounded-xl text-xs hover:shadow-lg" onClick={() => { setSelectedLead(lead); setIsRemarksSyncOpen(true) }}>History</button>
                                   )}
+                                  {activeTab === 'followup' && lead.follow_up_date && (() => {
+                                    try {
+                                      const raw = lead.follow_up_date
+                                      const d = raw.includes('T') ? raw.slice(0,10) : raw
+                                      const todayIso = new Date().toISOString().slice(0,10)
+                                      if (d < todayIso) {
+                                        const diffMs = new Date(todayIso + 'T00:00:00').getTime() - new Date(d + 'T00:00:00').getTime()
+                                        const days = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)))
+                                        return (
+                                          <Badge className="bg-red-100 text-red-800 border border-red-300 text-[10px]">Overdue: {days}d</Badge>
+                                        )
+                                      }
+                                    } catch {}
+                                  })()}
                                 </>
                               )}
                             </div>
-                          </td>
-                          {!(activeTab === "fresh" && activeStatus === "Fresh") && activeTab !== 'wonlost' && activeTab !== 'qualified' && (
-                            <td className="p-3">
-                              {/* Show Qualified + latest follow-up status if available */}
-                              {(() => {
-                                const latestFollowUpStatus = lead.sixth_call_lead_status || lead.fifth_call_lead_status || lead.fourth_call_lead_status || lead.third_call_lead_status || lead.second_call_lead_status || ''
-                                const primary = (lead.lead_status || '').toString()
-                                const label = primary === 'Qualified' && latestFollowUpStatus ? `Qualified + ${latestFollowUpStatus}` : primary
-                                return (
-                                  <Badge 
-                                    variant="outline"
-                                    className={`rounded-full ${
-                                      (primary === "Fresh" ? "bg-blue-100 text-blue-800" :
-                                       primary === "Called" ? "bg-green-100 text-green-800" :
-                                       primary === "Follow Up" ? "bg-yellow-100 text-yellow-800" :
-                                       primary === "Qualified" ? "bg-purple-100 text-purple-800" :
-                                       primary === "Won" ? "bg-green-100 text-green-800" :
-                                       primary === "Lost" ? "bg-red-100 text-red-800" :
-                                       "bg-gray-100 text-gray-800")
-                                    }`}
-                                  >
-                                    {label}
-                                  </Badge>
-                                )
-                              })()}
-                              {activeTab === "followup" && overdueDays > 0 && (
-                                <Badge variant="secondary" className="ml-2 bg-red-600 text-white rounded-full">Overdue: {overdueDays} {overdueDays === 1 ? 'day' : 'days'}</Badge>
-                              )}
-                            </td>
-                          )}
-                          <td className="p-3 font-medium text-gray-900">{lead.customer_name}</td>
-                          <td className="p-3 text-gray-800">{lead.customer_mobile_number}</td>
-                          <td className="p-3 text-gray-800">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span>{lead.source}</span>
-                              {lead.sub_source && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                  {lead.sub_source}
-                                </span>
+                            {/* LEAD STATUS */}
+                            <div className="flex items-center gap-2">
+                              {activeTab === 'wonlost' ? (
+                                <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
+                              ) : (
+                                (() => {
+                                  const latest = getLatestLeadStatus(lead)
+                                  const base = (lead?.lead_status || '').toString().trim()
+                                  const isQualified = base === 'Qualified'
+                                  const combined = isQualified && latest && latest.toLowerCase() !== 'qualified'
+                                    ? `Qualified + ${latest}`
+                                    : (latest || 'N/A')
+                                  return (
+                                    <>
+                                      <Badge variant="outline" className={`rounded-full text-xs border ${getLeadStatusBadgeClass(combined.toLowerCase())}`}>
+                                        {combined}
+                                      </Badge>
+                                      {activeTab === 'followup' && lead.follow_up_date && (() => {
+                                        try {
+                                          const raw = lead.follow_up_date
+                                          const d = raw.includes('T') ? raw.slice(0,10) : raw
+                                          const todayIso = new Date().toISOString().slice(0,10)
+                                          if (d < todayIso) {
+                                            const diffMs = new Date(todayIso + 'T00:00:00').getTime() - new Date(d + 'T00:00:00').getTime()
+                                            const days = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)))
+                                            return (
+                                              <Badge className="bg-red-100 text-red-800 border border-red-300 text-[10px]">Overdue: {days}d</Badge>
+                                            )
+                                          }
+                                        } catch {}
+                                      })()}
+                                    </>
+                                  )
+                                })()
                               )}
                             </div>
-                          </td>
-                          <td className="p-3">
-                            {lead.campaign ? (
-                              <span className="text-gray-800">{lead.campaign}</span>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full bg-gray-100 text-gray-600">
-                                No Campaign
-                              </Badge>
+                            <div className="font-medium text-gray-900 truncate">{lead.customer_name}</div>
+                            <div className="text-gray-800">{lead.customer_mobile_number}</div>
+                            <div className="text-xs">
+                              {activeTab === 'followup' && lead.follow_up_date ? (
+                                <span>{(lead.follow_up_date.includes('T') ? lead.follow_up_date.slice(0,10) : lead.follow_up_date)}</span>
+                              ) : (
+                                <span>{lead.date}</span>
+                              )}
+                            </div>
+                            <div className="truncate">{lead.source}</div>
+                            <div className="truncate">{lead.campaign || 'N/A'}</div>
+                            <div><Badge variant="outline" className="text-xs truncate">{lead.branch || 'N/A'}</Badge></div>
+                            <div className="truncate">{lead.icrop_id || 'Pending'}</div>
+                            <div className="truncate">{lead.ps_name || 'Unassigned'}</div>
+                            {includeLostReason && (
+                              <div className="truncate text-xs">{lead.lost_reason || 'N/A'}</div>
                             )}
-                          </td>
-                          <td className="p-3">
-                            <Badge variant="outline" className={`rounded-full ${lead.branch ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}>
-                              {lead.branch || 'Unassigned'}
-                            </Badge>
-                          </td>
-                          {!(activeTab === "fresh" && activeStatus === "Fresh") && (
-                            <td className="p-3">
-                              <Badge variant="outline" className={`rounded-full ${lead.icrop_id ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}`}>
-                                {lead.icrop_id || 'Pending'}
-                              </Badge>
-                            </td>
-                          )}
-                          <td className="p-3">
-                            <Badge variant="outline" className={`rounded-full ${lead.ps_name ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
-                              {lead.ps_name || 'Unassigned'}
-                            </Badge>
-                          </td>
-                          {activeTab === "lostconfirm" && (
-                            <td className="p-3">
-                              <div className="text-sm text-gray-800 bg-red-50 rounded-2xl p-2 border border-red-200">
-                                {lead.lost_reason || 'No reason provided'}
-                              </div>
-                            </td>
-                          )}
-                          <td className="p-3 text-sm text-gray-800">{lead.date}</td>
-                          <td className="p-3 text-sm font-mono text-gray-800">{lead.uid}</td>
-                        </tr>
+                            <div className="text-xs font-mono">{lead.uid}</div>
+                            <div></div>
+                          </div>
                         )
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={
-                          (activeTab === "fresh" && activeStatus === "Fresh") ? 7 : 
-                          activeTab === 'wonlost' ? 6 : 
-                          activeTab === 'qualified' ? 7 : 8
-                        } className="p-8 text-center text-gray-500">
-                          No leads found for the selected criteria
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                      }}
+                    </List>
+                  )
+                })() as any}
+                </>
+                )}
               </div>
             </CardContent>
           </Card>

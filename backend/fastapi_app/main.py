@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -144,6 +145,22 @@ from .background_tasks import (create_lead_async, update_lead_async, bulk_update
 import logging
 logger = logging.getLogger(__name__)
 
+# Reduce noisy logs/prints in production
+try:
+    import os as _os
+    if (_os.environ.get('ENV', '').lower() == 'production' or 
+        _os.environ.get('PYTHON_ENV', '').lower() == 'production'):
+        # Set root logger to WARNING to suppress info/debug
+        logging.getLogger().setLevel(logging.WARNING)
+        # Disable bare print statements to avoid I/O overhead
+        import builtins as _builtins  # type: ignore
+        def _no_print(*args, **kwargs):
+            return None
+        _builtins.print = _no_print  # type: ignore
+except Exception:
+    # Never fail app startup due to logging suppression
+    pass
+
 # Basic cache stats for visibility
 cre_cache_stats = {"hits": 0, "misses": 0}
 
@@ -168,6 +185,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Enable gzip compression for responses >1KB
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Supabase client (robust env loading)
 SUPABASE_URL = config('SUPABASE_URL', default=os.environ.get('SUPABASE_URL', 'https://raticwohyvxcyoqzqnwj.supabase.co'))
@@ -398,6 +418,22 @@ async def health_check():
         "message": "EPIC CRM 2.0 is running",
         "optimized_endpoints": "available"
     }
+
+@app.get("/health/redis")
+async def health_check_redis():
+    """Check Redis connectivity and basic cache status"""
+    from .redis_cache import cache as redis_cache
+    status_resp = {"redis": "down"}
+    try:
+        client = getattr(redis_cache, 'redis_client', None)
+        if client:
+            client.ping()
+            status_resp["redis"] = "up"
+        else:
+            status_resp["redis"] = "disabled"
+    except Exception as e:
+        status_resp["error"] = str(e)
+    return status_resp
 
 @app.get("/api/test/tradein")
 async def test_tradein_table():
