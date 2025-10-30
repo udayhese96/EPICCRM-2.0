@@ -73,6 +73,13 @@ interface Lead {
   follow_up_date?: string
   ps_assigned_at?: string
   icrop_id?: string
+  ps_name?: string
+  ps_branch?: string
+  ps_id?: string
+  make?: string
+  model?: string
+  variant?: string
+  sub_source?: string
 }
 
 interface TeamPerformanceData {
@@ -117,8 +124,9 @@ interface SourcePerformanceData {
   untouched: number
   called: number
   waiting_for_approval: number
-      won: number
+  won: number
   lost: number
+  lost_requested?: number
   total_assigned: number
   is_sub_source?: boolean
 }
@@ -794,6 +802,14 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
+      // Debug: Check if PS data is present
+      if (data.leads && data.leads.length > 0) {
+        console.log('[Frontend] First lead PS data:', {
+          ps_id: data.leads[0].ps_id,
+          ps_name: data.leads[0].ps_name,
+          ps_branch: data.leads[0].ps_branch
+        })
+      }
       return data
     }
     return { leads: [], total: 0 }
@@ -4171,6 +4187,9 @@ export default function TeamLeaderDashboard() {
                               <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
                                 Lost
                               </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[130px]">
+                                Lost Requested
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -4223,6 +4242,9 @@ export default function TeamLeaderDashboard() {
                                       <td className="px-4 py-3 text-center text-sm text-red-600 font-medium">
                                         {item.lost.toLocaleString()}
                                       </td>
+                                      <td className="px-4 py-3 text-center text-sm text-orange-600 font-medium">
+                                        {(item.lost_requested || 0).toLocaleString()}
+                                      </td>
                                     </tr>
                                   ))}
                                 {/* Summary Row */}
@@ -4243,6 +4265,9 @@ export default function TeamLeaderDashboard() {
                                     </td>
                                     <td className="px-4 py-3 text-center text-sm text-blue-900">
                                       {sourcePerformanceData.reduce((sum, item) => sum + item.lost, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + (item.lost_requested || 0), 0).toLocaleString()}
                                     </td>
                                   </tr>
                                 )}

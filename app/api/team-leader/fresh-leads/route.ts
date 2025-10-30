@@ -110,6 +110,16 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
+    
+    // Debug: Log first lead to verify PS data
+    if (data.leads && data.leads.length > 0) {
+      console.log('[Fresh Leads API] First lead data:', {
+        lead_uid: data.leads[0].lead_uid,
+        ps_id: data.leads[0].ps_id,
+        ps_name: data.leads[0].ps_name,
+        ps_branch: data.leads[0].ps_branch
+      })
+    }
 
     return NextResponse.json(data, {
       headers: {

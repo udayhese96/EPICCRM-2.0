@@ -3245,8 +3245,10 @@ async def get_fresh_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -3423,8 +3425,10 @@ async def get_todays_followup(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -3600,8 +3604,10 @@ async def get_open_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -3778,8 +3784,10 @@ async def get_waiting_approval_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -3956,8 +3964,10 @@ async def get_booked_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -4134,8 +4144,10 @@ async def get_retailed_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -4312,8 +4324,10 @@ async def get_lost_leads(
         enriched_leads = []
         for lead in leads:
             ps_id = lead.get('ps_id')
-            ps_name = ps_member_names.get(ps_id, 'Unknown')
-            ps_branch = ps_member_branches.get(ps_id, 'Unknown')
+            # Use ps_name from lookup map if available, otherwise fall back to the lead's ps_name
+            ps_name = ps_member_names.get(ps_id, lead.get('ps_name', 'Unknown'))
+            # Use ps_branch from lookup map if available, otherwise fall back to the lead's ps_branch
+            ps_branch = ps_member_branches.get(ps_id, lead.get('ps_branch', 'Unknown'))
             
             # Get additional details from qualified_leads lookup map (already fetched in bulk above)
             qualified_data = qualified_data_map.get(lead.get('lead_uid'), {})
@@ -4472,13 +4486,13 @@ async def get_analytics_kpi(
         # Deduplicate by lead_uid
         won_leads = len(set([lead.get('lead_uid') for lead in won_response.data or [] if lead.get('lead_uid')]))
         
-        # Lost Leads: COUNT(*) where final_status='Lost' filtered by lost_timestamp
+        # Lost Leads: COUNT(*) where final_status='Lost' filtered by updated_at (standardized)
         # DEDUPLICATION: Count DISTINCT lead_uid to match the lost tab logic
         lost_query = supabase.table('ps_followup_master').select('lead_uid').in_('ps_id', ps_ids).eq('final_status', 'Lost')
         if start_date:
-            lost_query = lost_query.gte('lost_timestamp', start_date)
+            lost_query = lost_query.gte('updated_at', start_date)
         if end_date:
-            lost_query = lost_query.lte('lost_timestamp', end_date)
+            lost_query = lost_query.lte('updated_at', end_date)
         lost_response = lost_query.execute()
         # Deduplicate by lead_uid
         lost_leads = len(set([lead.get('lead_uid') for lead in lost_response.data or [] if lead.get('lead_uid')]))
@@ -4525,18 +4539,18 @@ async def get_source_performance(
             return {"sources": []}
         
         # Get all leads for the PS team with source information
-        # This matches your SQL query logic exactly
+        # Use updated_at for date filtering across metrics (standardized)
         base_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids)
         
         # Apply PS name filter if provided (for specific PS filtering)
         if ps_name:
             base_query = base_query.eq('ps_name', ps_name)
         
-        # Apply date range filter for ps_assigned_at
+        # Apply date range filter using updated_at (standardized)
         if start_date:
-            base_query = base_query.gte('ps_assigned_at', start_date)
+            base_query = base_query.gte('updated_at', start_date)
         if end_date:
-            base_query = base_query.lte('ps_assigned_at', end_date)
+            base_query = base_query.lte('updated_at', end_date)
         
         response = base_query.execute()
         all_leads = response.data or []
@@ -4568,7 +4582,8 @@ async def get_source_performance(
                     'untouched': set(),
                     'waiting_for_approval': set(),
                     'won': set(),
-                    'lost': set()
+                    'lost': set(),
+                    'lost_requested': set()
                 }
             
             group = source_groups[source_key]
@@ -4583,10 +4598,12 @@ async def get_source_performance(
                 group['waiting_for_approval'].add(lead_uid)
             elif final_status == 'Won':
                 group['won'].add(lead_uid)
-            elif final_status in ['Lost', 'Lost Requested']:  # Handle both Lost statuses
+            elif final_status == 'Lost':
                 group['lost'].add(lead_uid)
+            elif final_status == 'Lost Requested':
+                group['lost_requested'].add(lead_uid)
                 if source.lower() == 'google':
-                    print(f"[Source Performance] Google lead {lead_uid} categorized as LOST (status: {final_status})")
+                    print(f"[Source Performance] Google lead {lead_uid} categorized as LOST FAMILY (status: {final_status})")
         
         print(f"[Source Performance] Grouped into {len(source_groups)} source groups")
         
@@ -4599,6 +4616,7 @@ async def get_source_performance(
             waiting_for_approval = len(group['waiting_for_approval'])  # COUNT(DISTINCT CASE WHEN final_status = 'Waiting for Approval' THEN lead_uid END)
             won = len(group['won'])  # COUNT(DISTINCT CASE WHEN final_status = 'Won' THEN lead_uid END)
             lost = len(group['lost'])  # COUNT(DISTINCT CASE WHEN final_status = 'Lost' THEN lead_uid END)
+            lost_requested = len(group['lost_requested'])  # Separate metric
             called = total_leads - untouched  # Called = Total - Untouched
             
             sources.append({
@@ -4608,6 +4626,7 @@ async def get_source_performance(
                 'waiting_for_approval': waiting_for_approval,
                 'won': won,
                 'lost': lost,
+                'lost_requested': lost_requested,
                 'called': called
             })
         
