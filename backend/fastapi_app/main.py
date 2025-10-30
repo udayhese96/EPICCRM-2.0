@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, File, UploadFile, Form, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
@@ -1282,6 +1282,98 @@ async def get_leads(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/qualified-leads")
+async def get_qualified_leads(
+    source: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=5000),
+    cursor_created_at: Optional[str] = Query(None, description="ISO timestamp of last item from previous page"),
+    cursor_id: Optional[int] = Query(None, description="ID of last item from previous page"),
+    current_user=Depends(get_current_user)
+):
+    """Keyset-paginated qualified leads with role-aware caching.
+
+    Always ordered by created_at DESC, id DESC. Uses cursor (created_at,id).
+    """
+    try:
+        # Role-based max limits
+        max_limit = 10000 if getattr(current_user, 'role', None) in ['admin', 'branch_head'] else (
+            2000 if getattr(current_user, 'role', None) in ['cre', 'ps'] else 5000
+        )
+        effective_limit = min(limit, max_limit)
+
+        # Cache key params (role-aware + cursor-aware)
+        cache_params = {
+            'route': 'qualified_leads',
+            'role': getattr(current_user, 'role', None),
+            'username': getattr(current_user, 'username', None),
+            'branch_id': getattr(current_user, 'branch_id', None),
+            'source': source or '-',
+            'limit': effective_limit,
+            'cursor_created_at': cursor_created_at or '-',
+            'cursor_id': cursor_id if cursor_id is not None else '-'
+        }
+
+        cached = get_cached_leads(cache_params)
+        if cached is not None:
+            return cached
+
+        # Base select (cover only needed columns)
+        select_cols = (
+            'id,lead_uid,customer_name,customer_mobile_number,customer_location,source,sub_source,'
+            'cre_name,lead_category,model_interested,first_remark,variant,buying_plan,'
+            'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
+            'final_status,booking_status,retailed_status,created_at,updated_at'
+        )
+
+        base = supabase.table('qualified_leads').select(select_cols)
+
+        # Filters
+        if source:
+            if source.lower() == 'walk-in':
+                base = base.in_('source', ['Walk-in','Digital','Google','Meta','WhatsApp','Car Dekho','Car Wale','OEM','Tele Out','Referral','Other'])
+            else:
+                base = base.eq('source', source)
+
+        # Keyset filter (created_at DESC, id DESC)
+        if cursor_created_at and cursor_id is not None:
+            base = base.or_(
+                f"and(created_at.lt.{cursor_created_at}),and(created_at.eq.{cursor_created_at},id.lt.{cursor_id})"
+            )
+
+        # Order + limit
+        data_resp = (
+            base
+                .order('created_at', desc=True)
+                .order('id', desc=True)
+                .limit(effective_limit)
+                .execute()
+        )
+        data = data_resp.data or []
+
+        # Compute next cursor
+        next_cursor = None
+        if len(data) == effective_limit:
+            last = data[-1]
+            next_cursor = {
+                'cursor_created_at': last.get('created_at'),
+                'cursor_id': last.get('id')
+            }
+
+        result = {
+            'leads': data,
+            'pagination': {
+                'limit': effective_limit,
+                'next_cursor': next_cursor,
+                'has_more': next_cursor is not None
+            }
+        }
+
+        cache_leads(cache_params, result, ttl=120)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/leads")
 async def create_lead(lead_data: LeadCreate, current_user=Depends(can_manage_leads)):
     """Create a new lead - ULTRA FAST with background processing"""
@@ -1965,9 +2057,11 @@ async def update_lead(lead_id: str, lead_data: LeadUpdate, current_user=None):
 
 # Public endpoint: Update lead_master by UID (no auth) - ULTRA FAST
 @app.put("/api/public/lead-master/{uid}")
-async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
+async def update_public_lead_master(uid: str, lead_data: LeadUpdate, background_tasks: BackgroundTasks):
     """Update lead master - ULTRA FAST for CRE dashboard with background processing"""
     try:
+        import time
+        start_time = time.time()
         # 🔍 Enhanced Debug Logging
         print(f"🔄 [FastAPI] Received request for lead: {uid}")
         print(f"🔄 [FastAPI] Lead data received: {lead_data.model_dump()}")
@@ -1979,19 +2073,21 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
         print(f"  - first_remark_type: {type(lead_data.first_remark)}")
         print(f"  - first_remark_truthy: {bool(lead_data.first_remark)}")
         
-        # Quick validation - check if lead exists and get first-call state
+        # Single SELECT: fetch all fields we need in one round trip
         existing = (
             supabase
                 .table('lead_master')
-                .select('uid, first_remark, first_call_date')
+                .select('uid, first_remark, first_call_date, second_remark, third_remark, fourth_remark, fifth_remark, sixth_remark, cre_name')
                 .eq('uid', uid)
                 .limit(1)
                 .execute()
         )
         if not existing.data:
             raise HTTPException(status_code=404, detail="Lead not found")
-        existing_first_remark = (existing.data[0].get('first_remark') or '').strip()
-        existing_first_call_date = (existing.data[0].get('first_call_date') or '').strip()
+        lead_info = existing.data[0]
+        existing_first_remark = (lead_info.get('first_remark') or '').strip()
+        existing_first_call_date = (lead_info.get('first_call_date') or '').strip()
+        current_cre_name = (lead_info.get('cre_name') or '').strip()
 
         # Build update data
         update_data = {"updated_at": now_ist_iso()}
@@ -2097,33 +2193,18 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
         followup_note_for_worker = None
         if (lead_data.followup_note or "").strip():
             followup_note_for_worker = (lead_data.followup_note or "").strip()
-            print(f"🔍 [FastAPI] Detected followup_note for direct processing: '{followup_note_for_worker}'")
             
             # Process followup_note directly and add to update_data
             note = followup_note_for_worker.strip()
             if note:
-                # Get current lead data to determine which call we're on
-                current_lead = supabase.table('lead_master').select('*').eq('uid', uid).execute()
-                if current_lead.data:
-                    lead_info = current_lead.data[0]
-                    
-                    # Call progression logic:
-                    # Qualification = first_remark (qualifying call - PROTECTED, cannot be overwritten)
-                    # F1 = second_remark (first follow-up)
-                    # F2 = third_remark (second follow-up)
-                    # F3 = fourth_remark (third follow-up)
-                    # F4 = fifth_remark (fourth follow-up)
-                    # F5 = sixth_remark (fifth follow-up)
-                    
+                # Use lead_info we already fetched
                     call_sequence = [
-                        ('second_remark', 'second_call_date'),       # F1 - First follow-up
-                        ('third_remark', 'third_call_date'),         # F2 - Second follow-up
-                        ('fourth_remark', 'fourth_call_date'),       # F3 - Third follow-up
-                        ('fifth_remark', 'fifth_call_date'),         # F4 - Fourth follow-up
-                        ('sixth_remark', 'sixth_call_date')          # F5 - Fifth follow-up
-                    ]
-                    
-                    # Find the next empty call slot (start from F1, skip qualification as it's the first call)
+                    ('second_remark', 'second_call_date'),
+                    ('third_remark', 'third_call_date'),
+                    ('fourth_remark', 'fourth_call_date'),
+                    ('fifth_remark', 'fifth_call_date'),
+                    ('sixth_remark', 'sixth_call_date')
+                ]
                     next_call_remark = None
                     next_call_date = None
                     for remark_field, date_field in call_sequence:
@@ -2131,12 +2212,9 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                             next_call_remark = remark_field
                             next_call_date = date_field
                             break
-                    
                     if next_call_remark:
-                        # Set the remark and date for this call
                         update_data[next_call_remark] = note
                         update_data[next_call_date] = now_ist_iso()
-                        # Map column names to call numbers for logging
                         call_mapping = {
                             'second_remark': 'F1',
                             'third_remark': 'F2', 
@@ -2145,17 +2223,14 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                             'sixth_remark': 'F5'
                         }
                         call_number = call_mapping.get(next_call_remark, next_call_remark)
-                        print(f"🔍 [FastAPI] Set {next_call_remark} = '{note}' (Follow-up {call_number})")
                     else:
-                        # All follow-up slots filled, append to last remark
                         update_data["sixth_remark"] = f"{lead_info.get('sixth_remark', '')} | {note}".strip()
                         update_data["sixth_call_date"] = now_ist_iso()
-                        print(f"🔍 [FastAPI] All follow-up slots full, appended to sixth_remark")
+                    pass
         
         # Handle first_remark (for qualification)
         if lead_data.first_remark is not None:
             update_data["first_remark"] = lead_data.first_remark
-            print(f"🔍 [FastAPI] Added first_remark to update_data: '{lead_data.first_remark}'")
 
         # Prepare user info for background processing
         user_info = {
@@ -2165,36 +2240,33 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
         }
 
         # ALWAYS update lead_master directly for immediate UI sync
-        print(f"🔄 [FastAPI] Updating lead_master directly for immediate sync: {uid}")
+        
         try:
-            # Direct database update to lead_master for all changes
-            response = supabase.table('lead_master').update(update_data).eq('uid', uid).execute()
+            # Direct database update with timeout protection
+            import asyncio
+            response = await asyncio.wait_for(
+                asyncio.to_thread(lambda: supabase.table('lead_master').update(update_data).eq('uid', uid).execute()),
+                timeout=20.0
+            )
             
             if response.data:
-                print(f"✅ [FastAPI] Lead_master updated successfully: {uid}")
-                # Invalidate CRE cache for current owner
+                
+                # Invalidate CRE cache for current owner (use already-fetched value)
                 try:
-                    current = supabase.table('lead_master').select('cre_name').eq('uid', uid).limit(1).execute()
-                    cre_name = (current.data[0].get('cre_name') if current.data else None)
-                    if cre_name:
-                        await invalidate_cre_cache(cre_name)
+                    if current_cre_name:
+                        await invalidate_cre_cache(current_cre_name)
                 except Exception:
                     pass
-                result = {
-                    'success': True,
-                    'lead_id': uid,
-                    'message': 'Lead updated successfully',
-                    'status': 'completed'
-                }
-                
-                # Trigger background processing for qualified_leads and tradein_master sync
+                # Schedule background sync (non-blocking)
                 try:
-                    print(f"🔄 [FastAPI] Triggering background sync for qualified_leads and tradein_master: {uid}")
-                    # No need to pass followup_note since it's already processed directly above
-                    worker_result = update_lead_async(uid, {}, user_info)
-                    print(f"🔄 [FastAPI] Background worker result: {worker_result}")
-                except Exception as bg_error:
-                    print(f"⚠️ [FastAPI] Background sync failed (lead_master still updated): {bg_error}")
+                    background_tasks.add_task(update_lead_async, uid, {}, {
+                        'username': 'public_user', 'role': 'public', 'user_id': 'public'
+                    })
+                except Exception:
+                    pass
+                elapsed_ms = (time.time() - start_time) * 1000
+                
+                result = {'success': True, 'lead_id': uid, 'message': 'Lead updated successfully'}
             else:
                 print(f"❌ [FastAPI] Lead_master update failed: {uid}")
                 result = {
@@ -2203,26 +2275,21 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
                     'message': 'Failed to update lead',
                     'status': 'error'
                 }
+        except asyncio.TimeoutError:
+            
+            result = {
+                'success': False,
+                'lead_id': uid,
+                'message': 'Database update timed out after 20s',
+                'status': 'timeout'
+                }
         except Exception as e:
-            print(f"❌ [FastAPI] Lead_master update error: {e}")
+            
             result = {
                 'success': False,
                 'lead_id': uid,
                 'message': f'Database update failed: {str(e)}',
                 'status': 'error'
-            }
-        
-        # Add trade-in data if needed
-        if (lead_data.trade_in or "").lower() == "yes":
-            result['trade_in_data'] = {
-                "lead_uid": uid,
-                "trade_in_make": lead_data.trade_in_make,
-                "trade_in_model": lead_data.trade_in_model,
-                "trade_in_year": lead_data.trade_in_year,
-                "trade_in_km": lead_data.trade_in_km,
-                "trade_in_ownership": lead_data.trade_in_ownership,
-                "created_at": now_ist_iso(),
-                "updated_at": now_ist_iso()
             }
 
         return result
@@ -2230,7 +2297,7 @@ async def update_public_lead_master(uid: str, lead_data: LeadUpdate):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[public.update] exception: {e}")
+        
         raise HTTPException(status_code=500, detail=str(e))
 
 class CREUserCreate(BaseModel):
@@ -4827,7 +4894,6 @@ async def debug_cre_call_history():
 @app.get("/api/public/cre-assigned/{username}")
 async def get_public_cre_assigned(username: str, name: Optional[str] = None, _t: Optional[str] = None):
     try:
-        print(f"Fetching leads for username: {username}, name: {name}")
 
         # Prefer full name if provided; otherwise use username
         import json
@@ -4837,7 +4903,7 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None, _t:
         
         if not search_term:
             return []
-
+        
         # Redis caching: key = "cre_leads:{cre_name_lowercase}", TTL = 300s
         try:
             from .redis_cache import cache  # local import to avoid circulars at module load
@@ -4857,14 +4923,8 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None, _t:
         # Return cached data unless explicitly bypassed with _t parameter
         if cached is not None and _t is None:
             cre_cache_stats["hits"] += 1
-            try:
-                total = cre_cache_stats['hits'] + cre_cache_stats['misses']
-                print(f"Cache HIT for {normalized_term} | Rate: {cre_cache_stats['hits']/total*100:.1f}%")
-            except Exception:
-                pass
             return cached
-        else:
-            cre_cache_stats["misses"] += 1
+        cre_cache_stats["misses"] += 1
         
         # Optimized query: select only required columns, case-insensitive match, limit 2000
         select_cols = (
@@ -4908,19 +4968,18 @@ async def get_public_cre_assigned(username: str, name: Optional[str] = None, _t:
                 del lead['trade_in_master']
             elif 'trade_in_master' in lead:
                 del lead['trade_in_master']
-
+        
         # Store in Redis cache for 5 minutes
         try:
             if cache and getattr(cache, 'redis_client', None):
                 cache.redis_client.setex(cache_key, 300, json.dumps(found_leads, default=json_serial))
         except Exception as e:
-            print(f"Redis set error for {cache_key}: {e}")
+            logger.warning(f"Redis set error for {cache_key}: {e}")
         
-        print(f"Found {len(found_leads)} leads for CRE (cached under {cache_key})")
         return found_leads
     except Exception as e:
-        # Minimal logging to server stdout for debugging 500s
-        print(f"Error in get_public_cre_assigned: {e}")
+        # Minimal logging
+        logger.error(f"Error in get_public_cre_assigned: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Alternative endpoint with query parameters
