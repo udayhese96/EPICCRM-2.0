@@ -608,8 +608,8 @@ export default function CREDashboard() {
       const parsed = session ? JSON.parse(session) : null
       const username = parsed?.username || ''
       const fullName = parsed?.full_name || parsed?.name || ''
-      // Use fullName for API call since database stores cre_name with proper case
-      const qs = new URLSearchParams({ username: fullName || username })
+      // IMPORTANT: Path expects username; pass full name separately for backend matching
+      const qs = new URLSearchParams({ username })
       if (fullName) qs.append('name', fullName)
       
       // NEW: Add tab filter for backend filtering (massive performance boost!)
