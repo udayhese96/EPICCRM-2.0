@@ -24,7 +24,7 @@ interface User {
 interface AddLeadModalProps {
   isOpen: boolean
   onClose: () => void
-  onAdd: (leadData: any) => void
+  onAdd: (leadData: any) => Promise<void>
   user: User | null
 }
 
@@ -188,8 +188,25 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || parsed?.token
 
-      console.log('CRE Lead - Sending data:', leadData)
-      console.log('CRE Lead - Token:', token ? 'Present' : 'Missing')
+      console.log('🚀 CRE Lead - Sending data:', leadData)
+      console.log('🚀 CRE Lead - Token:', token ? 'Present' : 'Missing')
+
+      // Extract CRE username robustly
+      let creUsername: string | null = null
+      if (parsed?.username) {
+        creUsername = parsed.username
+        console.log('✅ Username found in parsed.username:', creUsername)
+      } else if (parsed?.user?.username) {
+        creUsername = parsed.user.username
+        console.log('✅ Username found in parsed.user.username:', creUsername)
+      } else if (user?.username) {
+        creUsername = user.username
+        console.log('✅ Username found in user prop:', creUsername)
+      } else {
+        console.warn('⚠️ WARNING: No CRE username found in session or user prop')
+        console.log('📋 Session data available:', Object.keys(parsed || {}))
+        console.log('📋 User prop available:', user ? Object.keys(user) : 'null')
+      }
 
       const response = await fetch('/api/cre/leads', {
         method: 'POST',
@@ -201,7 +218,9 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
       })
 
       if (response.ok) {
-        onAdd(leadData)
+        console.log('✅ Lead created successfully')
+        // Await parent refresh to complete before closing for smooth UX
+        await onAdd(leadData)
         onClose()
         alert("Lead added successfully!")
       } else {
