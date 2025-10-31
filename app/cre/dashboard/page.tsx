@@ -29,8 +29,8 @@ import {
   Globe
 } from "lucide-react"
 import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react"
-import dynamic from 'next/dynamic'
-const List = dynamic(() => import('react-window').then(m => (m as any).FixedSizeList as any), { ssr: false }) as any
+import NextDynamic from 'next/dynamic'
+const List = NextDynamic(() => import('react-window').then(m => (m as any).FixedSizeList as any), { ssr: false }) as any
 import { createClient } from "@/lib/supabase/client"
 import { LeadUpdateModal } from "./components/lead-update-modal"
 import { AddLeadModal } from "./components/add-lead-modal"
@@ -148,6 +148,7 @@ interface Lead {
 
 export default function CREDashboard() {
   const [user, setUser] = useState<User | null>(null)
+  const usernameRef = useRef<string>("")
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
@@ -176,6 +177,7 @@ export default function CREDashboard() {
   // Debounced refresh to coalesce multiple triggers
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastRefreshAtRef = useRef<number>(0)
+  const isInitialized = useRef<boolean>(false)
 
   const requestRefresh = (options?: { immediate?: boolean, force?: boolean }) => {
     const now = Date.now()
@@ -205,9 +207,20 @@ export default function CREDashboard() {
   }
 
   useEffect(() => {
-    const supabaseUser = localStorage.getItem("supabase_user")
+    if (isInitialized.current) return
+    isInitialized.current = true
+    console.log('🚀 Dashboard initializing...')
+
+    const supabaseUser = localStorage.getItem("supabase_user") || localStorage.getItem('user')
     if (supabaseUser) {
-      setUser(JSON.parse(supabaseUser))
+      try {
+        const u = JSON.parse(supabaseUser)
+        setUser(u)
+        usernameRef.current = u?.username || ""
+        console.log('✅ User loaded:', usernameRef.current)
+      } catch (e) {
+        console.error('Failed to parse user from localStorage:', e)
+      }
     }
     fetchAssignedLeads()
     fetchLostRequests()
@@ -236,6 +249,32 @@ export default function CREDashboard() {
       }, 1500)
     }
     
+    // Listen for success-only lead insert events and refresh for this CRE
+    const handleLeadInsertedSuccess = async (event: any) => {
+      const { leadUid, creUsername } = event?.detail || {}
+      console.log('📡 Dashboard received: lead-inserted-success event')
+      console.log('   - Lead UID:', leadUid)
+      console.log('   - CRE Username from event:', creUsername)
+      console.log('   - Current CRE username:', usernameRef.current)
+      if (creUsername !== usernameRef.current) {
+        console.log(`⏭️  Event for different CRE (${creUsername}), skipping refresh`)
+        return
+      }
+      console.log(`✅ Event is for THIS CRE (${creUsername})! Refreshing...`)
+      setIsRefreshing(true)
+      try {
+        await fetchAssignedLeads(false, true)
+        await fetchLostRequests()
+        console.log('✅ Dashboard refreshed successfully')
+      } catch (error) {
+        console.error('❌ Failed to refresh after lead insertion:', error)
+      } finally {
+        setTimeout(() => setIsRefreshing(false), 500)
+      }
+    }
+    window.addEventListener('lead-inserted-success', handleLeadInsertedSuccess as any)
+    console.log('✅ Event listener registered for: lead-inserted-success')
+
     // Listen for CRE-specific lead status changes
     const handleLeadStatusChange = async () => {
       if (process.env.NODE_ENV === 'development') {
@@ -255,7 +294,9 @@ export default function CREDashboard() {
     }
     
     // Listen for CRE-specific events only
-    if (!user?.username) return () => {}
+    if (!user?.username) return () => {
+      window.removeEventListener('lead-inserted-success', handleLeadInsertedSuccess as any)
+    }
     
     const creSpecificEventName = `lead-master-updated-${user.username}`
     const creSpecificStatusEventName = `lead-status-changed-${user.username}`
@@ -264,10 +305,12 @@ export default function CREDashboard() {
     window.addEventListener(creSpecificStatusEventName, handleLeadStatusChange as any)
     checkRedisWorkerStatus()
     
-    // Set up real-time subscriptions instead of polling
-    const cleanup = setupRealtimeSubscriptions()
-    
-    // Conservative fallback polling (real-time handles most updates)
+    // In production, disable real-time (use polling). Enable real-time only in development.
+    let cleanup: (() => void) | null = null
+    // Always enable real-time subscriptions for smooth UI sync
+    cleanup = setupRealtimeSubscriptions()
+
+    // Safe polling fallback (every 60s)
     const fallbackRefresh = setInterval(() => {
       if (!isLoading && !isRefreshing) {
         fetchAssignedLeads(true)
@@ -276,12 +319,11 @@ export default function CREDashboard() {
     
     return () => {
       // Cleanup real-time subscriptions
-      if (cleanup) {
-        cleanup()
-      }
+      if (cleanup) cleanup()
       // Cleanup CRE-specific event listeners
       window.removeEventListener(creSpecificEventName, immediateRefresh as any)
       window.removeEventListener(creSpecificStatusEventName, handleLeadStatusChange as any)
+      window.removeEventListener('lead-inserted-success', handleLeadInsertedSuccess as any)
       // Cleanup fallback interval only
       clearInterval(fallbackRefresh)
       if (refreshTimerRef.current) {
@@ -289,7 +331,7 @@ export default function CREDashboard() {
         refreshTimerRef.current = null
       }
     }
-  }, [user?.username])
+  }, [])
 
   // NEW: Refetch leads when active tab changes (for backend filtering)
   useEffect(() => {
@@ -324,34 +366,91 @@ export default function CREDashboard() {
     try {
       const supabase = createClient()
     
+    // Helper to map DB row to UI Lead
+    const mapLeadFromRow = (row: any): Lead => ({
+      id: String(row?.id ?? row?.uid ?? ''),
+      uid: String(row?.uid ?? ''),
+      customer_name: row?.customer_name ?? '',
+      customer_mobile_number: row?.customer_mobile_number ?? '',
+      source: row?.source ?? '',
+      sub_source: row?.sub_source ?? '',
+      campaign: row?.campaign ?? '',
+      date: (row?.created_at || '').toString().slice(0,10),
+      lead_status: row?.lead_status ?? '',
+      final_status: row?.final_status ?? '',
+      lead_category: row?.lead_category ?? undefined,
+      follow_up_date: row?.follow_up_date ?? undefined,
+      first_call_date: row?.first_call_date ?? undefined,
+      pending_reason: undefined,
+      followup_count: row?.followup_count ?? 0,
+      customer_email: undefined,
+      customer_location: row?.customer_location ?? undefined,
+      remarks: row?.remarks ?? undefined,
+      lead_remark: row?.lead_remark ?? undefined,
+      second_call_lead_status: row?.second_call_lead_status ?? undefined,
+      third_call_lead_status: row?.third_call_lead_status ?? undefined,
+      fourth_call_lead_status: row?.fourth_call_lead_status ?? undefined,
+      fifth_call_lead_status: row?.fifth_call_lead_status ?? undefined,
+      sixth_call_lead_status: row?.sixth_call_lead_status ?? undefined,
+      branch: row?.branch ?? undefined,
+      ps_name: row?.ps_name ?? undefined,
+      ps_id: row?.ps_id ?? undefined,
+      icrop_id: row?.icrop_id ?? undefined,
+      model_interested: row?.model_interested ?? undefined,
+      variant: row?.variant ?? undefined,
+      buying_plan: row?.buying_plan ?? undefined,
+      finance_option: row?.finance_option ?? undefined,
+      trade_in: row?.trade_in ?? undefined,
+      trade_in_make: row?.trade_in_make ?? undefined,
+      trade_in_model: row?.trade_in_model ?? undefined,
+      trade_in_year: row?.trade_in_year ?? undefined,
+      trade_in_km: row?.trade_in_km ?? undefined,
+      trade_in_ownership: row?.trade_in_ownership ?? undefined,
+      test_drive: undefined,
+      test_drive_type: row?.test_drive_type ?? undefined,
+      profession: row?.profession ?? undefined,
+      lost_reason: row?.lost_reason ?? undefined,
+      lost_requested_at: row?.lost_requested_at ?? undefined,
+      ps_requested_by: row?.ps_requested_by ?? undefined,
+      pending_reasons: row?.pending_reasons ?? undefined,
+      existing_remarks: row?.existing_remarks ?? undefined,
+    })
+
     // Subscribe to lead_master changes with server-side filtering for efficiency
     const leadSubscription = supabase
       .channel(`lead_master_changes_${user.username}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'lead_master',
-          filter: `cre_name=eq.${user.username}`
-        },
+        { event: '*', schema: 'public', table: 'lead_master', filter: `cre_name=eq.${user.username}` },
         (payload) => {
-          // Server-side filtering ensures we only receive events for this CRE's leads
+          const eventType = (payload as any)?.eventType || (payload as any)?.type
+          const row = (payload as any)?.new || (payload as any)?.old
+          const leadUid = row?.uid
           if (process.env.NODE_ENV === 'development') {
-            console.log('🔄 [Real-time] Lead master change detected for this CRE:', payload.eventType, (payload.new as any)?.uid || (payload.old as any)?.uid)
-            console.log('🔄 [Real-time] Lead status change:', {
-              old_status: (payload.old as any)?.lead_status,
-              new_status: (payload.new as any)?.lead_status,
-              old_remark: (payload.old as any)?.lead_remark,
-              new_remark: (payload.new as any)?.lead_remark
-            })
-            console.log('🔄 [Real-time] Refreshing leads data due to lead_master change')
+            console.log('🔄 [Real-time] lead_master change:', eventType, leadUid)
           }
+
+          setLeads((prev) => {
+            if (!row) return prev
+            if (eventType === 'DELETE') {
+              return prev.filter(l => l.uid !== leadUid)
+            }
+            const updated = mapLeadFromRow(row)
+            const idx = prev.findIndex(l => l.uid === leadUid)
+            if (idx >= 0) {
+              const copy = [...prev]
+              copy[idx] = { ...copy[idx], ...updated }
+              return copy
+            }
+            return [updated, ...prev]
+          })
+
+          // Light background refetch to ensure consistency without flashing
           setCountsUpdating(true)
-          requestRefresh({ immediate: true, force: true })
           setTimeout(() => {
-            setCountsUpdating(false)
-          }, 1200)
+            requestRefresh({ immediate: false, force: false })
+            setTimeout(() => setCountsUpdating(false), 800)
+          }, 250)
         }
       )
       .subscribe((status) => {
@@ -673,14 +772,16 @@ export default function CREDashboard() {
     }
   }
 
-  const handleUpdateLead = (leadData: any) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log("🔄 [UI Sync] Lead update initiated; awaiting consolidated refresh", leadData)
+  const handleUpdateLead = async (leadData: any) => {
+    try {
+      setIsRefreshing(true)
+      await fetchAssignedLeads(false, true)
+      await fetchLostRequests()
+    } catch (e) {
+      console.error('Failed to refresh after status change:', e)
+    } finally {
+      setIsRefreshing(false)
     }
-    
-    // Rely on events from the modal + debounced refresh
-    setIsRefreshing(true)
-    setTimeout(() => setIsRefreshing(false), 1200)
   }
 
   const openUpdateModal = (lead: Lead) => {
@@ -688,29 +789,75 @@ export default function CREDashboard() {
     setIsUpdateModalOpen(true)
   }
 
-  const handleAddLead = (leadData: any) => {
-    // Add the new lead to the leads list
-    const newLead = {
-      id: leadData.uid,
-      uid: leadData.uid,
-      customer_name: leadData.customer_name,
-      customer_mobile_number: leadData.customer_mobile_number,
-      source: leadData.source,
-      sub_source: leadData.sub_source || '',
-      campaign: leadData.campaign || '', // Use campaign column directly
-      date: leadData.created_at?.slice(0,10) || new Date().toISOString().slice(0,10),
-      // CRE leads are immediately qualified
-      lead_status: 'Qualified',
-      final_status: leadData.final_status,
-      lead_category: leadData.lead_category || 'Warm',
-      followup_count: 0,
-      follow_up_date: leadData.follow_up_date,
-      first_call_date: new Date().toISOString(), // CRE adding lead counts as first call
-      lead_remark: leadData.remarks || ''
+  const handleAddLead = async (leadData: any) => {
+        try {
+      console.log('🎯 handleAddLead called with:', leadData?.uid)
+      toast.success(`Lead ${leadData?.uid || ''} added!`)
+
+      // Optimistic local insert so sections update immediately
+      const optimistic: Lead = {
+        id: String(leadData.uid),
+        uid: String(leadData.uid),
+        customer_name: leadData.customer_name || '',
+        customer_mobile_number: leadData.customer_mobile_number || '',
+        source: leadData.source || '',
+        sub_source: leadData.sub_source || '',
+        campaign: leadData.campaign || '',
+        date: (leadData.created_at || new Date().toISOString()).slice(0,10),
+        lead_status: leadData.lead_status || 'Qualified',
+        final_status: leadData.final_status || 'Pending',
+        lead_category: leadData.lead_category || undefined,
+        follow_up_date: leadData.follow_up_date || undefined,
+        first_call_date: new Date().toISOString(),
+        pending_reason: undefined,
+        followup_count: 0,
+        customer_email: undefined,
+        customer_location: leadData.customer_location || undefined,
+        remarks: leadData.remarks || undefined,
+        lead_remark: leadData.remarks || undefined,
+        second_call_lead_status: undefined,
+        third_call_lead_status: undefined,
+        fourth_call_lead_status: undefined,
+        fifth_call_lead_status: undefined,
+        sixth_call_lead_status: undefined,
+        branch: leadData.branch || undefined,
+        ps_name: leadData.ps_name || undefined,
+        ps_id: leadData.ps_id || undefined,
+        icrop_id: leadData.icrop_id || undefined,
+        model_interested: leadData.model_interested || undefined,
+        variant: leadData.variant || undefined,
+        buying_plan: leadData.buying_plan || undefined,
+        finance_option: leadData.finance_option || undefined,
+        trade_in: leadData.trade_in || undefined,
+        trade_in_make: leadData.trade_in_make || undefined,
+        trade_in_model: leadData.trade_in_model || undefined,
+        trade_in_year: leadData.trade_in_year || undefined,
+        trade_in_km: leadData.trade_in_km || undefined,
+        trade_in_ownership: leadData.trade_in_ownership || undefined,
+        test_drive: undefined,
+        test_drive_type: leadData.test_drive_type || undefined,
+        profession: leadData.profession || undefined,
+        lost_reason: undefined,
+        lost_requested_at: undefined,
+        ps_requested_by: undefined,
+        pending_reasons: undefined,
+        existing_remarks: undefined,
+      }
+      setLeads(prev => {
+        const exists = prev.some(l => l.uid === optimistic.uid)
+        if (exists) return prev
+        return [optimistic, ...prev]
+      })
+
+      // Background reconcile to ensure parity with DB and counts
+      setIsRefreshing(true)
+      await fetchAssignedLeads(false, true)
+      await fetchLostRequests()
+    } catch (e) {
+      console.error('Failed to refresh after add:', e)
+    } finally {
+      setIsRefreshing(false)
     }
-    setLeads(prevLeads => [newLead, ...prevLeads])
-    // Also refetch from server to ensure parity with backend
-    setTimeout(() => { fetchAssignedLeads(true) }, 600)
   }
 
   const handleApproveLost = async (leadUid: string) => {
@@ -1402,20 +1549,8 @@ export default function CREDashboard() {
         const resp1 = await fetch(`/api/leads/distinct?_t=${Date.now()}`)
         const data1 = resp1.ok ? await resp1.json() : { status: [] }
         const baseStatuses: string[] = Array.isArray(data1?.status) ? data1.status : []
-
-        // Second call: dynamic detection (superset, merged)
-        const resp2 = await fetch(`/api/analytics/dynamic-status?period=all&_t=${Date.now()}`)
-        const data2 = resp2.ok ? await resp2.json() : { statusAnalysis: {} }
-        const dynamicLeadStatuses: string[] = Array.isArray(data2?.statusAnalysis?.leadStatuses) ? data2.statusAnalysis.leadStatuses : []
-        const dynamicFinalStatuses: string[] = Array.isArray(data2?.statusAnalysis?.finalStatuses) ? data2.statusAnalysis.finalStatuses : []
-
-        const merged = Array.from(new Set([
-          ...baseStatuses,
-          ...dynamicLeadStatuses,
-          ...dynamicFinalStatuses
-        ].map((s: any) => (s ?? '').toString().trim()).filter(Boolean)))
-
-        setGlobalStatuses(merged.sort())
+        // Skip dynamic-status analytics fetch to avoid timeouts/cache overflow
+        setGlobalStatuses(baseStatuses.sort())
       } catch (e) {
         console.error('Failed to load global statuses', e)
       } finally {

@@ -5027,7 +5027,17 @@ async def get_cre_assigned(
 ):
     try:
         print(f"Fetching leads for username: {username}, name: {name}, tab: {tab}")
-        query = supabase.table('lead_master').select('*, trade_in_master(*)').eq('assigned', 'Yes')
+        # Select only the required columns to avoid timeouts and reduce payload size
+        select_cols = (
+            'uid,id,customer_name,customer_mobile_number,alternate_mobile_number,source,sub_source,campaign,created_at,updated_at,'
+            'lead_status,final_status,lead_category,follow_up_date,first_call_date,'
+            'branch,ps_name,ps_id,icrop_id,first_remark,pending_reasons,customer_location,'
+            'model_interested,variant,buying_plan,finance_option,trade_in,'
+            'test_drive_type,profession,second_call_date,second_remark,third_call_date,third_remark,fourth_call_date,fourth_remark,'
+            'fifth_call_date,fifth_remark,sixth_call_date,sixth_remark,second_call_lead_status,third_call_lead_status,fourth_call_lead_status,fifth_call_lead_status,sixth_call_lead_status,'
+            'cre_name,assigned,trade_in_master(trade_in_make,trade_in_model,trade_in_year,trade_in_km,trade_in_ownership)'
+        )
+        query = supabase.table('lead_master').select(select_cols).eq('assigned', 'Yes')
 
         # Prefer full name if provided; otherwise use username
         clean_user = (username or '').strip()
