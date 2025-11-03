@@ -50,6 +50,7 @@ export function SourceCREDistribution({
     overallCrePerformance: CREPerformanceData[]
     uniqueSources: string[]
     totalLeads: number
+    noData?: boolean
   } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [selectedSource, setSelectedSource] = useState<string>('all')
@@ -58,16 +59,36 @@ export function SourceCREDistribution({
   const fetchData = async () => {
     try {
       setIsLoading(true)
+
+      // Map period to filter mode
+      let filterMode = 'all';
+      let actualStartDate = '';
+      let actualEndDate = '';
+
+      if (period === 'all') {
+        filterMode = 'all';
+      } else if (startDate && endDate) {
+        // Date range mode
+        filterMode = 'range';
+        actualStartDate = startDate;
+        actualEndDate = endDate;
+      } else if (startDate) {
+        // Today mode
+        filterMode = 'today';
+        actualStartDate = startDate;
+      }
+
       const params = new URLSearchParams({
-        period: period || 'all',
-        ...(startDate && { startDate }),
-        ...(endDate && { endDate }),
-        ...(branch && { branch }),
-        ...(month && { month }),
-        ...(selectedSource !== 'all' && { source: selectedSource })
+        section: 'sourceCre',
+        filter: filterMode,
+        // Don't send source filter to backend - filtering happens on frontend for pie charts only
+        ...(actualStartDate && { startDate: actualStartDate }),
+        ...(actualEndDate && { endDate: actualEndDate })
       })
 
-      const response = await fetch(`/api/analytics/source-cre-distribution?${params}`, {
+      console.log('[SourceCREDistribution] Fetching with params:', params.toString())
+
+      const response = await fetch(`/api/analytics/unified?${params}`, {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
@@ -77,14 +98,46 @@ export function SourceCREDistribution({
 
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('[SourceCREDistribution] API error:', errorData)
         throw new Error(errorData.error || 'Failed to fetch source-CRE distribution data')
       }
 
       const analyticsData = await response.json()
-      setData(analyticsData)
+      console.log('[SourceCREDistribution] Received data:', analyticsData)
+
+      // Check for noData flag from API
+      if (analyticsData.noData) {
+        setData({
+          sourceCreDistribution: [],
+          overallCrePerformance: [],
+          uniqueSources: ['all'],
+          totalLeads: 0,
+          noData: true
+        });
+        return;
+      }
+
+      // Transform unified API response to component's expected format
+      const transformedData = {
+        sourceCreDistribution: analyticsData.rows || [],
+        overallCrePerformance: analyticsData.overallCrePerformance || [],
+        uniqueSources: ['all', ...new Set((analyticsData.rows || []).map((r: any) => r.source))],
+        totalLeads: analyticsData.totalLeads || 0,
+        noData: false
+      }
+
+      console.log('[SourceCREDistribution] Transformed data:', transformedData)
+      setData(transformedData)
     } catch (error) {
-      console.error('Error fetching source-CRE distribution:', error)
+      console.error('[SourceCREDistribution] Error fetching data:', error)
       toast.error('Failed to fetch source-CRE distribution data')
+      // Set empty data on error
+      setData({
+        sourceCreDistribution: [],
+        overallCrePerformance: [],
+        uniqueSources: ['all'],
+        totalLeads: 0
+      })
     } finally {
       setIsLoading(false)
     }
@@ -92,7 +145,9 @@ export function SourceCREDistribution({
 
   useEffect(() => {
     fetchData()
-  }, [period, branch, month, startDate, endDate, selectedSource])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, branch, month, startDate, endDate])
+  // selectedSource not included - filtering happens client-side for pie charts only
 
   if (isLoading) {
     return (
@@ -128,31 +183,66 @@ export function SourceCREDistribution({
     )
   }
 
-  // Sort data based on selected criteria
-  const sortedSourceData = [...(data.sourceCreDistribution || [])].sort((a, b) => {
+  // ====================
+  // PIE CHARTS DATA (Apply Filter by Source + Sort by)
+  // ====================
+  
+  // Filter source data for pie charts based on selected source
+  const filteredSourceDataForPieChart = selectedSource === 'all' 
+    ? (data.sourceCreDistribution || [])
+    : (data.sourceCreDistribution || []).filter(s => s.source === selectedSource);
+
+  // Sort source data for pie charts based on selected criteria
+  const sortedSourceDataForPieChart = [...filteredSourceDataForPieChart].sort((a, b) => {
     switch (sortBy) {
       case 'conversion':
-        return b.conversionRate - a.conversionRate
+        return b.conversionPct - a.conversionPct
       case 'qualified':
-        return b.totalQualified - a.totalQualified
+        return b.qualified - a.qualified
       case 'leads':
       default:
         return b.totalLeads - a.totalLeads
     }
   })
 
-  // Create pie chart data
-  const sourcePieData = sortedSourceData.slice(0, 8).map((source, index) => ({
+  // Create pie chart data for sources
+  const sourcePieData = sortedSourceDataForPieChart.slice(0, 8).map((source, index) => ({
     name: source.source,
     value: source.totalLeads,
     color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
   }))
 
-  const crePieData = (data.overallCrePerformance || []).slice(0, 8).map((cre, index) => ({
+  // Filter CRE data for pie charts based on selected source
+  const filteredCreDataForPieChart = selectedSource === 'all'
+    ? (data.overallCrePerformance || [])
+    : (data.overallCrePerformance || [])
+        .filter(cre => cre.sources.includes(selectedSource));
+
+  // Sort CRE data for pie charts based on selected criteria
+  const sortedCreDataForPieChart = [...filteredCreDataForPieChart].sort((a, b) => {
+    switch (sortBy) {
+      case 'conversion':
+        return b.conversionRate - a.conversionRate
+      case 'qualified':
+        return b.qualified - a.qualified
+      case 'leads':
+      default:
+        return b.count - a.count
+    }
+  });
+
+  const crePieData = sortedCreDataForPieChart.slice(0, 8).map((cre, index) => ({
     name: cre.creName,
-    value: cre.count,
+    value: cre.count, // Always show count (total leads) as the pie chart value
     color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
   }))
+
+  // ====================
+  // TABLE DATA (Only apply created_at filter - no source or sort filters)
+  // ====================
+  
+  // Table shows ALL sources (only filtered by date in backend)
+  const tableData = (data.sourceCreDistribution || []).sort((a, b) => b.totalLeads - a.totalLeads)
 
   return (
     <div className="space-y-6">
@@ -211,8 +301,7 @@ export function SourceCREDistribution({
       <Card className="bg-white border-orange-300 shadow-lg">
         <CardHeader>
           <CardTitle className="text-orange-800">
-            Source-wise CRE Distribution
-            {selectedSource !== 'all' && ` - ${selectedSource}`}
+            Source-wise CRE Distribution (All Sources - Date Filtered Only)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -232,10 +321,9 @@ export function SourceCREDistribution({
                 </tr>
               </thead>
               <tbody className="divide-y divide-orange-200">
-                {(sortedSourceData || []).map((source, index) => {
-                  const topCre = source.creDistribution?.[0]
+                {(tableData || []).map((source, index) => {
                   return (
-                    <tr key={source.sourceWithSubsource} className="hover:bg-orange-50">
+                    <tr key={source.source + '-' + source.subsource} className="hover:bg-orange-50">
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">
                         <div className="flex items-center gap-2">
                           <div 
@@ -252,28 +340,28 @@ export function SourceCREDistribution({
                         {source.totalLeads.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-right">
-                        {source.totalQualified.toLocaleString()}
+                        {source.qualified.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-right">
-                        {source.totalBooked.toLocaleString()}
+                        {source.booked.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-right">
-                        {source.totalRetailed.toLocaleString()}
+                        {source.retailed.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-right">
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          source.conversionRate >= 20 ? 'bg-green-100 text-green-800' :
-                          source.conversionRate >= 10 ? 'bg-yellow-100 text-yellow-800' :
+                          source.conversionPct >= 20 ? 'bg-green-100 text-green-800' :
+                          source.conversionPct >= 10 ? 'bg-yellow-100 text-yellow-800' :
                           'bg-red-100 text-red-800'
                         }`}>
-                          {source.conversionRate.toFixed(1)}%
+                          {source.conversionPct.toFixed(1)}%
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">
-                        {topCre?.creName || 'N/A'}
+                        {source.topCRE || 'N/A'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-right">
-                        {topCre?.count?.toLocaleString() || '0'}
+                        {source.creLeads?.toLocaleString() || '0'}
                       </td>
                     </tr>
                   )

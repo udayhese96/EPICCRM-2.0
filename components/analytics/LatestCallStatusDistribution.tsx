@@ -53,16 +53,35 @@ export function LatestCallStatusDistribution({
   const fetchData = async () => {
     try {
       setIsLoading(true)
+
+      // Map period to filter mode
+      let filterMode = 'all';
+      let actualStartDate = '';
+      let actualEndDate = '';
+
+      if (period === 'all') {
+        filterMode = 'all';
+      } else if (startDate && endDate) {
+        // Date range mode
+        filterMode = 'range';
+        actualStartDate = startDate;
+        actualEndDate = endDate;
+      } else if (startDate) {
+        // Today mode
+        filterMode = 'today';
+        actualStartDate = startDate;
+      }
+
       const params = new URLSearchParams({
-        period,
-        ...(branch && { branch }),
-        ...(month && { month }),
-        ...(startDate && { startDate }),
-        ...(endDate && { endDate }),
-        ...(selectedSource !== 'all' && { source: selectedSource })
+        section: 'latestCall',
+        filter: filterMode,
+        ...(actualStartDate && { startDate: actualStartDate }),
+        ...(actualEndDate && { endDate: actualEndDate })
       })
 
-      const response = await fetch(`/api/analytics/latest-call-status-distribution?${params}`, {
+      console.log('[LatestCallStatusDistribution] Fetching with params:', params.toString())
+
+      const response = await fetch(`/api/analytics/unified?${params}`, {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
@@ -72,14 +91,43 @@ export function LatestCallStatusDistribution({
 
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('[LatestCallStatusDistribution] API error:', errorData)
         throw new Error(errorData.error || 'Failed to fetch latest call status data')
       }
 
       const analyticsData = await response.json()
-      setData(analyticsData)
+      console.log('[LatestCallStatusDistribution] Received data:', analyticsData)
+
+      // Transform unified API response to component's expected format
+      const statusData = (analyticsData.distribution || []).map((item: any) => ({
+        status: item.latestCallStatus,
+        count: item.count,
+        percentage: analyticsData.totalLeads > 0 ? ((item.count / analyticsData.totalLeads) * 100).toFixed(2) : '0.00',
+        sourceCount: item.sourceCount || 0,
+        creCount: item.creCount || 0,
+        sources: item.sources || [],
+        cres: item.cres || []
+      }));
+
+      const transformedData = {
+        latestCallStatusDistribution: statusData,
+        sourceWiseStatusDistribution: analyticsData.sourceWiseDistribution || [],
+        uniqueSources: ['all', ...(analyticsData.uniqueSources || [])],
+        totalLeads: analyticsData.totalLeads || 0
+      }
+
+      console.log('[LatestCallStatusDistribution] Transformed data:', transformedData)
+      setData(transformedData)
     } catch (error) {
-      console.error('Error fetching latest call status:', error)
+      console.error('[LatestCallStatusDistribution] Error fetching data:', error)
       toast.error('Failed to fetch latest call status data')
+      // Set empty data on error
+      setData({
+        latestCallStatusDistribution: [],
+        sourceWiseStatusDistribution: [],
+        uniqueSources: ['all'],
+        totalLeads: 0
+      })
     } finally {
       setIsLoading(false)
     }
@@ -87,7 +135,8 @@ export function LatestCallStatusDistribution({
 
   useEffect(() => {
     fetchData()
-  }, [period, branch, month, startDate, endDate, selectedSource])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, branch, month, startDate, endDate])
 
   if (isLoading) {
     return (
@@ -123,12 +172,29 @@ export function LatestCallStatusDistribution({
     )
   }
 
+  // Filter data based on selected source
+  const filteredStatusData = selectedSource === 'all' 
+    ? data.latestCallStatusDistribution 
+    : data.latestCallStatusDistribution?.map(status => ({
+        ...status,
+        count: status.sources.includes(selectedSource) 
+          ? data.sourceWiseStatusDistribution
+              ?.find(s => s.source === selectedSource)
+              ?.statusDistribution
+              ?.find(sd => sd.status === status.status)
+              ?.count || 0
+          : 0
+      })).filter(status => status.count > 0) || [];
+
   // Create pie chart data for top statuses
-  const statusPieData = data.latestCallStatusDistribution?.slice(0, 8).map((status, index) => ({
+  const statusPieData = filteredStatusData?.slice(0, 8).map((status, index) => ({
     name: status.status,
     value: status.count,
     color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
   })) || []
+
+  // Calculate filtered total
+  const filteredTotal = filteredStatusData?.reduce((sum, status) => sum + status.count, 0) || 0
 
   return (
     <div className="space-y-6">
@@ -150,7 +216,7 @@ export function LatestCallStatusDistribution({
           </Select>
         </div>
         <div className="text-sm text-gray-600">
-          Total Leads: <span className="font-semibold">{data.totalLeads?.toLocaleString() || '0'}</span>
+          Total Leads: <span className="font-semibold">{(selectedSource === 'all' ? data.totalLeads : filteredTotal)?.toLocaleString() || '0'}</span>
         </div>
       </div>
 
@@ -169,19 +235,19 @@ export function LatestCallStatusDistribution({
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Total Statuses:</span>
-                <span className="font-semibold">{data.latestCallStatusDistribution?.length || 0}</span>
+                <span className="font-semibold">{filteredStatusData?.length || 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Sources:</span>
-                <span className="font-semibold">{(data.uniqueSources?.length || 1) - 1}</span>
+                <span className="font-semibold">{selectedSource === 'all' ? (data.uniqueSources?.length || 1) - 1 : 1}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Top Status:</span>
-                <span className="font-semibold">{data.latestCallStatusDistribution?.[0]?.status || 'N/A'}</span>
+                <span className="font-semibold">{filteredStatusData?.[0]?.status || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Top Status Count:</span>
-                <span className="font-semibold">{data.latestCallStatusDistribution?.[0]?.count?.toLocaleString() || '0'}</span>
+                <span className="font-semibold">{filteredStatusData?.[0]?.count?.toLocaleString() || '0'}</span>
               </div>
             </div>
           </CardContent>
@@ -209,7 +275,7 @@ export function LatestCallStatusDistribution({
                 </tr>
               </thead>
               <tbody className="divide-y divide-orange-200">
-                {data.latestCallStatusDistribution?.map((status, index) => (
+                {filteredStatusData?.map((status, index) => (
                   <tr key={status.status} className="hover:bg-orange-50">
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       <div className="flex items-center gap-2">
@@ -227,7 +293,7 @@ export function LatestCallStatusDistribution({
                       {status.percentage}%
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-right">
-                      {status.sourceCount}
+                      {selectedSource === 'all' ? status.sourceCount : 1}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-right">
                       {status.creCount}
