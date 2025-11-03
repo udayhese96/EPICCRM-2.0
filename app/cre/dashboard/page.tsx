@@ -2586,7 +2586,16 @@ export default function CREDashboard() {
                             {/* LEAD STATUS */}
                             <div className="flex items-center gap-2">
                               {activeTab === 'wonlost' ? (
-                                <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
+                                <>
+                                  <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
+                                  <button 
+                                    className="px-2 py-1 bg-blue-100 text-blue-800 rounded-xl text-xs hover:shadow-lg flex items-center gap-1" 
+                                    onClick={() => { setSelectedLead(lead); setIsRemarksSyncOpen(true) }}
+                                    title="View History"
+                                  >
+                                    📋 History
+                                  </button>
+                                </>
                               ) : (
                                 (() => {
                                   const latest = getLatestLeadStatus(lead)
