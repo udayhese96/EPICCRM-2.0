@@ -218,11 +218,16 @@ export function AddLeadModal({ isOpen, onClose, onAdd, user }: AddLeadModalProps
       })
 
       if (response.ok) {
+        const result = await response.json()
         console.log('✅ Lead created successfully')
         // Await parent refresh to complete before closing for smooth UX
         await onAdd(leadData)
         onClose()
-        alert("Lead added successfully!")
+        if (result?.duplicate) {
+          alert('Mobile number already exists. Lead updated.')
+        } else {
+          alert("Lead added successfully!")
+        }
       } else {
         const error = await response.text()
         console.error('Failed to add lead:', error)
