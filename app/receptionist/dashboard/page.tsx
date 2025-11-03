@@ -92,20 +92,44 @@ const SOURCE_OPTIONS: { [key: string]: string[] } = {
   "Other": []
 }
 
-// Toyota models and variants
+// Toyota models and variants (exactly matching follow-up form)
 const TOYOTA_MODELS: { [key: string]: string[] } = {
-  "Toyota Innova Crysta": ["G", "GX / GX+", "VX", "ZX"],
-  "Toyota Innova Hycross": ["G", "GX", "GX (O)", "VX", "VX (O)", "ZX", "ZX (O)"],
-  "Toyota Fortuner": ["4x2 MT", "4x2 AT", "4x4 MT", "4x4 AT", "GR-S 4x2 AT", "GR-S 4x4 AT"],
-  "Toyota Fortuner Legender": ["4x2 AT", "4x4 AT"],
-  "Toyota Camry": ["Hybrid"],
-  "Toyota Vellfire": ["Executive Lounge"],
-  "Toyota Land Cruiser 300 (LC 300)": ["VX", "ZX", "GR-S"],
-  "Toyota Hilux": ["Standard", "High"],
-  "Toyota Urban Cruiser Hyryder": ["E", "S", "G", "V"],
-  "Toyota Rumion": ["S MT", "S AT", "G MT", "G AT", "V MT", "V AT"],
-  "Toyota Glanza": ["E", "S", "G"],
-  "Toyota Urban Cruiser Taisor": ["E", "S", "S+", "V"]
+  "Toyota Glanza": [
+    "E", "S (MT / AMT / CNG)", "G (MT / AMT / CNG)", "V (MT / AMT)"
+  ],
+  "Toyota Urban Cruiser Taisor": [
+    "E (Petrol / CNG)", "S (MT / AMT)", "S+", "G Turbo (MT / AT)", "V Turbo (MT / AT)"
+  ],
+  "Toyota Urban Cruiser Hyryder": [
+    "E", "S (NeoDrive / Hybrid / CNG)", "G (NeoDrive / Hybrid)", "V (NeoDrive / Hybrid)"
+  ],
+  "Toyota Rumion": [
+    "S (MT / AT / CNG)", "G (MT / AT)", "V (MT / AT)"
+  ],
+  "Toyota Fortuner": [
+    "Petrol 4x2 MT / AT", "Diesel 4x2 MT / AT", "Diesel 4x4 MT / AT", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Innova Crysta": [
+    "G", "GX / GX+", "VX", "ZX"
+  ],
+  "Toyota Innova Hycross": [
+    "G", "GX / GX(O)", "VX / VX(O)", "ZX / ZX(O)"
+  ],
+  "Toyota Hilux": [
+    "STD", "High MT", "High AT"
+  ],
+  "Toyota Fortuner Legender": [
+    "4x2 AT Diesel", "4x4 AT Diesel", "Neo Drive (48V mild hybrid)"
+  ],
+  "Toyota Vellfire": [
+    "Hi", "VIP Executive Lounge"
+  ],
+  "Toyota Camry": [
+    "Elegance", "Sprint"
+  ],
+  "Toyota Land Cruiser 300 (LC 300)": [
+    "ZX", "GR-S"
+  ]
 }
 
 // Purchase timeline options (same as CRE form)
