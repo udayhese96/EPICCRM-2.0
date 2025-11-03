@@ -2153,40 +2153,7 @@ export default function PSDashboard() {
                         {activeTab === 'wonlost' && 'Leads that are won or lost'}
                       </p>
                       
-                      {/* Source + Subsource badges */}
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {(() => {
-                          const currentList = filteredFollowUps
-                          // Create combined source+subsource badges
-                          const sourceSubsourceCombos = [...new Set(
-                            currentList
-                              .filter(item => item.source || item.sub_source)
-                              .map(item => {
-                                const source = item.source || ''
-                                const subsource = item.sub_source || ''
-                                if (source && subsource) {
-                                  return `${source} ${subsource}`
-                                } else if (source) {
-                                  return source
-                                } else if (subsource) {
-                                  return subsource
-                                }
-                                return null
-                              })
-                              .filter(Boolean)
-                          )]
-                          
-                          return (
-                            <>
-                              {sourceSubsourceCombos.map(combo => (
-                                <Badge key={combo} className="text-xs px-2 py-0.5 bg-white/20 text-white/90 border-white/30">
-                                  {combo}
-                                </Badge>
-                              ))}
-                            </>
-                          )
-                        })()}
-                      </div>
+                      {/* Source badges removed per requirement */}
                     </div>
                   </div>
 
