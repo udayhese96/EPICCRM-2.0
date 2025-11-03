@@ -5865,23 +5865,34 @@ async def get_cre_team_leader_qualified_leads(
             if cached_leads is not None:
                 return cached_leads
         
-        # Get total count first
+        # Compute Month-To-Date start in IST, then convert to UTC for filtering
+        from datetime import datetime, timedelta, timezone
+        now_utc = datetime.now(timezone.utc)
+        ist_offset = timedelta(hours=5, minutes=30)
+        now_ist = now_utc + ist_offset
+        month_start_ist = now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start_utc = month_start_ist - ist_offset
+        month_start_iso = month_start_utc.isoformat().replace("+00:00", "Z")
+
+        # Get total count first (MTD IST)
         count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .gte('created_at', month_start_iso)
                 .execute()
         )
         total_count = count_response.count or 0
         
-        # Get unassigned leads count
+        # Get unassigned leads count (MTD IST)
         unassigned_count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .is_('ps_name', 'null')
+                .gte('created_at', month_start_iso)
                 .execute()
         )
         unassigned_count = unassigned_count_response.count or 0
@@ -5901,6 +5912,7 @@ async def get_cre_team_leader_qualified_leads(
                     'final_status,booking_status,retailed_status,created_at,updated_at'
                 )
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .gte('created_at', month_start_iso)
                 .order('created_at', desc=True)
                 .execute()
         )
@@ -9664,6 +9676,567 @@ def process_tl_performance_data(raw_data, ps_to_tl_map, team_leaders_data):
     }
 
     return tl_list + [totals]
+
+@app.get("/analytics/sales-manager/ps-leads")
+async def get_ps_leads_drilldown(
+    branch: str = Query(..., description="Branch name to filter data"),
+    ps_name: str = Query(..., description="PS name to filter data"),
+    status_type: str = Query(..., description="Status type: total, unattended, open_leads, lost_leads, approval_pending, booked, retailed"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get detailed leads for a specific PS and status type (drill-down functionality).
+    Returns list of leads with full details including call history and remarks.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate parameters
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        if not ps_name or ps_name.strip() == "":
+            raise HTTPException(status_code=400, detail="PS name parameter is required")
+        if not status_type or status_type.strip() == "":
+            raise HTTPException(status_code=400, detail="Status type parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Build the query based on status_type
+        query = supabase.table("ps_followup_master").select(
+            """lead_uid, ps_name, ps_branch, customer_name, customer_mobile_number,
+               alternate_mobile_number, source, cre_name, lead_category, model_interested,
+               follow_up_date, lead_status, first_call_date, first_call_remark, first_call_lead_status,
+               second_call_date, second_call_remark, second_call_lead_status,
+               third_call_date, third_call_remark, third_call_lead_status,
+               fourth_call_date, fourth_call_remark, fourth_call_lead_status,
+               fifth_call_date, fifth_call_remark, fifth_call_lead_status,
+               sixth_call_date, sixth_call_remark, sixth_call_lead_status,
+               seventh_call_date, seventh_call_remark, seventh_call_lead_status,
+               final_status, created_at, updated_at"""
+        ).eq("ps_branch", branch).eq("ps_name", ps_name)
+        
+        # Apply status filter based on status_type
+        if status_type == "total":
+            # Get all leads for this PS
+            pass
+        elif status_type == "unattended":
+            # Leads without first_call_date
+            query = query.is_("first_call_date", "null")
+        elif status_type == "open_leads":
+            # Leads with first_call_date but status is Waiting for Approval or Pending
+            query = query.not_.is_("first_call_date", "null")
+            ps_data = query.execute()
+            # Filter in memory for better control
+            leads = []
+            for lead in ps_data.data:
+                if lead.get('final_status') in ['Waiting for Approval', 'Pending']:
+                    leads.append(lead)
+            # Format leads for open_leads
+            formatted_leads = []
+            for lead in leads:
+                formatted_lead = {
+                    "lead_uid": lead.get("lead_uid"),
+                    "customer_name": lead.get("customer_name"),
+                    "customer_mobile_number": lead.get("customer_mobile_number"),
+                    "alternate_mobile_number": lead.get("alternate_mobile_number"),
+                    "source": lead.get("source"),
+                    "cre_name": lead.get("cre_name"),
+                    "lead_category": lead.get("lead_category"),
+                    "model_interested": lead.get("model_interested"),
+                    "follow_up_date": lead.get("follow_up_date"),
+                    "lead_status": lead.get("lead_status"),
+                    "final_status": lead.get("final_status"),
+                    "first_call_date": lead.get("first_call_date"),
+                    "first_call_remark": lead.get("first_call_remark"),
+                    "first_call_lead_status": lead.get("first_call_lead_status"),
+                    "second_call_date": lead.get("second_call_date"),
+                    "second_call_remark": lead.get("second_call_remark"),
+                    "second_call_lead_status": lead.get("second_call_lead_status"),
+                    "third_call_date": lead.get("third_call_date"),
+                    "third_call_remark": lead.get("third_call_remark"),
+                    "third_call_lead_status": lead.get("third_call_lead_status"),
+                    "fourth_call_date": lead.get("fourth_call_date"),
+                    "fourth_call_remark": lead.get("fourth_call_remark"),
+                    "fourth_call_lead_status": lead.get("fourth_call_lead_status"),
+                    "fifth_call_date": lead.get("fifth_call_date"),
+                    "fifth_call_remark": lead.get("fifth_call_remark"),
+                    "fifth_call_lead_status": lead.get("fifth_call_lead_status"),
+                    "sixth_call_date": lead.get("sixth_call_date"),
+                    "sixth_call_remark": lead.get("sixth_call_remark"),
+                    "sixth_call_lead_status": lead.get("sixth_call_lead_status"),
+                    "seventh_call_date": lead.get("seventh_call_date"),
+                    "seventh_call_remark": lead.get("seventh_call_remark"),
+                    "seventh_call_lead_status": lead.get("seventh_call_lead_status"),
+                    "created_at": lead.get("created_at"),
+                    "updated_at": lead.get("updated_at")
+                }
+                formatted_leads.append(formatted_lead)
+            return {
+                "success": True,
+                "branch": branch,
+                "ps_name": ps_name,
+                "status_type": status_type,
+                "leads": formatted_leads,
+                "count": len(formatted_leads),
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        elif status_type == "lost_leads":
+            query = query.eq("final_status", "Lost")
+        elif status_type == "approval_pending":
+            query = query.eq("final_status", "Waiting for Approval")
+        elif status_type == "booked":
+            query = query.eq("final_status", "Booked")
+        elif status_type == "retailed":
+            query = query.eq("final_status", "Won")
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid status_type: {status_type}")
+        
+        # Execute query
+        ps_data = query.execute()
+        
+        if not ps_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "ps_name": ps_name,
+                "status_type": status_type,
+                "leads": [],
+                "count": 0,
+                "message": f"No {status_type} leads found for PS: {ps_name} in branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        
+        # Format the leads data for frontend
+        formatted_leads = []
+        for lead in ps_data.data:
+            formatted_lead = {
+                "lead_uid": lead.get("lead_uid"),
+                "customer_name": lead.get("customer_name"),
+                "customer_mobile_number": lead.get("customer_mobile_number"),
+                "alternate_mobile_number": lead.get("alternate_mobile_number"),
+                "source": lead.get("source"),
+                "cre_name": lead.get("cre_name"),
+                "lead_category": lead.get("lead_category"),
+                "model_interested": lead.get("model_interested"),
+                "follow_up_date": lead.get("follow_up_date"),
+                "lead_status": lead.get("lead_status"),
+                "final_status": lead.get("final_status"),
+                "first_call_date": lead.get("first_call_date"),
+                "first_call_remark": lead.get("first_call_remark"),
+                "first_call_lead_status": lead.get("first_call_lead_status"),
+                "second_call_date": lead.get("second_call_date"),
+                "second_call_remark": lead.get("second_call_remark"),
+                "second_call_lead_status": lead.get("second_call_lead_status"),
+                "third_call_date": lead.get("third_call_date"),
+                "third_call_remark": lead.get("third_call_remark"),
+                "third_call_lead_status": lead.get("third_call_lead_status"),
+                "fourth_call_date": lead.get("fourth_call_date"),
+                "fourth_call_remark": lead.get("fourth_call_remark"),
+                "fourth_call_lead_status": lead.get("fourth_call_lead_status"),
+                "fifth_call_date": lead.get("fifth_call_date"),
+                "fifth_call_remark": lead.get("fifth_call_remark"),
+                "fifth_call_lead_status": lead.get("fifth_call_lead_status"),
+                "sixth_call_date": lead.get("sixth_call_date"),
+                "sixth_call_remark": lead.get("sixth_call_remark"),
+                "sixth_call_lead_status": lead.get("sixth_call_lead_status"),
+                "seventh_call_date": lead.get("seventh_call_date"),
+                "seventh_call_remark": lead.get("seventh_call_remark"),
+                "seventh_call_lead_status": lead.get("seventh_call_lead_status"),
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at")
+            }
+            formatted_leads.append(formatted_lead)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "ps_name": ps_name,
+            "status_type": status_type,
+            "leads": formatted_leads,
+            "count": len(formatted_leads),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username
+        }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in PS leads drill-down: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch PS leads data: {str(e)}"
+        )
+
+@app.get("/analytics/sales-manager/tl-leads")
+async def get_tl_leads_drilldown(
+    branch: str = Query(..., description="Branch name to filter data"),
+    tl_name: str = Query(..., description="Team Leader name to filter data"),
+    status_type: str = Query(..., description="Status type: total, unattended, open_leads, lost_leads, approval_pending, booked, retailed"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get detailed leads for a specific Team Leader and status type (drill-down functionality).
+    Returns list of leads with full details including call history and remarks.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate parameters
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        if not tl_name or tl_name.strip() == "":
+            raise HTTPException(status_code=400, detail="Team Leader name parameter is required")
+        if not status_type or status_type.strip() == "":
+            raise HTTPException(status_code=400, detail="Status type parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Get all team leaders for this branch
+        team_leaders_data = supabase.table("users").select(
+            "id, username"
+        ).eq("branch", branch).eq("role", "team_leader").execute()
+        
+        # Create ID to Team Leader name mapping
+        tl_id_to_name_map = {}
+        if team_leaders_data.data:
+            for tl in team_leaders_data.data:
+                tl_id_to_name_map[tl.get('id')] = tl.get('username')
+        
+        # Get PS users with their team leader assignments
+        users_data = supabase.table("users").select(
+            "username, full_name, team_leader_id"
+        ).eq("branch", branch).execute()
+        
+        # Create PS to Team Leader mapping
+        ps_to_tl_map = {}
+        if users_data.data:
+            for user in users_data.data:
+                ps_username = user.get('username')
+                ps_full_name = user.get('full_name')
+                team_leader_id = user.get('team_leader_id')
+                if ps_full_name and team_leader_id:
+                    team_leader_name = tl_id_to_name_map.get(team_leader_id, f"Unknown TL ({team_leader_id})")
+                    ps_to_tl_map[ps_username] = team_leader_name
+                    ps_to_tl_map[ps_full_name] = team_leader_name
+        
+        # Get all PS names that belong to this team leader
+        ps_names_for_tl = []
+        for ps_name, assigned_tl in ps_to_tl_map.items():
+            if assigned_tl == tl_name:
+                ps_names_for_tl.append(ps_name)
+        
+        if not ps_names_for_tl:
+            return {
+                "success": True,
+                "branch": branch,
+                "tl_name": tl_name,
+                "status_type": status_type,
+                "leads": [],
+                "count": 0,
+                "message": f"No PS members found for Team Leader: {tl_name} in branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        
+        # Build the query based on status_type
+        query = supabase.table("ps_followup_master").select(
+            """lead_uid, ps_name, ps_branch, customer_name, customer_mobile_number,
+               alternate_mobile_number, source, cre_name, lead_category, model_interested,
+               follow_up_date, lead_status, first_call_date, first_call_remark, first_call_lead_status,
+               second_call_date, second_call_remark, second_call_lead_status,
+               third_call_date, third_call_remark, third_call_lead_status,
+               fourth_call_date, fourth_call_remark, fourth_call_lead_status,
+               fifth_call_date, fifth_call_remark, fifth_call_lead_status,
+               sixth_call_date, sixth_call_remark, sixth_call_lead_status,
+               seventh_call_date, seventh_call_remark, seventh_call_lead_status,
+               final_status, created_at, updated_at"""
+        ).eq("ps_branch", branch).in_("ps_name", ps_names_for_tl)
+        
+        # Apply status filter based on status_type
+        if status_type == "total":
+            # Get all leads for this TL's team
+            pass
+        elif status_type == "unattended":
+            query = query.is_("first_call_date", "null")
+        elif status_type == "open_leads":
+            query = query.not_.is_("first_call_date", "null")
+            ps_data = query.execute()
+            # Filter in memory for better control
+            leads = []
+            for lead in ps_data.data:
+                if lead.get('final_status') in ['Waiting for Approval', 'Pending']:
+                    leads.append(lead)
+            # Format leads
+            formatted_leads = []
+            for lead in leads:
+                formatted_lead = {
+                    "lead_uid": lead.get("lead_uid"),
+                    "customer_name": lead.get("customer_name"),
+                    "customer_mobile_number": lead.get("customer_mobile_number"),
+                    "alternate_mobile_number": lead.get("alternate_mobile_number"),
+                    "source": lead.get("source"),
+                    "cre_name": lead.get("cre_name"),
+                    "lead_category": lead.get("lead_category"),
+                    "model_interested": lead.get("model_interested"),
+                    "follow_up_date": lead.get("follow_up_date"),
+                    "lead_status": lead.get("lead_status"),
+                    "final_status": lead.get("final_status"),
+                    "first_call_date": lead.get("first_call_date"),
+                    "first_call_remark": lead.get("first_call_remark"),
+                    "first_call_lead_status": lead.get("first_call_lead_status"),
+                    "second_call_date": lead.get("second_call_date"),
+                    "second_call_remark": lead.get("second_call_remark"),
+                    "second_call_lead_status": lead.get("second_call_lead_status"),
+                    "third_call_date": lead.get("third_call_date"),
+                    "third_call_remark": lead.get("third_call_remark"),
+                    "third_call_lead_status": lead.get("third_call_lead_status"),
+                    "fourth_call_date": lead.get("fourth_call_date"),
+                    "fourth_call_remark": lead.get("fourth_call_remark"),
+                    "fourth_call_lead_status": lead.get("fourth_call_lead_status"),
+                    "fifth_call_date": lead.get("fifth_call_date"),
+                    "fifth_call_remark": lead.get("fifth_call_remark"),
+                    "fifth_call_lead_status": lead.get("fifth_call_lead_status"),
+                    "sixth_call_date": lead.get("sixth_call_date"),
+                    "sixth_call_remark": lead.get("sixth_call_remark"),
+                    "sixth_call_lead_status": lead.get("sixth_call_lead_status"),
+                    "seventh_call_date": lead.get("seventh_call_date"),
+                    "seventh_call_remark": lead.get("seventh_call_remark"),
+                    "seventh_call_lead_status": lead.get("seventh_call_lead_status"),
+                    "created_at": lead.get("created_at"),
+                    "updated_at": lead.get("updated_at")
+                }
+                formatted_leads.append(formatted_lead)
+            return {
+                "success": True,
+                "branch": branch,
+                "tl_name": tl_name,
+                "status_type": status_type,
+                "leads": formatted_leads,
+                "count": len(formatted_leads),
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        elif status_type == "lost_leads":
+            query = query.eq("final_status", "Lost")
+        elif status_type == "approval_pending":
+            query = query.eq("final_status", "Waiting for Approval")
+        elif status_type == "booked":
+            query = query.eq("final_status", "Booked")
+        elif status_type == "retailed":
+            query = query.eq("final_status", "Won")
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid status_type: {status_type}")
+        
+        # Execute query
+        ps_data = query.execute()
+        
+        if not ps_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "tl_name": tl_name,
+                "status_type": status_type,
+                "leads": [],
+                "count": 0,
+                "message": f"No {status_type} leads found for Team Leader: {tl_name} in branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        
+        # Format the leads data for frontend
+        formatted_leads = []
+        for lead in ps_data.data:
+            formatted_lead = {
+                "lead_uid": lead.get("lead_uid"),
+                "ps_name": lead.get("ps_name"),
+                "customer_name": lead.get("customer_name"),
+                "customer_mobile_number": lead.get("customer_mobile_number"),
+                "alternate_mobile_number": lead.get("alternate_mobile_number"),
+                "source": lead.get("source"),
+                "cre_name": lead.get("cre_name"),
+                "lead_category": lead.get("lead_category"),
+                "model_interested": lead.get("model_interested"),
+                "follow_up_date": lead.get("follow_up_date"),
+                "lead_status": lead.get("lead_status"),
+                "final_status": lead.get("final_status"),
+                "first_call_date": lead.get("first_call_date"),
+                "first_call_remark": lead.get("first_call_remark"),
+                "first_call_lead_status": lead.get("first_call_lead_status"),
+                "second_call_date": lead.get("second_call_date"),
+                "second_call_remark": lead.get("second_call_remark"),
+                "second_call_lead_status": lead.get("second_call_lead_status"),
+                "third_call_date": lead.get("third_call_date"),
+                "third_call_remark": lead.get("third_call_remark"),
+                "third_call_lead_status": lead.get("third_call_lead_status"),
+                "fourth_call_date": lead.get("fourth_call_date"),
+                "fourth_call_remark": lead.get("fourth_call_remark"),
+                "fourth_call_lead_status": lead.get("fourth_call_lead_status"),
+                "fifth_call_date": lead.get("fifth_call_date"),
+                "fifth_call_remark": lead.get("fifth_call_remark"),
+                "fifth_call_lead_status": lead.get("fifth_call_lead_status"),
+                "sixth_call_date": lead.get("sixth_call_date"),
+                "sixth_call_remark": lead.get("sixth_call_remark"),
+                "sixth_call_lead_status": lead.get("sixth_call_lead_status"),
+                "seventh_call_date": lead.get("seventh_call_date"),
+                "seventh_call_remark": lead.get("seventh_call_remark"),
+                "seventh_call_lead_status": lead.get("seventh_call_lead_status"),
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at")
+            }
+            formatted_leads.append(formatted_lead)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "tl_name": tl_name,
+            "status_type": status_type,
+            "leads": formatted_leads,
+            "count": len(formatted_leads),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username
+        }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in TL leads drill-down: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch TL leads data: {str(e)}"
+        )
+
+@app.get("/analytics/sales-manager/source-leads")
+async def get_source_leads_drilldown(
+    branch: str = Query(..., description="Branch name to filter data"),
+    source: str = Query(..., description="Source name to filter data"),
+    sub_source: Optional[str] = Query(None, description="Sub-source name (optional)"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get detailed leads for a specific source (and optional sub-source).
+    Returns list of leads with full details including call history and remarks.
+    Requires sales_manager or admin role.
+    """
+    try:
+        # Validate parameters
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        if not source or source.strip() == "":
+            raise HTTPException(status_code=400, detail="Source name parameter is required")
+        
+        # For sales managers, ensure they can only access their own branch data
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+        
+        # Build the query
+        query = supabase.table("ps_followup_master").select(
+            """lead_uid, ps_name, ps_branch, customer_name, customer_mobile_number,
+               alternate_mobile_number, source, sub_source, cre_name, lead_category, model_interested,
+               follow_up_date, lead_status, first_call_date, first_call_remark, first_call_lead_status,
+               second_call_date, second_call_remark, second_call_lead_status,
+               third_call_date, third_call_remark, third_call_lead_status,
+               fourth_call_date, fourth_call_remark, fourth_call_lead_status,
+               fifth_call_date, fifth_call_remark, fifth_call_lead_status,
+               sixth_call_date, sixth_call_remark, sixth_call_lead_status,
+               seventh_call_date, seventh_call_remark, seventh_call_lead_status,
+               final_status, created_at, updated_at"""
+        ).eq("ps_branch", branch).ilike("source", source)
+        
+        # If sub_source is provided, filter by it
+        if sub_source and sub_source.strip():
+            query = query.ilike("sub_source", sub_source)
+        
+        # Execute query
+        ps_data = query.execute()
+        
+        if not ps_data.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "source": source,
+                "sub_source": sub_source,
+                "leads": [],
+                "count": 0,
+                "message": f"No leads found for source: {source}" + (f" / sub-source: {sub_source}" if sub_source else "") + f" in branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username
+            }
+        
+        # Format the leads data for frontend
+        formatted_leads = []
+        for lead in ps_data.data:
+            formatted_lead = {
+                "lead_uid": lead.get("lead_uid"),
+                "ps_name": lead.get("ps_name"),
+                "customer_name": lead.get("customer_name"),
+                "customer_mobile_number": lead.get("customer_mobile_number"),
+                "alternate_mobile_number": lead.get("alternate_mobile_number"),
+                "source": lead.get("source"),
+                "sub_source": lead.get("sub_source"),
+                "cre_name": lead.get("cre_name"),
+                "lead_category": lead.get("lead_category"),
+                "model_interested": lead.get("model_interested"),
+                "follow_up_date": lead.get("follow_up_date"),
+                "lead_status": lead.get("lead_status"),
+                "final_status": lead.get("final_status"),
+                "first_call_date": lead.get("first_call_date"),
+                "first_call_remark": lead.get("first_call_remark"),
+                "first_call_lead_status": lead.get("first_call_lead_status"),
+                "second_call_date": lead.get("second_call_date"),
+                "second_call_remark": lead.get("second_call_remark"),
+                "second_call_lead_status": lead.get("second_call_lead_status"),
+                "third_call_date": lead.get("third_call_date"),
+                "third_call_remark": lead.get("third_call_remark"),
+                "third_call_lead_status": lead.get("third_call_lead_status"),
+                "fourth_call_date": lead.get("fourth_call_date"),
+                "fourth_call_remark": lead.get("fourth_call_remark"),
+                "fourth_call_lead_status": lead.get("fourth_call_lead_status"),
+                "fifth_call_date": lead.get("fifth_call_date"),
+                "fifth_call_remark": lead.get("fifth_call_remark"),
+                "fifth_call_lead_status": lead.get("fifth_call_lead_status"),
+                "sixth_call_date": lead.get("sixth_call_date"),
+                "sixth_call_remark": lead.get("sixth_call_remark"),
+                "sixth_call_lead_status": lead.get("sixth_call_lead_status"),
+                "seventh_call_date": lead.get("seventh_call_date"),
+                "seventh_call_remark": lead.get("seventh_call_remark"),
+                "seventh_call_lead_status": lead.get("seventh_call_lead_status"),
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at")
+            }
+            formatted_leads.append(formatted_lead)
+        
+        return {
+            "success": True,
+            "branch": branch,
+            "source": source,
+            "sub_source": sub_source,
+            "leads": formatted_leads,
+            "count": len(formatted_leads),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username
+        }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in Source leads drill-down: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch Source leads data: {str(e)}"
+        )
 
 @app.get("/analytics/health")
 async def analytics_health_check():
