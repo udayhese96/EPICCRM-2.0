@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     const timestamp = searchParams.get('_t') || Date.now().toString()
     
     // Build API URL with search parameter if provided
-    let apiUrl = `${FASTAPI_URL}/api/cre-team-leader/qualified-leads?page=${page}&limit=${limit}&_t=${timestamp}`
+    let apiUrl = `${FASTAPI_BASE_URL}/api/cre-team-leader/qualified-leads?page=${page}&limit=${limit}&_t=${timestamp}`
     if (search && search.trim()) {
       apiUrl += `&search=${encodeURIComponent(search.trim())}`
     }

@@ -5865,23 +5865,34 @@ async def get_cre_team_leader_qualified_leads(
             if cached_leads is not None:
                 return cached_leads
         
-        # Get total count first
+        # Compute Month-To-Date start in IST, then convert to UTC for filtering
+        from datetime import datetime, timedelta, timezone
+        now_utc = datetime.now(timezone.utc)
+        ist_offset = timedelta(hours=5, minutes=30)
+        now_ist = now_utc + ist_offset
+        month_start_ist = now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start_utc = month_start_ist - ist_offset
+        month_start_iso = month_start_utc.isoformat().replace("+00:00", "Z")
+
+        # Get total count first (MTD IST)
         count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .gte('created_at', month_start_iso)
                 .execute()
         )
         total_count = count_response.count or 0
         
-        # Get unassigned leads count
+        # Get unassigned leads count (MTD IST)
         unassigned_count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .is_('ps_name', 'null')
+                .gte('created_at', month_start_iso)
                 .execute()
         )
         unassigned_count = unassigned_count_response.count or 0
@@ -5901,6 +5912,7 @@ async def get_cre_team_leader_qualified_leads(
                     'final_status,booking_status,retailed_status,created_at,updated_at'
                 )
                 .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
+                .gte('created_at', month_start_iso)
                 .order('created_at', desc=True)
                 .execute()
         )

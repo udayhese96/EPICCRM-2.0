@@ -987,7 +987,17 @@ export default function CREDashboard() {
 
     const withinDateFilter = (lead: any) => {
       const created = (lead.date || '').slice(0,10)
-      
+
+      // For Won/Lost section, always show Month-To-Date (IST)
+      if (deferredActiveTab === 'wonlost') {
+        const now = new Date()
+        const istOffsetMinutes = 330 - now.getTimezoneOffset()
+        const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
+        const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
+        const monthStartIso = monthStartIst.toISOString().slice(0,10)
+        return created >= monthStartIso
+      }
+
       // Use new date range filter if dates are set
       if (startDate) {
         return created === startDate
@@ -1371,27 +1381,57 @@ export default function CREDashboard() {
       ).length,
       // Qualified = lead_status Qualified AND final_status Pending
       qualified: leads.filter(lead => (lead?.lead_status === "Qualified") && ((lead?.final_status ?? "").toString().toLowerCase() === "pending") && !isFinalizedWon(lead)).length,
-      wonlost: leads.filter(lead => {
-        const fs = (lead?.final_status || '').toString().toLowerCase()
-        const ls = (lead?.lead_status || '').toString().toLowerCase()
-        const isLost = fs === 'lost' || ls === 'lost'
-        const isLostRequested = fs === 'lost requested'
-        const isBooked = fs === 'booked'
-        const isRetailed = fs === 'retailed'
-        const isWon = fs === 'won' || fs.includes('won') || ls === 'won'
-        return isLost || isLostRequested || isBooked || isRetailed || isWon
-      }).length,
+      wonlost: leads
+        .filter(lead => {
+          const fs = (lead?.final_status || '').toString().toLowerCase()
+          const ls = (lead?.lead_status || '').toString().toLowerCase()
+          const isLost = fs === 'lost' || ls === 'lost'
+          const isLostRequested = fs === 'lost requested'
+          const isBooked = fs === 'booked'
+          const isRetailed = fs === 'retailed'
+          const isWon = fs === 'won' || fs.includes('won') || ls === 'won'
+          return isLost || isLostRequested || isBooked || isRetailed || isWon
+        })
+        .filter(l => {
+          const created = (l?.date || '').toString().slice(0,10)
+          const now = new Date()
+          const istOffsetMinutes = 330 - now.getTimezoneOffset()
+          const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
+          const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
+          const monthStartIso = monthStartIst.toISOString().slice(0,10)
+          return created >= monthStartIso
+        }).length,
       // Fixed: Won leads should show final_status = 'booked', 'retailed', or 'won'
-      won: leads.filter(lead => {
-        const fs = (lead?.final_status || '').toString().toLowerCase()
-        const ls = (lead?.lead_status || '').toString().toLowerCase()
-        return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won') || ls === 'won'
-      }).length,
+      won: leads
+        .filter(lead => {
+          const fs = (lead?.final_status || '').toString().toLowerCase()
+          const ls = (lead?.lead_status || '').toString().toLowerCase()
+          return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won') || ls === 'won'
+        })
+        .filter(l => {
+          const created = (l?.date || '').toString().slice(0,10)
+          const now = new Date()
+          const istOffsetMinutes = 330 - now.getTimezoneOffset()
+          const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
+          const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
+          const monthStartIso = monthStartIst.toISOString().slice(0,10)
+          return created >= monthStartIso
+        }).length,
       // Fixed: Lost leads should show final_status = 'lost' (not lead_status)
-      lost: leads.filter(lead => {
-        const fs = (lead?.final_status || '').toString().toLowerCase()
-        return fs === 'lost'
-      }).length,
+      lost: leads
+        .filter(lead => {
+          const fs = (lead?.final_status || '').toString().toLowerCase()
+          return fs === 'lost'
+        })
+        .filter(l => {
+          const created = (l?.date || '').toString().slice(0,10)
+          const now = new Date()
+          const istOffsetMinutes = 330 - now.getTimezoneOffset()
+          const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
+          const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
+          const monthStartIso = monthStartIst.toISOString().slice(0,10)
+          return created >= monthStartIso
+        }).length,
       lostRequested: leads.filter(lead => (lead?.final_status || '').toString().toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
       walkin: leads.filter(lead => ['Walk-in', 'Digital', 'Referral'].includes(lead.source)).length
