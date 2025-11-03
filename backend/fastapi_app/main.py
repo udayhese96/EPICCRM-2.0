@@ -1488,6 +1488,72 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
     try:
         import uuid
         
+        # 1) Check for duplicate by customer_mobile_number
+        try:
+            existing_q = (
+                supabase
+                    .table('lead_master')
+                    .select('id, uid, is_dup')
+                    .eq('customer_mobile_number', lead_data.customer_mobile_number)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            existing_res = existing_q.execute()
+            existing = existing_res.data[0] if existing_res.data else None
+        except Exception as e:
+            existing = None
+
+        if existing:
+            # Build duplicate entry and append to is_dup JSON
+            current_is_dup = existing.get('is_dup')
+            # Normalize to list form for consistency
+            if isinstance(current_is_dup, list):
+                attempt_base = len(current_is_dup)
+                history = current_is_dup
+            elif isinstance(current_is_dup, dict):
+                attempt_base = 1
+                history = [current_is_dup]
+            else:
+                attempt_base = 0
+                history = []
+
+            dup_entry = {
+                "attempt": attempt_base + 1,
+                "timestamp": now_ist_iso(),
+                "source": getattr(lead_data, 'source', None) or "",
+                "sub_source": getattr(lead_data, 'sub_source', None) or "",
+            }
+
+            new_history = history + [dup_entry]
+
+            update_payload = {
+                "is_dup": new_history,
+                "updated_at": now_ist_iso(),
+            }
+
+            # If CRE is assigned in this attempt, we can optionally record that assignment timing as well
+            if getattr(lead_data, 'assigned_cre_id', None) and getattr(lead_data, 'assigned_cre_name', None):
+                update_payload["assigned"] = "Yes"
+                update_payload["cre_id"] = lead_data.assigned_cre_id
+                update_payload["cre_name"] = lead_data.assigned_cre_name
+                update_payload["cre_assigned_at"] = now_ist_iso()
+
+            updated = (
+                supabase
+                    .table('lead_master')
+                    .update(update_payload)
+                    .eq('id', existing['id'])
+                    .execute()
+            )
+
+            updated_row = updated.data[0] if updated.data else existing
+            return {
+                "message": "Mobile number already exists. Lead updated.",
+                "duplicate": True,
+                "lead": updated_row,
+            }
+
+        # 2) If not duplicate, proceed with normal insert
         # Generate unique UID
         lead_uid = f"LD{str(uuid.uuid4())[:8].upper()}"
         
@@ -1524,7 +1590,7 @@ async def create_admin_lead(lead_data: AdminLeadCreate, current_user=Depends(adm
                     await invalidate_cre_cache(cre_name)
             except Exception:
                 pass
-            return {"message": "Lead created successfully", "lead": response.data[0]}
+            return {"message": "Lead created successfully", "duplicate": False, "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
             
@@ -1747,6 +1813,46 @@ async def upload_leads_bulk(
         print(f"[Bulk Upload] Fatal error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/admin/leads/duplicate-is-dup")
+async def get_leads_with_is_dup(
+    limit: int = Query(100, ge=1, le=1000, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    current_user=Depends(admin_required)
+):
+    """Get leads from lead_master where is_dup column has non-null values"""
+    try:
+        # Query leads where is_dup is not null using Supabase filter
+        query = (
+            supabase
+                .table('lead_master')
+                .select('*', count='exact')
+                .not_.is_('is_dup', 'null')
+                .order('created_at', desc=True)
+                .range(offset, offset + limit - 1)
+        )
+        
+        result = query.execute()
+        
+        # Get total count from the count parameter
+        total_count = result.count if hasattr(result, 'count') and result.count is not None else len(result.data or [])
+        
+        leads = result.data or []
+        
+        return {
+            "success": True,
+            "leads": leads,
+            "count": len(leads),
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(leads) < total_count
+        }
+    except Exception as e:
+        print(f"[get_leads_with_is_dup] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch leads with is_dup: {str(e)}")
+
 @app.post("/api/cre/leads", response_model=dict)
 async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_current_user)):
     """Create a new lead for CRE users with background processing for qualified_leads and trade_in_master"""
@@ -1755,6 +1861,66 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
         if current_user.role != 'cre' or current_user.id != lead_data.cre_id:
             raise HTTPException(status_code=403, detail="Access denied")
         
+        # Duplicate check by mobile number; if exists, append to is_dup and update row
+        try:
+            existing_q = (
+                supabase
+                    .table('lead_master')
+                    .select('id, uid, is_dup')
+                    .eq('customer_mobile_number', lead_data.customer_mobile_number)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            existing_res = existing_q.execute()
+            existing = existing_res.data[0] if existing_res.data else None
+        except Exception:
+            existing = None
+
+        if existing:
+            current_is_dup = existing.get('is_dup')
+            if isinstance(current_is_dup, list):
+                attempt_base = len(current_is_dup)
+                history = current_is_dup
+            elif isinstance(current_is_dup, dict):
+                attempt_base = 1
+                history = [current_is_dup]
+            else:
+                attempt_base = 0
+                history = []
+
+            dup_entry = {
+                "attempt": attempt_base + 1,
+                "timestamp": now_ist_iso(),
+                "source": getattr(lead_data, 'source', None) or "",
+                "sub_source": getattr(lead_data, 'sub_source', None) or "",
+            }
+
+            new_history = history + [dup_entry]
+
+            update_payload = {
+                "is_dup": new_history,
+                "updated_at": now_ist_iso(),
+                "assigned": "Yes",
+                "cre_id": lead_data.cre_id,
+                "cre_name": lead_data.cre_name,
+                "cre_assigned_at": now_ist_iso(),
+            }
+
+            updated = (
+                supabase
+                    .table('lead_master')
+                    .update(update_payload)
+                    .eq('id', existing['id'])
+                    .execute()
+            )
+
+            updated_row = updated.data[0] if updated.data else existing
+            return {
+                "message": "Mobile number already exists. Lead updated.",
+                "duplicate": True,
+                "lead": updated_row,
+            }
+
         # Create lead record
         lead_record = {
             "uid": lead_data.uid,
@@ -1881,7 +2047,7 @@ async def create_cre_lead(lead_data: CRELeadCreate, current_user=Depends(get_cur
                 await invalidate_cre_cache(lead_data.cre_name)
             except Exception:
                 pass
-            return {"message": "Lead created successfully", "lead": response.data[0]}
+            return {"message": "Lead created successfully", "duplicate": False, "lead": response.data[0]}
         else:
             raise HTTPException(status_code=500, detail="Failed to create lead")
             
@@ -6550,6 +6716,85 @@ async def add_ps_lead(lead_data: dict, current_user=Depends(get_current_user)):
         
         # Generate lead UID if not provided
         uid = lead_data.get('uid') or f"PS{int(time.time()) % 1000000:06d}"
+
+        # Duplicate check across lead_master and ps_followup_master by customer_mobile_number
+        mobile = lead_data.get('customer_mobile_number')
+        existing_lead_master = None
+        existing_ps_followup = None
+        try:
+            lm_q = (
+                supabase
+                    .table('lead_master')
+                    .select('id, uid, is_dup')
+                    .eq('customer_mobile_number', mobile)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            lm_res = lm_q.execute()
+            existing_lead_master = lm_res.data[0] if lm_res.data else None
+        except Exception:
+            existing_lead_master = None
+
+        try:
+            ps_q = (
+                supabase
+                    .table('ps_followup_master')
+                    .select('id, lead_uid, is_dup, customer_mobile_number')
+                    .eq('customer_mobile_number', mobile)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            ps_res = ps_q.execute()
+            existing_ps_followup = ps_res.data[0] if ps_res.data else None
+        except Exception:
+            existing_ps_followup = None
+
+        if existing_lead_master or existing_ps_followup:
+            # Build duplicate entry
+            dup_entry = {
+                "attempt": 1,  # will be recalculated per-record
+                "timestamp": current_time,
+                "source": lead_data.get('source') or "",
+                "sub_source": lead_data.get('sub_source') or "",
+            }
+
+            # Helper to append dup entry to a record's is_dup field
+            def _append_dup(existing_record, table_name):
+                current_is_dup = existing_record.get('is_dup')
+                if isinstance(current_is_dup, list):
+                    attempt_base = len(current_is_dup)
+                    history = current_is_dup
+                elif isinstance(current_is_dup, dict):
+                    attempt_base = 1
+                    history = [current_is_dup]
+                else:
+                    attempt_base = 0
+                    history = []
+                entry = { **dup_entry, "attempt": attempt_base + 1 }
+                new_history = history + [entry]
+                update_payload = {
+                    "is_dup": new_history,
+                    "updated_at": current_time,
+                }
+                supabase.table(table_name).update(update_payload).eq('id', existing_record['id']).execute()
+
+            # Update both tables where a record exists
+            if existing_lead_master:
+                _append_dup(existing_lead_master, 'lead_master')
+            if existing_ps_followup:
+                _append_dup(existing_ps_followup, 'ps_followup_master')
+
+            # Choose a lead_uid to return (prefer lead_master)
+            lead_uid = (existing_lead_master or {}).get('uid') or (existing_ps_followup or {}).get('lead_uid') or uid
+            return JSONResponse(content={
+                "message": "Mobile number already exists. Lead updated.",
+                "duplicate": True,
+                "lead_uid": lead_uid,
+                "synced": {
+                    "lead_master": bool(existing_lead_master),
+                    "ps_followup_master": bool(existing_ps_followup),
+                }
+            })
         
         # Find CREs assigned to this branch for walk-in follow-ups
         cre_assignments = []
@@ -7763,15 +8008,82 @@ async def create_receptionist_lead(
         if current_user.role != 'receptionist':
             raise HTTPException(status_code=403, detail="Only receptionists can create leads")
 
-        # If duplicate check failed but user chose to continue anyway
-        if not lead_data.allow_duplicate:
-            # Check duplicate mobile again
-            duplicate_response = await check_duplicate_mobile(lead_data.customer_mobile_number, current_user)
-            if duplicate_response.isDuplicate:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Duplicate mobile number exists. Use allow_duplicate=true to force creation"
-                )
+        # Duplicate check across lead_master and ps_followup_master by customer_mobile_number
+        mobile = lead_data.customer_mobile_number
+        current_time = now_ist_iso()
+
+        existing_lead_master = None
+        existing_ps_followup = None
+        try:
+            lm_q = (
+                supabase
+                    .table('lead_master')
+                    .select('id, uid, is_dup')
+                    .eq('customer_mobile_number', mobile)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            lm_res = lm_q.execute()
+            existing_lead_master = lm_res.data[0] if lm_res.data else None
+        except Exception:
+            existing_lead_master = None
+
+        try:
+            ps_q = (
+                supabase
+                    .table('ps_followup_master')
+                    .select('id, lead_uid, is_dup, customer_mobile_number')
+                    .eq('customer_mobile_number', mobile)
+                    .order('created_at', desc=True)
+                    .limit(1)
+            )
+            ps_res = ps_q.execute()
+            existing_ps_followup = ps_res.data[0] if ps_res.data else None
+        except Exception:
+            existing_ps_followup = None
+
+        if existing_lead_master or existing_ps_followup:
+            dup_entry_base = {
+                "timestamp": current_time,
+                "source": lead_data.source or "",
+                "sub_source": lead_data.sub_source or "",
+            }
+
+            def _append_dup(existing_record, table_name):
+                current_is_dup = existing_record.get('is_dup')
+                if isinstance(current_is_dup, list):
+                    attempt_base = len(current_is_dup)
+                    history = current_is_dup
+                elif isinstance(current_is_dup, dict):
+                    attempt_base = 1
+                    history = [current_is_dup]
+                else:
+                    attempt_base = 0
+                    history = []
+                entry = { **dup_entry_base, "attempt": attempt_base + 1 }
+                new_history = history + [entry]
+                update_payload = {
+                    "is_dup": new_history,
+                    "updated_at": current_time,
+                }
+                supabase.table(table_name).update(update_payload).eq('id', existing_record['id']).execute()
+
+            if existing_lead_master:
+                _append_dup(existing_lead_master, 'lead_master')
+            if existing_ps_followup:
+                _append_dup(existing_ps_followup, 'ps_followup_master')
+
+            lead_uid = (existing_lead_master or {}).get('uid') or (existing_ps_followup or {}).get('lead_uid')
+            return {
+                "success": True,
+                "duplicate": True,
+                "lead_uid": lead_uid,
+                "message": "Mobile number already exists. Lead updated.",
+                "synced": {
+                    "lead_master": bool(existing_lead_master),
+                    "ps_followup_master": bool(existing_ps_followup)
+                }
+            }
 
         # Generate lead UID
         uid = f"CD{int(time.time()) % 1000000:06d}"

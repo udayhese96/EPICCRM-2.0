@@ -540,16 +540,17 @@ export default function AssignLeadsPage() {
       })
 
       if (response.ok) {
-        // If the lead was assigned to a CRE, it won't affect unassigned counts
-        // If it wasn't assigned, we need to increment the unassigned count for that source
-        if (!addLeadForm.assigned_cre_id && addLeadForm.source) {
+        const data = await response.json()
+
+        // Only increment unassigned counts on a true new insert (not duplicate) and when not assigned
+        if (!data?.duplicate && !addLeadForm.assigned_cre_id && addLeadForm.source) {
           setUnassignedData((prev: any) => {
             if (!prev) return prev
-            
+
             const updatedBySource = { ...prev.by_source }
             const currentCount = updatedBySource[addLeadForm.source] || 0
             updatedBySource[addLeadForm.source] = currentCount + 1
-            
+
             return {
               ...prev,
               by_source: updatedBySource,
@@ -557,7 +558,7 @@ export default function AssignLeadsPage() {
             }
           })
         }
-        
+
         setAddLeadForm({
           customer_name: "",
           customer_mobile_number: "",
@@ -568,7 +569,11 @@ export default function AssignLeadsPage() {
         })
         setShowAddLeadModal(false)
         setLastRefresh(new Date())
-        alert('Lead added successfully!')
+        if (data?.duplicate) {
+          alert('Mobile number already exists. Lead updated.')
+        } else {
+          alert('Lead added successfully!')
+        }
       } else {
         alert('Error adding lead. Please try again.')
       }

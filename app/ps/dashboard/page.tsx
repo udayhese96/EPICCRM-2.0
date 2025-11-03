@@ -190,10 +190,14 @@ const AddLeadForm = ({ onClose, onAdd }: AddLeadFormProps) => {
 
       if (leadResponse.ok) {
         const leadResult = await leadResponse.json()
-        console.log('✅ [PS Lead] Lead created and assigned to CRE:', leadResult)
+        console.log('✅ [PS Lead] Lead created/updated:', leadResult)
         
-        // Show success message
-        toast.success(`Lead submitted successfully! Lead ID: ${leadResult.lead_uid}`)
+        // Show appropriate message
+        if (leadResult?.duplicate) {
+          toast.info(`Mobile number already exists. Lead updated. Lead ID: ${leadResult.lead_uid}`)
+        } else {
+          toast.success(`Lead submitted successfully! Lead ID: ${leadResult.lead_uid}`)
+        }
         
         // Lead added successfully:
         // - CRE will see it in walkin leads section

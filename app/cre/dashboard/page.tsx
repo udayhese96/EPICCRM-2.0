@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Search,
   X,
+  Check,
   Phone,
   User,
   RefreshCw,
@@ -2442,12 +2443,12 @@ export default function CREDashboard() {
                   const includeLostReason = activeTab === 'lostconfirm'
                   // Wider STATUS and sensible widths for readability; enables horizontal scroll usage
                   const cols = includeLostReason
-                    ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','140px','160px','72px']
-                    : ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','160px','72px']
+                  ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','320px','260px','72px']
+                  : ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','160px','72px']
                   const template = cols.join(' ')
                   return (
                     <div
-                      className="min-w-[1800px] bg-gradient-to-r from-gray-100 to-gray-200 grid gap-2 p-3 pr-12 sticky top-0 z-10 font-semibold text-gray-800 text-sm"
+                      className="min-w-[2200px] bg-gradient-to-r from-gray-100 to-gray-200 grid gap-2 p-3 pr-12 sticky top-0 z-10 font-semibold text-gray-800 text-sm"
                       style={{ gridTemplateColumns: template }}
                     >
                   {activeTab === 'wonlost' ? (
@@ -2483,7 +2484,7 @@ export default function CREDashboard() {
                       ref={ref}
                       {...props}
                       className={`${props.className || ''}`}
-                      style={{ ...(props.style as any), overflowX: 'hidden', overflowY: 'auto', scrollbarGutter: 'stable both-edges', minWidth: '1800px' }}
+                      style={{ ...(props.style as any), overflowX: 'hidden', overflowY: 'auto', scrollbarGutter: 'stable both-edges', minWidth: '2200px' }}
                     />
                   ))
                   VirtualListOuter.displayName = 'VirtualListOuter'
@@ -2491,7 +2492,7 @@ export default function CREDashboard() {
                     <List
                       height={600}
                       itemCount={filteredLeads.length}
-                      itemSize={70}
+                      itemSize={96}
                       width="100%"
                       outerElementType={VirtualListOuter}
                     >
@@ -2500,7 +2501,7 @@ export default function CREDashboard() {
                         const isEvenRow = index % 2 === 0
                         const includeLostReason = activeTab === 'lostconfirm'
                         const cols = includeLostReason
-                          ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','140px','160px','72px']
+                          ? ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','320px','260px','72px']
                           : ['110px','240px','200px','160px','140px','160px','160px','140px','140px','120px','160px','72px']
                         const template = cols.join(' ')
                         const getLatestLeadStatus = (l: any) => {
@@ -2534,11 +2535,30 @@ export default function CREDashboard() {
                         return (
                           <div
                             style={{ ...style, gridTemplateColumns: template }}
-                            className={`min-w-[1800px] grid gap-2 p-3 pr-12 border-b text-sm transition-colors ${isEvenRow ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50`}
+                            className={`min-w-[2200px] grid gap-2 p-3 pr-12 border-b text-sm transition-colors ${isEvenRow ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50`}
                           >
                             {/* ACTION */}
                             <div className="flex gap-2 items-center">
-                              {activeTab !== 'wonlost' && (
+                              {activeTab === 'lostconfirm' ? (
+                                <>
+                                  <button
+                                    aria-label="Approve lost"
+                                    title="Approve"
+                                    className="px-2 py-1.5 rounded-xl text-xs bg-green-100 text-green-800 border border-green-300 hover:bg-green-200 flex items-center justify-center"
+                                    onClick={() => handleApproveLost(lead.uid)}
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    aria-label="Reject lost"
+                                    title="Reject"
+                                    className="px-2 py-1.5 rounded-xl text-xs bg-red-100 text-red-800 border border-red-300 hover:bg-red-200 flex items-center justify-center"
+                                    onClick={() => handleRejectLost(lead.uid)}
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : activeTab !== 'wonlost' && (
                                 <>
                                   <Button size="sm" variant="outline" className="rounded-2xl" onClick={() => openUpdateModal(lead)}>
                                     <Edit3 className="w-4 h-4" />
@@ -2566,7 +2586,16 @@ export default function CREDashboard() {
                             {/* LEAD STATUS */}
                             <div className="flex items-center gap-2">
                               {activeTab === 'wonlost' ? (
-                                <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
+                                <>
+                                  <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
+                                  <button 
+                                    className="px-2 py-1 bg-blue-100 text-blue-800 rounded-xl text-xs hover:shadow-lg flex items-center gap-1" 
+                                    onClick={() => { setSelectedLead(lead); setIsRemarksSyncOpen(true) }}
+                                    title="View History"
+                                  >
+                                    📋 History
+                                  </button>
+                                </>
                               ) : (
                                 (() => {
                                   const latest = getLatestLeadStatus(lead)
@@ -2614,7 +2643,7 @@ export default function CREDashboard() {
                             <div className="truncate">{lead.icrop_id || 'Pending'}</div>
                             <div className="truncate">{lead.ps_name || 'Unassigned'}</div>
                             {includeLostReason && (
-                              <div className="truncate text-xs">{lead.lost_reason || 'N/A'}</div>
+                              <div className="text-xs whitespace-normal break-words">{lead.lost_reason || 'N/A'}</div>
                             )}
                             <div className="text-xs font-mono">{lead.uid}</div>
                             <div></div>
