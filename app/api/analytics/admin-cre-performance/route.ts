@@ -88,11 +88,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database query failed', details: assignedError.message }, { status: 500 });
     }
 
-    // Fetch Retailed & Lost with updated_at filter
+    // Fetch Retailed & Lost using updated_at from lead_master
+    // Note: Database stores as 'Won', 'Lost' (capitalized), also check 'Retailed'
     let updatedQuery = supabase
       .from('lead_master')
       .select('cre_name, final_status, updated_at')
-      .in('final_status', ['retailed', 'won', 'lost']);
+      .in('final_status', ['Won', 'Lost', 'Retailed', 'won', 'lost', 'retailed']);
 
     if (startBound) {
       updatedQuery = updatedQuery.gte('updated_at', startBound.toISOString());
@@ -108,10 +109,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database query failed', details: updatedError.message }, { status: 500 });
     }
 
-    // Fetch qualified leads from qualified_leads table
+    // Fetch qualified leads directly from qualified_leads grouped by cre_name
     let qualifiedQuery = supabase
       .from('qualified_leads')
-      .select('lead_uid, created_at');
+      .select('cre_name, created_at');
 
     if (startBound) {
       qualifiedQuery = qualifiedQuery.gte('created_at', startBound.toISOString());
@@ -127,23 +128,37 @@ export async function GET(request: NextRequest) {
       // Continue without qualified data
     }
 
-    // Build qualified leads map
-    const qualifiedLeadUids = new Set((qualifiedRows || []).map(q => q.lead_uid));
-
-    // Fetch lead_master data for qualified leads to get cre_name
-    let qualifiedLeadsData: any[] = [];
-    if (qualifiedLeadUids.size > 0) {
-      const { data: qLeads } = await supabase
-        .from('lead_master')
-        .select('uid, cre_name')
-        .in('uid', Array.from(qualifiedLeadUids));
-      qualifiedLeadsData = qLeads || [];
+    // Build qualified leads count per CRE directly from qualified_leads
+    const qualifiedByCre = new Map<string, number>();
+    for (const row of (qualifiedRows || [])) {
+      const name = row.cre_name || 'Unassigned';
+      qualifiedByCre.set(name, (qualifiedByCre.get(name) || 0) + 1);
     }
 
     const rows = assignedRows || [];
     const updatedData = updatedRows || [];
 
-    console.log(`[Admin CRE Performance] Assigned: ${rows.length}, Updated: ${updatedData.length}, Qualified: ${qualifiedLeadsData.length}`);
+    // Build quick maps for retailed and lost counts by CRE from updated_at filtered data
+    const retailedByCre = new Map<string, number>();
+    const lostByCre = new Map<string, number>();
+    
+    for (const row of updatedData) {
+      const creName = row.cre_name || 'Unassigned';
+      const finalStatus = (row.final_status || '');
+      const fsLower = finalStatus.toLowerCase();
+      
+      // Retailed: final_status = 'retailed', 'Retailed', 'won', 'Won'
+      if (fsLower === 'retailed' || fsLower === 'won') {
+        retailedByCre.set(creName, (retailedByCre.get(creName) || 0) + 1);
+      }
+      
+      // Lost: final_status = 'lost' or 'Lost'
+      if (fsLower === 'lost') {
+        lostByCre.set(creName, (lostByCre.get(creName) || 0) + 1);
+      }
+    }
+
+    console.log(`[Admin CRE Performance] Assigned: ${rows.length}, Updated (Won/Lost): ${updatedData.length}, Qualified rows: ${(qualifiedRows || []).length}`);
 
     // Aggregate by CRE
     const creMap: Record<string, any> = {};
@@ -197,9 +212,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Process Qualified Leads from qualified_leads table (filtered by qualified_leads.created_at)
-    for (const qLead of qualifiedLeadsData) {
-      const creName = qLead.cre_name || 'Unassigned';
+    // Apply Qualified Leads counts (from qualified_leads.created_at grouped by cre_name)
+    for (const [creName, count] of qualifiedByCre.entries()) {
       if (!creMap[creName]) {
         creMap[creName] = {
           creName,
@@ -215,12 +229,11 @@ export async function GET(request: NextRequest) {
           tatUnit: 'd' as const
         };
       }
-      creMap[creName].qualifiedLeads++;
+      creMap[creName].qualifiedLeads += count;
     }
 
-    // Process Retailed & Lost from updated_at filtered data
-    for (const row of updatedData) {
-      const creName = row.cre_name || 'Unassigned';
+    // Apply Retailed counts
+    for (const [creName, count] of retailedByCre.entries()) {
       if (!creMap[creName]) {
         creMap[creName] = {
           creName,
@@ -236,18 +249,27 @@ export async function GET(request: NextRequest) {
           tatUnit: 'd' as const
         };
       }
+      creMap[creName].retailed += count;
+    }
 
-      const finalStatus = (row.final_status || '').toLowerCase();
-
-      // Retailed: filtered by updated_at
-      if (finalStatus === 'retailed' || finalStatus === 'won') {
-        creMap[creName].retailed++;
+    // Apply Lost counts
+    for (const [creName, count] of lostByCre.entries()) {
+      if (!creMap[creName]) {
+        creMap[creName] = {
+          creName,
+          assigned: 0,
+          qualifiedLeads: 0,
+          untouched: 0,
+          openLeads: 0,
+          retailed: 0,
+          lost: 0,
+          tatSum: 0,
+          tatCount: 0,
+          tatAvg: 0,
+          tatUnit: 'd' as const
+        };
       }
-
-      // Lost: filtered by updated_at
-      if (finalStatus === 'lost') {
-        creMap[creName].lost++;
-      }
+      creMap[creName].lost += count;
     }
 
     // Calculate TAT averages and format
