@@ -1,4 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { getAuthFromRequest } from '@/utils/api/auth'
+import { deriveRange } from '@/utils/date/range'
+import { respond, respondError } from '@/utils/api/envelope'
+import { rateLimit } from '@/utils/api/rateLimit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,7 +11,9 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || ''
     const dateRange = searchParams.get('date_range') || 'all'
     const psMember = searchParams.get('ps_member') || 'all'
-    const limit = searchParams.get('limit') || '10'
+    const pageSizeParam = searchParams.get('page_size')
+    const cursor = searchParams.get('cursor')
+    const limit = pageSizeParam ? String(Math.min(parseInt(pageSizeParam || '50') || 50, 100)) : (searchParams.get('limit') || '10')
     const offset = searchParams.get('offset') || '0'
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
@@ -15,57 +21,36 @@ export async function GET(request: NextRequest) {
     console.log('[Open Leads] Params:', { teamLeaderId, dateRange, psMember, startDate, endDate })
 
     if (!teamLeaderId) {
-      return NextResponse.json(
-        { error: 'Team leader ID is required' },
-        { status: 400 }
-      )
+      return respondError('Team leader ID is required', 400)
     }
 
-    // Get the access token from cookies
-    const accessToken = request.cookies.get('access_token')?.value
-
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      )
+    const { bearer, tlId, tenantId } = getAuthFromRequest(request)
+    if (!bearer) {
+      return respondError('Authentication required', 401)
     }
 
-    // Calculate date range
-    let startDateObj: Date | null = null
-    let endDateObj: Date | null = null
+    // Rate limit lists: 10 req / 10s per TL
+    const rl = rateLimit('list', tlId, 10, 10_000, tenantId)
+    if (!rl.allowed) return respondError('Too Many Requests', 429, { retryAfter: rl.retryAfter })
 
-    if (startDate && endDate) {
-      // Use custom date range
-      startDateObj = new Date(startDate)
-      endDateObj = new Date(endDate)
-    } else if (dateRange === 'all') {
-      // All time - no date filtering
-      startDateObj = null
-      endDateObj = null
-    } else if (dateRange === 'today') {
-      // Today only
-      const now = new Date()
-      startDateObj = new Date(now)
-      startDateObj.setHours(0, 0, 0, 0)
-      endDateObj = new Date(now)
-      endDateObj.setHours(23, 59, 59, 999)
-    } else {
-      // Last X days (default behavior)
-      const now = new Date()
-      startDateObj = new Date()
-      startDateObj.setDate(now.getDate() - parseInt(dateRange))
-      endDateObj = new Date()
-      endDateObj.setHours(23, 59, 59, 999)
+    // Log cursor migration status
+    if (offset !== '0' && !cursor) {
+      console.warn('[Open Leads] Using offset pagination - consider migrating to cursor')
     }
 
-    // Build query parameters for the backend
+    // Calculate and clamp date range (lists: max 90 days)
+    const range = deriveRange({ preset: dateRange, start: startDate, end: endDate, tz: null, clampDays: 90 })
+
+    // Build query parameters for the backend (non-breaking: pass legacy params)
     const backendParams = new URLSearchParams({
       team_leader_id: teamLeaderId,
       date_range: dateRange,
       limit,
       offset,
     })
+
+    // Experimental pass-through for cursor (backend may ignore until implemented)
+    if (cursor) backendParams.append('cursor', cursor)
 
     if (search) {
       backendParams.append('search', search)
@@ -76,19 +61,20 @@ export async function GET(request: NextRequest) {
     }
 
     // Add date parameters if calculated
-    if (startDateObj && endDateObj) {
-      backendParams.append('start_date', startDateObj.toISOString())
-      backendParams.append('end_date', endDateObj.toISOString())
+    if (range.startISO && range.endISO) {
+      backendParams.append('start_date', range.startISO)
+      backendParams.append('end_date', range.endISO)
     }
 
     // Call the FastAPI backend
-    const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
     const response = await fetch(
-      `${backendUrl}/api/team-leader/open-leads?${backendParams.toString()}`,
+      `${FASTAPI_BASE_URL}/api/team-leader/open-leads?${backendParams.toString()}`,
       {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
@@ -98,32 +84,16 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text()
       console.error('[OpenLeads API] Backend error:', response.status, errorText)
-
-      return NextResponse.json(
-        {
-          error: 'Failed to fetch open leads data',
-          details: errorText
-        },
-        { status: response.status }
-      )
+      return respondError('Failed to fetch open leads data', response.status, errorText)
     }
 
     const data = await response.json()
 
-    return NextResponse.json(data, {
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
-      },
-    })
+    // Short cache for instant tab switches with background revalidation
+    return respond(data, { cache: 's-maxage=5, stale-while-revalidate=20' })
 
   } catch (error) {
     console.error('[OpenLeads API] Error:', error)
-    return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    )
+    return respondError('Internal server error', 500, error instanceof Error ? error.message : 'Unknown error')
   }
 }

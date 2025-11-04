@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[TL-API] teamLeaderId:', teamLeaderId, 'days:', dateRange)
+    console.log(`🔄 Using FastAPI URL: ${API_CONFIG.FASTAPI_URL}`)
 
     // Forward auth from incoming request
     const headerAuth = request.headers.get('authorization')

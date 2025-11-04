@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthFromRequest } from '@/utils/api/auth'
+import { respondError } from '@/utils/api/envelope'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,15 +22,13 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get the access token from cookies
-    const accessToken = request.cookies.get('access_token')?.value
-    console.log('[Source Performance] Access token from cookies:', accessToken ? 'Present' : 'Missing')
+    // Get the access token using shared auth utility
+    const authCtx = getAuthFromRequest(request)
+    const { bearer } = authCtx
+    console.log('[Source Performance] Auth context:', { hasBearer: !!bearer })
     
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'Access token is required' },
-        { status: 401 }
-      )
+    if (!bearer) {
+      return respondError('Access token is required', 401)
     }
 
     // Calculate date range
@@ -60,17 +60,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Build the base URL for the backend API
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
-    console.log('[Source Performance] Fetching PS members from:', `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`)
+    console.log('[Source Performance] Fetching PS members from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`)
 
     // Fetch PS members for this team leader
     const psResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`,
       {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
         },
       }
     )
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    console.log('[Source Performance] Fetching source performance data from:', `${backendUrl}/api/team-leader/${teamLeaderId}/source-performance`)
+    console.log('[Source Performance] Fetching source performance data from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/source-performance`)
 
     // Prepare request body
     const requestBody: any = {
@@ -130,12 +131,12 @@ export async function GET(request: NextRequest) {
 
     // Fetch source performance data from backend
     const sourcePerformanceResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/source-performance`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/source-performance`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
         },
         body: JSON.stringify(requestBody),
       }
@@ -146,7 +147,8 @@ export async function GET(request: NextRequest) {
     if (!sourcePerformanceResponse.ok) {
       const errorText = await sourcePerformanceResponse.text()
       console.error('[Source Performance] Source performance error:', errorText)
-      throw new Error(`Failed to fetch source performance data: ${sourcePerformanceResponse.status} ${errorText}`)
+      console.error('[Source Performance] Error details - Status:', sourcePerformanceResponse.status, 'Body:', errorText)
+      return respondError(`Backend error: ${errorText}`, sourcePerformanceResponse.status, errorText)
     }
 
     const sourcePerformanceData = await sourcePerformanceResponse.json()

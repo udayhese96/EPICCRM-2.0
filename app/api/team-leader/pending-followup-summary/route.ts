@@ -1,4 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { getAuthFromRequest } from '@/utils/api/auth'
+import { deriveRange } from '@/utils/date/range'
+import { respond, respondError } from '@/utils/api/envelope'
+import { summaryCache, shouldBypassCache } from '@/utils/api/cache'
+import { rateLimit } from '@/utils/api/rateLimit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,74 +18,53 @@ export async function GET(request: NextRequest) {
     console.log('[Pending Followup Summary] Params:', { teamLeaderId, dateRange, startDate, endDate })
 
     if (!teamLeaderId) {
-      return NextResponse.json(
-        { error: 'Team leader ID is required' },
-        { status: 400 }
-      )
+      return respondError('Team leader ID is required', 400)
     }
 
-    // Get access token from cookies
-    const accessToken = request.cookies.get('access_token')?.value
-
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'Access token is required' },
-        { status: 401 }
-      )
+    const authCtx = getAuthFromRequest(request)
+    const { bearer, tlId, tenantId } = authCtx
+    console.log('[Pending Followup Summary] Auth context:', { hasBearer: !!bearer, tenantId, tlId })
+    if (!bearer) {
+      return respondError('Access token is required', 401)
     }
 
-    // Calculate date range
-    let startDateObj: Date
-    let endDateObj: Date
-    
-    if (startDate && endDate) {
-      // Use custom date range
-      startDateObj = new Date(startDate)
-      endDateObj = new Date(endDate)
-    } else if (dateRange === 'all') {
-      // All time - no date filtering
-      startDateObj = null as any
-      endDateObj = null as any
-    } else if (dateRange === 'today') {
-      // Today only
-      const now = new Date()
-      startDateObj = new Date(now)
-      startDateObj.setHours(0, 0, 0, 0)
-      endDateObj = new Date(now)
-      endDateObj.setHours(23, 59, 59, 999)
-    } else {
-      // Last X days (default behavior)
-      const now = new Date()
-      startDateObj = new Date()
-      startDateObj.setDate(now.getDate() - parseInt(dateRange))
-      endDateObj = new Date()
-      endDateObj.setHours(23, 59, 59, 999)
-    }
+    // Calculate and clamp date range (analytics/summary: max 180 days)
+    const range = deriveRange({ preset: dateRange, start: startDate, end: endDate, tz: null, clampDays: 180 })
 
     // Build the base URL for the backend API
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
-    console.log('[Pending Followup Summary] Fetching from backend:', `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`)
+    console.log('[Pending Followup Summary] Fetching from backend:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/pending-followup-summary`)
 
     // Prepare request body
     const requestBody: any = {}
-    
-    // Add date parameters if not "all time"
-    if (startDateObj && endDateObj) {
-      requestBody.start_date = startDateObj.toISOString()
-      requestBody.end_date = endDateObj.toISOString()
+    if (range.startISO && range.endISO) {
+      requestBody.start_date = range.startISO
+      requestBody.end_date = range.endISO
     }
 
     console.log('[Pending Followup Summary] Request body:', requestBody)
 
+    // Cache and rate limit
+    const cacheDisabled = process.env.NEXT_PUBLIC_TL_CACHE === 'false' || shouldBypassCache(request)
+    const cacheKey = cacheDisabled ? null : `pending-summary:${tenantId || 'default'}:${teamLeaderId}:${range.startISO || 'na'}:${range.endISO || 'na'}`
+    if (cacheKey) {
+      const hit = summaryCache.get(cacheKey)
+      if (hit) return respond(hit, { cache: { sMaxAge: 15, staleWhileRevalidate: 60 }, requestETag: request.headers.get('if-none-match') })
+    }
+
+    const rl = rateLimit('summary', tlId, 5, 10_000, tenantId)
+    if (!rl.allowed) return respondError('Too Many Requests', 429, { retryAfter: rl.retryAfter })
+
     // Fetch pending followup summary data from backend
     const response = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/pending-followup-summary`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/pending-followup-summary`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
         },
         body: JSON.stringify(requestBody),
       }
@@ -91,22 +75,18 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text()
       console.error('[Pending Followup Summary] Backend error:', errorText)
-      return NextResponse.json(
-        { error: 'Failed to fetch pending followup summary data', details: errorText },
-        { status: response.status }
-      )
+      console.error('[Pending Followup Summary] Error details - Status:', response.status, 'Body:', errorText)
+      return respondError(`Backend error: ${errorText}`, response.status, errorText)
     }
 
     const data = await response.json()
     console.log('[Pending Followup Summary] Data received:', data)
 
-    return NextResponse.json(data)
+    if (cacheKey) summaryCache.set(cacheKey, data, 15_000)
+    return respond(data, { cache: { sMaxAge: 15, staleWhileRevalidate: 60 } })
   } catch (error) {
     console.error('[Pending Followup Summary] Error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return respondError('Internal server error', 500, error instanceof Error ? error.message : 'Unknown error')
   }
 }
 

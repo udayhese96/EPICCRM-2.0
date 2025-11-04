@@ -18,7 +18,6 @@ import {
   CheckCircle2, 
   AlertCircle, 
   History,
-  Download,
   Undo2,
   Search,
   Filter
@@ -26,7 +25,6 @@ import {
 import Link from "next/link"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import { VirtualList } from "@/components/ui/virtual-list"
 
 interface Lead {
   id: number
@@ -76,7 +74,6 @@ export default function LeadTransferPage() {
   const [recentlyTransferredCreIds, setRecentlyTransferredCreIds] = useState<Set<number>>(new Set())
   const [recentlyTransferredCreUids, setRecentlyTransferredCreUids] = useState<Set<string>>(new Set())
   // Note: We manage localStorage manually to avoid timing issues when switching CREs
-  const gridCols = "grid grid-cols-[40px_8rem_1fr_9rem_7rem_7rem_14rem_4rem]"
   const [selectedCreLeads, setSelectedCreLeads] = useState<Set<number>>(new Set())
   
   // PS Transfer States (SEPARATE from CRE)
@@ -852,10 +849,6 @@ export default function LeadTransferPage() {
     setShowHistory(true)
   }
 
-  const exportReport = () => {
-    // Implementation for export
-    alert('Export functionality coming soon!')
-  }
 
   return (
     <div className="relative min-h-screen w-full bg-gradient-to-br from-[#fff7ef] via-[#fff2e4] to-[#ffe7d1]">
@@ -880,15 +873,6 @@ export default function LeadTransferPage() {
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-orange-700">
               Lead Transfer
             </h1>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={exportReport}
-              className="rounded-xl bg-white/70 border-none shadow hover:bg-green-50"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export Report
-            </Button>
           </div>
 
           {/* Tab Selector */}
@@ -1211,51 +1195,75 @@ export default function LeadTransferPage() {
                       </div>
                     </div>
 
-                    <div className="border border-orange-100 rounded-2xl bg-white/90 shadow-sm">
-                      {/* Grid header */}
-                      <div className={`sticky top-0 z-10 bg-orange-50 text-orange-800 font-medium text-sm ${gridCols} border-b`}>
-                        <div className="px-4 py-3">
-                          <Checkbox />
-                        </div>
-                        <div className="px-4 py-3">UID</div>
-                        <div className="px-4 py-3">Customer</div>
-                        <div className="px-4 py-3">Mobile</div>
-                        <div className="px-4 py-3">Status</div>
-                        <div className="px-4 py-3">Source</div>
-                        <div className="px-4 py-3">Model</div>
-                        <div className="px-4 py-3">Actions</div>
+                    <div className="border border-orange-100 rounded-2xl bg-white/90 shadow-sm overflow-hidden">
+                      <div className="max-h-[500px] overflow-auto rounded-2xl">
+                        <table className="w-full leads-data-table">
+                          <colgroup>
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '160px' }} />
+                            <col style={{ width: '140px' }} />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '100px' }} />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '120px' }} />
+                          </colgroup>
+                            <thead className="leads-data-thead">
+                              <tr>
+                                <th className="leads-data-th text-left">UID</th>
+                                <th className="leads-data-th text-left">Customer</th>
+                                <th className="leads-data-th text-left">Mobile</th>
+                                <th className="leads-data-th text-center">Status</th>
+                                <th className="leads-data-th text-left">Source</th>
+                                <th className="leads-data-th text-left">Model</th>
+                                <th className="leads-data-th text-center">Transfer History</th>
+                              </tr>
+                            </thead>
+                          <tbody className="leads-data-tbody">
+                            {creLeads.map((lead, index) => (
+                              <tr key={lead.id} className={`leads-data-row ${index % 2 === 0 ? 'leads-data-row-even' : 'leads-data-row-odd'}`}>
+                                <td className="leads-data-td text-left">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      checked={selectedCreLeads.has(lead.id)}
+                                      onCheckedChange={() => toggleCreLead(lead.id)}
+                                    />
+                                    <span className="leads-data-uid">{lead.uid}</span>
+                                  </div>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-customer">{lead.customer_name}</span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-mobile">{lead.customer_mobile_number}</span>
+                                </td>
+                                <td className="leads-data-td text-center">
+                                  <span className="leads-data-status px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
+                                    {lead.lead_status || 'Pending'}
+                                  </span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-source">{lead.source || 'N/A'}</span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-model">{lead.model_interested || 'N/A'}</span>
+                                </td>
+                                <td className="leads-data-td text-center">
+                                  <Button size="sm" variant="ghost" onClick={() => showLeadHistory(lead)} className="leads-data-action-btn">
+                                    <History className="h-4 w-4" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                            {creLeads.length === 0 && (
+                              <tr>
+                                <td colSpan={7} className="leads-data-td text-center py-8 text-gray-500">
+                                  No leads found
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
-                      {/* Virtualized rows */}
-                      <VirtualList
-                        items={creLeads}
-                        itemHeight={64}
-                        containerHeight={500}
-                        renderItem={(lead) => (
-                          <div className={`${gridCols} items-center hover:bg-orange-50 text-sm`}>
-                            <div className="px-4 py-3 border-b">
-                              <Checkbox
-                                checked={selectedCreLeads.has(lead.id)}
-                                onCheckedChange={() => toggleCreLead(lead.id)}
-                              />
-                            </div>
-                            <div className="px-4 py-3 border-b font-mono text-xs">{lead.uid}</div>
-                            <div className="px-4 py-3 border-b font-medium truncate">{lead.customer_name}</div>
-                            <div className="px-4 py-3 border-b font-mono text-xs">{lead.customer_mobile_number}</div>
-                            <div className="px-4 py-3 border-b">
-                              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
-                                {lead.lead_status || 'Pending'}
-                              </span>
-                            </div>
-                            <div className="px-4 py-3 border-b text-xs">{lead.source || 'N/A'}</div>
-                            <div className="px-4 py-3 border-b text-xs truncate">{lead.model_interested || 'N/A'}</div>
-                            <div className="px-4 py-3 border-b">
-                              <Button size="sm" variant="ghost" onClick={() => showLeadHistory(lead)} className="rounded-lg">
-                                <History className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      />
                     </div>
 
                     <div className="flex justify-end">
@@ -1458,47 +1466,75 @@ export default function LeadTransferPage() {
                       </div>
                     </div>
 
-                    <div className="border border-orange-100 rounded-2xl bg-white/90 shadow-sm">
-                      <div className={`sticky top-0 z-10 bg-orange-50 text-orange-800 font-medium text-sm ${gridCols} border-b`}>
-                        <div className="px-4 py-3"><Checkbox /></div>
-                        <div className="px-4 py-3">UID</div>
-                        <div className="px-4 py-3">Customer</div>
-                        <div className="px-4 py-3">Mobile</div>
-                        <div className="px-4 py-3">Status</div>
-                        <div className="px-4 py-3">Source</div>
-                        <div className="px-4 py-3">Model</div>
-                        <div className="px-4 py-3">Actions</div>
+                    <div className="border border-orange-100 rounded-2xl bg-white/90 shadow-sm overflow-hidden">
+                      <div className="max-h-[500px] overflow-auto rounded-2xl">
+                        <table className="w-full leads-data-table">
+                          <colgroup>
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '160px' }} />
+                            <col style={{ width: '140px' }} />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '100px' }} />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '120px' }} />
+                          </colgroup>
+                            <thead className="leads-data-thead">
+                              <tr>
+                                <th className="leads-data-th text-left">UID</th>
+                                <th className="leads-data-th text-left">Customer</th>
+                                <th className="leads-data-th text-left">Mobile</th>
+                                <th className="leads-data-th text-center">Status</th>
+                                <th className="leads-data-th text-left">Source</th>
+                                <th className="leads-data-th text-left">Model</th>
+                                <th className="leads-data-th text-center">Transfer History</th>
+                              </tr>
+                            </thead>
+                          <tbody className="leads-data-tbody">
+                            {psLeads.map((lead, index) => (
+                              <tr key={lead.id} className={`leads-data-row ${index % 2 === 0 ? 'leads-data-row-even' : 'leads-data-row-odd'}`}>
+                                <td className="leads-data-td text-left">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      checked={selectedPsLeads.has(lead.id)}
+                                      onCheckedChange={() => togglePsLead(lead.id)}
+                                    />
+                                    <span className="leads-data-uid">{lead.uid}</span>
+                                  </div>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-customer">{lead.customer_name}</span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-mobile">{lead.customer_mobile_number}</span>
+                                </td>
+                                <td className="leads-data-td text-center">
+                                  <span className="leads-data-status px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
+                                    {lead.lead_status || 'Pending'}
+                                  </span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-source">{lead.source || 'N/A'}</span>
+                                </td>
+                                <td className="leads-data-td text-left">
+                                  <span className="leads-data-model">{lead.model_interested || 'N/A'}</span>
+                                </td>
+                                <td className="leads-data-td text-center">
+                                  <Button size="sm" variant="ghost" onClick={() => showLeadHistory(lead)} className="leads-data-action-btn">
+                                    <History className="h-4 w-4" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                            {psLeads.length === 0 && (
+                              <tr>
+                                <td colSpan={7} className="leads-data-td text-center py-8 text-gray-500">
+                                  No leads found
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
-                      <VirtualList
-                        items={psLeads}
-                        itemHeight={64}
-                        containerHeight={500}
-                        renderItem={(lead) => (
-                          <div className={`${gridCols} items-center hover:bg-orange-50 text-sm`}>
-                            <div className="px-4 py-3 border-b">
-                              <Checkbox
-                                checked={selectedPsLeads.has(lead.id)}
-                                onCheckedChange={() => togglePsLead(lead.id)}
-                              />
-                            </div>
-                            <div className="px-4 py-3 border-b font-mono text-xs">{lead.uid}</div>
-                            <div className="px-4 py-3 border-b font-medium truncate">{lead.customer_name}</div>
-                            <div className="px-4 py-3 border-b font-mono text-xs">{lead.customer_mobile_number}</div>
-                            <div className="px-4 py-3 border-b">
-                              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
-                                {lead.lead_status || 'Pending'}
-                              </span>
-                            </div>
-                            <div className="px-4 py-3 border-b text-xs">{lead.source || 'N/A'}</div>
-                            <div className="px-4 py-3 border-b text-xs truncate">{lead.model_interested || 'N/A'}</div>
-                            <div className="px-4 py-3 border-b">
-                              <Button size="sm" variant="ghost" onClick={() => showLeadHistory(lead)} className="rounded-lg">
-                                <History className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      />
                     </div>
 
                     <div className="flex justify-end">
@@ -1627,6 +1663,217 @@ export default function LeadTransferPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Optimized Leads Data Table Styles */}
+      <style jsx>{`
+        .leads-data-table {
+          table-layout: fixed;
+          border-collapse: collapse;
+          font-size: 0.875rem;
+          background-color: #ffffff;
+        }
+
+        .leads-data-thead {
+          background-color: #fff7ed;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .leads-data-th {
+          padding: 10px 12px;
+          font-weight: 600;
+          color: #9a3412;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          vertical-align: middle;
+          background-color: #fff7ed;
+        }
+
+        .leads-data-tbody {
+          background-color: #ffffff;
+        }
+
+        .leads-data-row {
+          transition: background-color 0.15s ease;
+          min-height: 52px;
+        }
+
+        .leads-data-row:hover {
+          background-color: #fff7ed;
+        }
+
+        .leads-data-row-even {
+          background-color: #ffffff;
+        }
+
+        .leads-data-row-odd {
+          background-color: #fefefe;
+        }
+
+        .leads-data-row:hover {
+          background-color: #fff7ed !important;
+        }
+
+        .leads-data-td {
+          padding: 10px 12px;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+          vertical-align: middle;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          color: #374151;
+          min-height: 52px;
+        }
+
+        .leads-data-uid {
+          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+          font-size: 0.75rem;
+          color: #6b7280;
+          font-weight: 500;
+        }
+
+        .leads-data-customer {
+          font-weight: 600;
+          color: #111827;
+        }
+
+        .leads-data-mobile {
+          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+          font-size: 0.8125rem;
+          color: #6b7280;
+        }
+
+        .leads-data-status {
+          display: inline-block;
+          white-space: nowrap;
+        }
+
+        .leads-data-source {
+          color: #4b5563;
+          font-size: 0.8125rem;
+        }
+
+        .leads-data-model {
+          color: #4b5563;
+          font-size: 0.8125rem;
+        }
+
+        .leads-data-action-btn {
+          padding: 6px;
+          border-radius: 8px;
+          transition: all 0.15s ease;
+        }
+
+        .leads-data-action-btn:hover {
+          background-color: #f3f4f6;
+          transform: scale(1.05);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+          .leads-data-table {
+            min-width: 820px;
+          }
+          
+          .leads-data-th,
+          .leads-data-td {
+            padding: 8px 10px;
+            font-size: 0.8125rem;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .leads-data-table {
+            min-width: 620px;
+          }
+          
+          .leads-data-th,
+          .leads-data-td {
+            padding: 6px 8px;
+            font-size: 0.75rem;
+          }
+
+          .leads-data-uid,
+          .leads-data-mobile {
+            font-size: 0.6875rem;
+          }
+
+          .leads-data-source,
+          .leads-data-model {
+            font-size: 0.75rem;
+          }
+
+          /* Hide low priority columns on mobile */
+          .leads-data-table colgroup col:nth-child(5),
+          .leads-data-table colgroup col:nth-child(6) {
+            width: 0px;
+          }
+          
+          .leads-data-th:nth-child(5),
+          .leads-data-th:nth-child(6),
+          .leads-data-td:nth-child(5),
+          .leads-data-td:nth-child(6) {
+            display: none;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .leads-data-table {
+            min-width: 480px;
+          }
+          
+          .leads-data-th,
+          .leads-data-td {
+            padding: 4px 6px;
+            font-size: 0.6875rem;
+          }
+
+          /* Hide more columns on very small screens */
+          .leads-data-table colgroup col:nth-child(4),
+          .leads-data-table colgroup col:nth-child(5),
+          .leads-data-table colgroup col:nth-child(6) {
+            width: 0px;
+          }
+          
+          .leads-data-th:nth-child(4),
+          .leads-data-th:nth-child(5),
+          .leads-data-th:nth-child(6),
+          .leads-data-td:nth-child(4),
+          .leads-data-td:nth-child(5),
+          .leads-data-td:nth-child(6) {
+            display: none;
+          }
+        }
+
+        /* Smooth scrolling for the table container */
+        .leads-data-table-container {
+          overflow-x: auto;
+          border-radius: 16px;
+          scroll-behavior: smooth;
+        }
+
+        .leads-data-table-container::-webkit-scrollbar {
+          height: 6px;
+        }
+
+        .leads-data-table-container::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 3px;
+        }
+
+        .leads-data-table-container::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 3px;
+        }
+
+        .leads-data-table-container::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
     </div>
   )
 }

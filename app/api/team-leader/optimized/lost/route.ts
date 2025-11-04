@@ -75,9 +75,10 @@ export async function GET(request: NextRequest) {
       backendParams.append('end_date', endDateObj.toISOString())
     }
 
-    const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
     const response = await fetch(
-      `${backendUrl}/api/team-leader/optimized/lost?${backendParams.toString()}`,
+      `${FASTAPI_BASE_URL}/api/team-leader/optimized/lost?${backendParams.toString()}`,
       {
         method: 'GET',
         headers: {

@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthFromRequest } from '@/utils/api/auth'
+import { deriveRange } from '@/utils/date/range'
+import { respond, respondError } from '@/utils/api/envelope'
+import { summaryCache, shouldBypassCache } from '@/utils/api/cache'
+import { rateLimit } from '@/utils/api/rateLimit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,63 +19,29 @@ export async function GET(request: NextRequest) {
     console.log('[Analytics Summary] Params:', { teamLeaderId, dateRange, psMember, startDate, endDate })
 
     if (!teamLeaderId) {
-      return NextResponse.json(
-        { error: 'Team leader ID is required' },
-        { status: 400 }
-      )
+      return respondError('Team leader ID is required', 400)
     }
 
-    // Get the access token from cookies
-    const accessToken = request.cookies.get('access_token')?.value
-    console.log('[Analytics Summary] Access token from cookies:', accessToken ? 'Present' : 'Missing')
-    
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'Access token is required' },
-        { status: 401 }
-      )
-    }
+    const authCtx = getAuthFromRequest(request)
+    const { bearer, tenantId } = authCtx
+    console.log('[Analytics Summary] Auth context:', { hasBearer: !!bearer, tenantId })
+    if (!bearer) return respondError('Access token is required', 401)
 
-    // Calculate date range
-    let startDateObj: Date
-    let endDateObj: Date
-    
-    if (startDate && endDate) {
-      // Use custom date range
-      startDateObj = new Date(startDate)
-      endDateObj = new Date(endDate)
-    } else if (dateRange === 'all') {
-      // All time - no date filtering
-      startDateObj = null as any
-      endDateObj = null as any
-    } else if (dateRange === 'today') {
-      // Today only
-      const now = new Date()
-      startDateObj = new Date(now)
-      startDateObj.setHours(0, 0, 0, 0)
-      endDateObj = new Date(now)
-      endDateObj.setHours(23, 59, 59, 999)
-    } else {
-      // Last X days (default behavior)
-      const now = new Date()
-      startDateObj = new Date()
-      startDateObj.setDate(now.getDate() - parseInt(dateRange))
-      endDateObj = new Date()
-      endDateObj.setHours(23, 59, 59, 999)
-    }
+    const range = deriveRange({ preset: dateRange, start: startDate, end: endDate, tz: null, clampDays: 180 })
 
     // Build the base URL for the backend API
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
 
-    console.log('[Analytics Summary] Fetching PS members from:', `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`)
+    console.log('[Analytics Summary] Fetching PS members from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`)
 
     // Fetch PS members for this team leader
     const psResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/ps-members`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/ps-members`,
       {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
         },
       }
     )
@@ -105,21 +76,32 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    console.log('[Analytics Summary] Fetching analytics data from:', `${backendUrl}/api/team-leader/${teamLeaderId}/analytics-kpi`)
+    console.log('[Analytics Summary] Fetching analytics data from:', `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/analytics-kpi`)
 
     // Fetch analytics data from backend
+    // Cache key and RL
+    const cacheDisabled = process.env.NEXT_PUBLIC_TL_CACHE === 'false' || shouldBypassCache(request)
+    const cacheKey = cacheDisabled ? null : `analytics-summary:${tenantId || 'default'}:${teamLeaderId}:${range.startISO || 'na'}:${range.endISO || 'na'}`
+    if (cacheKey) {
+      const hit = summaryCache.get(cacheKey)
+      if (hit) return respond(hit, { cache: { sMaxAge: 15, staleWhileRevalidate: 60 }, requestETag: request.headers.get('if-none-match') })
+    }
+
+    const rl = rateLimit('summary', teamLeaderId, 5, 10_000, tenantId)
+    if (!rl.allowed) return respondError('Too Many Requests', 429, { retryAfter: rl.retryAfter })
+
     const analyticsResponse = await fetch(
-      `${backendUrl}/api/team-leader/${teamLeaderId}/analytics-kpi`,
+      `${FASTAPI_BASE_URL}/api/team-leader/${teamLeaderId}/analytics-kpi`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': bearer,
         },
         body: JSON.stringify({
           ps_ids: targetPsIds,
-          start_date: startDateObj ? startDateObj.toISOString() : undefined,
-          end_date: endDateObj ? endDateObj.toISOString() : undefined,
+          start_date: range.startISO,
+          end_date: range.endISO,
         }),
       }
     )
@@ -129,24 +111,26 @@ export async function GET(request: NextRequest) {
     if (!analyticsResponse.ok) {
       const errorText = await analyticsResponse.text()
       console.error('[Analytics Summary] Analytics error:', errorText)
-      throw new Error(`Failed to fetch analytics data: ${analyticsResponse.status} ${errorText}`)
+      console.error('[Analytics Summary] Analytics error details - Status:', analyticsResponse.status, 'Body:', errorText)
+      return respondError(`Backend error: ${errorText}`, analyticsResponse.status, errorText)
     }
 
     const analyticsData = await analyticsResponse.json()
     console.log('[Analytics Summary] Analytics data:', analyticsData)
 
-    return NextResponse.json({
+    const payload = {
       total_assigned: analyticsData.total_assigned || 0,
       open_leads: analyticsData.open_leads || 0,
       won_leads: analyticsData.won_leads || 0,
       lost_leads: analyticsData.lost_leads || 0,
-    })
+    }
+
+    if (cacheKey) summaryCache.set(cacheKey, payload, 15_000)
+
+    return respond(payload, { cache: { sMaxAge: 15, staleWhileRevalidate: 60 } })
   } catch (error) {
     console.error('Error fetching analytics summary:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch analytics summary' },
-      { status: 500 }
-    )
+    return respondError('Failed to fetch analytics summary', 500)
   }
 }
 
