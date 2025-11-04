@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const FASTAPI_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
 
 export async function GET(request: NextRequest) {
   try {
@@ -67,7 +67,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 5. Fetch PS follow-up data filtered by assigned PS users and branch
-    const response = await fetch(`${FASTAPI_URL}/api/ps-followup`, {
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+    const response = await fetch(`${FASTAPI_BASE_URL}/api/ps-followup`, {
       method: 'GET',
       headers: {
         'Authorization': token,

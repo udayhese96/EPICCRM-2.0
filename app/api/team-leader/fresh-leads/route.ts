@@ -82,9 +82,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Call the FastAPI backend
-    const backendUrl = process.env.FASTAPI_URL || 'http://localhost:8000'
+    const FASTAPI_BASE_URL = process.env.FASTAPI_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : 'https://epic-crm-backend.onrender.com')
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
     const response = await fetch(
-      `${backendUrl}/api/team-leader/fresh-leads?${backendParams.toString()}`,
+      `${FASTAPI_BASE_URL}/api/team-leader/fresh-leads?${backendParams.toString()}`,
       {
         method: 'GET',
         headers: {
@@ -109,6 +110,16 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
+    
+    // Debug: Log first lead to verify PS data
+    if (data.leads && data.leads.length > 0) {
+      console.log('[Fresh Leads API] First lead data:', {
+        lead_uid: data.leads[0].lead_uid,
+        ps_id: data.leads[0].ps_id,
+        ps_name: data.leads[0].ps_name,
+        ps_branch: data.leads[0].ps_branch
+      })
+    }
 
     return NextResponse.json(data, {
       headers: {

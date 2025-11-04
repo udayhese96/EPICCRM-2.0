@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { RoleGuard } from '@/components/auth/role-guard'
+import { useTeamLeaderBundle } from '@/hooks/useTeamLeaderBundle'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -73,6 +74,13 @@ interface Lead {
   follow_up_date?: string
   ps_assigned_at?: string
   icrop_id?: string
+  ps_name?: string
+  ps_branch?: string
+  ps_id?: string
+  make?: string
+  model?: string
+  variant?: string
+  sub_source?: string
 }
 
 interface TeamPerformanceData {
@@ -117,8 +125,9 @@ interface SourcePerformanceData {
   untouched: number
   called: number
   waiting_for_approval: number
-      won: number
+  won: number
   lost: number
+  lost_requested?: number
   total_assigned: number
   is_sub_source?: boolean
 }
@@ -170,6 +179,9 @@ export default function TeamLeaderDashboard() {
   const [customEndDate, setCustomEndDate] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  // Feature flag for bundle endpoint
+  const useBundleEndpoint = process.env.NEXT_PUBLIC_BUNDLE_CARDS === 'true'
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>('analytics')
@@ -306,6 +318,23 @@ export default function TeamLeaderDashboard() {
     lostLeads: 0
   })
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+
+  // Bundle endpoint hook (new optimized approach)
+  const dateParams = useMemo(() => {
+    if (dateFilterType === 'date_range' && customStartDate && customEndDate) {
+      return { dateRange, startDate: customStartDate, endDate: customEndDate }
+    }
+    return { dateRange }
+  }, [dateFilterType, dateRange, customStartDate, customEndDate])
+  
+  const bundleData = useTeamLeaderBundle({
+    teamLeaderId: currentUserId || undefined,
+    dateRange: dateParams.dateRange,
+    startDate: dateParams.startDate,
+    endDate: dateParams.endDate,
+    enabled: useBundleEndpoint && !!currentUserId,
+    refreshInterval: 20_000,
+  })
 
   // Source Performance data
   const [sourcePerformanceData, setSourcePerformanceData] = useState<SourcePerformanceData[]>([])
@@ -718,6 +747,21 @@ export default function TeamLeaderDashboard() {
   const fetchAnalyticsData = useCallback(async () => {
     if (!currentUserId) return
 
+    // If bundle endpoint is enabled, use that data instead
+    if (useBundleEndpoint && bundleData.data) {
+      setAnalyticsData({
+        totalLeadsAssigned: bundleData.data.assigned_count,
+        openLeads: bundleData.data.open_count,
+        wonLeads: bundleData.data.won_count,
+        lostLeads: bundleData.data.lost_count,
+      })
+      setAnalyticsLoading(false)
+      // Still fetch source and pending data (bundle has them but compatibility)
+      await fetchSourcePerformanceData()
+      await fetchPendingFollowupData()
+      return
+    }
+
     setAnalyticsLoading(true)
     try {
       const dateParams = getDateParameters()
@@ -765,7 +809,7 @@ export default function TeamLeaderDashboard() {
     // Also fetch source performance data and pending follow-up data
     await fetchSourcePerformanceData()
     await fetchPendingFollowupData()
-  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchSourcePerformanceData, fetchPendingFollowupData])
+  }, [currentUserId, dateRange, selectedPS, dateFilterType, customStartDate, customEndDate, fetchSourcePerformanceData, fetchPendingFollowupData, useBundleEndpoint, bundleData.data])
 
 
   // Individual tab data fetchers
@@ -794,6 +838,14 @@ export default function TeamLeaderDashboard() {
     
     if (response.ok) {
       const data = await response.json()
+      // Debug: Check if PS data is present
+      if (data.leads && data.leads.length > 0) {
+        console.log('[Frontend] First lead PS data:', {
+          ps_id: data.leads[0].ps_id,
+          ps_name: data.leads[0].ps_name,
+          ps_branch: data.leads[0].ps_branch
+        })
+      }
       return data
     }
     return { leads: [], total: 0 }
@@ -4002,120 +4054,92 @@ export default function TeamLeaderDashboard() {
                         </Button>
                 </div>
 
-                {/* KPI Cards Grid */}
-                <div className="grid grid-cols-2 gap-3 sm:gap-6">
+                {/* KPI Cards Grid - Compact Design */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                   {/* Total Leads Assigned Card */}
-                  <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-2 px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-blue-700">
-                          Total Leads Assigned
-                </CardTitle>
-                        <button
-                          className="text-blue-600 hover:text-blue-800"
-                          title="Total unique leads assigned to your PS team within the selected date range"
-                        >
-                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </button>
-                      </div>
-              </CardHeader>
-              <CardContent className="px-3 py-2">
-                      {analyticsLoading ? (
-                        <div className="animate-pulse">
-                          <div className="h-8 bg-blue-200 rounded w-16 mb-2"></div>
-          </div>
-                      ) : (
-                        <div className="text-2xl sm:text-4xl font-bold text-blue-900">
-                          {analyticsData.totalLeadsAssigned.toLocaleString()}
-                  </div>
-                        )}
-              </CardContent>
-            </Card>
-
-                  {/* Open Leads Card */}
-                  <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-2 px-3 py-2">
-                <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-orange-700">
-                          Open Leads
-                  </CardTitle>
-                        <button
-                          className="text-orange-600 hover:text-orange-800"
-                          title="Leads with status 'Pending' within the selected date range"
-                        >
-                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </button>
+                  <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+                    <CardHeader className="p-3 pb-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <CardTitle className="text-xs font-medium text-blue-700 line-clamp-1">
+                          Total Assigned
+                        </CardTitle>
+                        <Info className="h-3 w-3 text-blue-600 flex-shrink-0" title="Total unique leads assigned to your PS team" />
                       </div>
                     </CardHeader>
-                      <CardContent className="px-3 py-2">
+                    <CardContent className="p-3 pt-0">
                       {analyticsLoading ? (
-                        <div className="animate-pulse">
-                          <div className="h-8 bg-orange-200 rounded w-16 mb-2"></div>
+                        <div className="h-6 bg-blue-200 rounded w-12 animate-pulse"></div>
+                      ) : (
+                        <div className="text-2xl font-bold text-blue-900">
+                          {analyticsData.totalLeadsAssigned.toLocaleString()}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Open Leads Card */}
+                  <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200">
+                    <CardHeader className="p-3 pb-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <CardTitle className="text-xs font-medium text-orange-700 line-clamp-1">
+                          Open Leads
+                        </CardTitle>
+                        <Info className="h-3 w-3 text-orange-600 flex-shrink-0" title="Leads with status 'Pending'" />
                       </div>
-                        ) : (
-                        <div className="text-2xl sm:text-4xl font-bold text-orange-900">
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      {analyticsLoading ? (
+                        <div className="h-6 bg-orange-200 rounded w-12 animate-pulse"></div>
+                      ) : (
+                        <div className="text-2xl font-bold text-orange-900">
                           {analyticsData.openLeads.toLocaleString()}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
 
                   {/* Won Leads Card */}
-                  <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-2 px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-green-700">
+                  <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+                    <CardHeader className="p-3 pb-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <CardTitle className="text-xs font-medium text-green-700 line-clamp-1">
                           Won Leads
-                </CardTitle>
-                        <button
-                          className="text-green-600 hover:text-green-800"
-                          title="Leads with status 'Won' filtered by won timestamp"
-                        >
-                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </button>
+                        </CardTitle>
+                        <Info className="h-3 w-3 text-green-600 flex-shrink-0" title="Leads with status 'Won'" />
                       </div>
-              </CardHeader>
-                      <CardContent className="px-3 py-2">
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
                       {analyticsLoading ? (
-                        <div className="animate-pulse">
-                          <div className="h-8 bg-green-200 rounded w-16 mb-2"></div>
-                      </div>
-                        ) : (
-                        <div className="text-2xl sm:text-4xl font-bold text-green-900">
+                        <div className="h-6 bg-green-200 rounded w-12 animate-pulse"></div>
+                      ) : (
+                        <div className="text-2xl font-bold text-green-900">
                           {analyticsData.wonLeads.toLocaleString()}
-                      </div>
-                        )}
-              </CardContent>
-            </Card>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
 
                   {/* Lost Leads Card */}
-                  <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200 shadow-sm hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-2 px-3 py-2">
-                        <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-red-700">
+                  <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200">
+                    <CardHeader className="p-3 pb-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <CardTitle className="text-xs font-medium text-red-700 line-clamp-1">
                           Lost Leads
                         </CardTitle>
-                        <button
-                          className="text-red-600 hover:text-red-800"
-                          title="Leads with status 'Lost' filtered by lost timestamp"
-                        >
-                          <Info className="h-3 w-3 sm:h-4 sm:w-4" />
-                        </button>
-                                  </div>
-                      </CardHeader>
-                      <CardContent className="px-3 py-2">
+                        <Info className="h-3 w-3 text-red-600 flex-shrink-0" title="Leads with status 'Lost'" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
                       {analyticsLoading ? (
-                        <div className="animate-pulse">
-                          <div className="h-8 bg-red-200 rounded w-16 mb-2"></div>
-                                    </div>
-                        ) : (
-                        <div className="text-2xl sm:text-4xl font-bold text-red-900">
+                        <div className="h-6 bg-red-200 rounded w-12 animate-pulse"></div>
+                      ) : (
+                        <div className="text-2xl font-bold text-red-900">
                           {analyticsData.lostLeads.toLocaleString()}
-                          </div>
-                        )}
-            </CardContent>
-          </Card>
                         </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
 
                 {/* Source Performance Table */}
         <div className="space-y-6">
@@ -4171,6 +4195,9 @@ export default function TeamLeaderDashboard() {
                               <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[80px]">
                                 Lost
                               </th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-900 min-w-[130px]">
+                                Lost Requested
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -4223,6 +4250,9 @@ export default function TeamLeaderDashboard() {
                                       <td className="px-4 py-3 text-center text-sm text-red-600 font-medium">
                                         {item.lost.toLocaleString()}
                                       </td>
+                                      <td className="px-4 py-3 text-center text-sm text-orange-600 font-medium">
+                                        {(item.lost_requested || 0).toLocaleString()}
+                                      </td>
                                     </tr>
                                   ))}
                                 {/* Summary Row */}
@@ -4243,6 +4273,9 @@ export default function TeamLeaderDashboard() {
                                     </td>
                                     <td className="px-4 py-3 text-center text-sm text-blue-900">
                                       {sourcePerformanceData.reduce((sum, item) => sum + item.lost, 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-sm text-blue-900">
+                                      {sourcePerformanceData.reduce((sum, item) => sum + (item.lost_requested || 0), 0).toLocaleString()}
                                     </td>
                                   </tr>
                                 )}
