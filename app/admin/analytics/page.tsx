@@ -36,13 +36,31 @@ interface CREPerformanceResponse {
   }
 }
 
+// Helper function to get first day of current month in YYYY-MM-DD format
+const getFirstDayOfMonth = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}-01`
+}
+
+// Helper function to get today's date in YYYY-MM-DD format
+const getTodayDate = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export default function AdminAnalyticsPage() {
   const [data, setData] = useState<CREPerformanceResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [selectedPeriod, setSelectedPeriod] = useState<'all_time' | 'today' | 'date_range'>('all_time')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  // Initialize with MTD (Month To Date) - first day of current month to today
+  const [selectedPeriod, setSelectedPeriod] = useState<'all_time' | 'today' | 'date_range'>('date_range')
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth())
+  const [endDate, setEndDate] = useState(getTodayDate())
 
   const fetchData = async () => {
     try {
@@ -187,7 +205,14 @@ export default function AdminAnalyticsPage() {
     if (selectedPeriod !== 'date_range') {
       setStartDate('')
       setEndDate('')
+    } else {
+      // When switching back to date_range, restore MTD if dates are empty
+      if (!startDate || !endDate) {
+        setStartDate(getFirstDayOfMonth())
+        setEndDate(getTodayDate())
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriod])
 
   useEffect(() => {
