@@ -127,10 +127,11 @@ async function buildSourceCreResponseDirect(
 
   console.log(`[buildSourceCreResponseDirect] Fetched ${leads?.length || 0} leads`);
 
-  // Fetch qualified leads from qualified_leads table
+  // Fetch qualified leads from qualified_leads table WITH source and cre_name
+  // This is the source of truth for qualified leads - use it directly for aggregation
   let qualifiedLeadsQuery = supabase
     .from('qualified_leads')
-    .select('lead_uid, created_at');
+    .select('lead_uid, source, cre_name, created_at');
 
   if (startBound) {
     qualifiedLeadsQuery = qualifiedLeadsQuery.gte('created_at', startBound);
@@ -145,9 +146,9 @@ async function buildSourceCreResponseDirect(
     console.error('[buildSourceCreResponseDirect] Qualified leads query error:', qualifiedError);
   }
 
-  // Create a Set of qualified lead UIDs for fast lookup
+  // Create a Set of qualified lead UIDs for fast lookup (for lead_master matching)
   const qualifiedLeadUids = new Set((qualifiedLeadsData || []).map(q => q.lead_uid));
-  console.log(`[buildSourceCreResponseDirect] Found ${qualifiedLeadUids.size} qualified leads`);
+  console.log(`[buildSourceCreResponseDirect] Found ${qualifiedLeadUids.size} qualified leads from qualified_leads table`);
 
   if (!leads || leads.length === 0) {
     return NextResponse.json({
@@ -167,9 +168,32 @@ async function buildSourceCreResponseDirect(
   const sourceMap: Record<string, any> = {};
   const creMap: Record<string, any> = {};
 
+  // First, build a map of qualified leads by normalized source + cre_name
+  // This is the source of truth - use qualified_leads table directly
+  const qualifiedBySourceCre: Record<string, { source: string; creName: string; count: number }> = {};
+  
+  (qualifiedLeadsData || []).forEach(ql => {
+    // Normalize source from qualified_leads
+    const rawSource = (ql.source || '').toString().trim();
+    const source = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
+    const creName = (ql.cre_name || 'Unassigned').toString().trim();
+    const qualifiedKey = `${source}|||${creName}`;
+    
+    if (!qualifiedBySourceCre[qualifiedKey]) {
+      qualifiedBySourceCre[qualifiedKey] = { source, creName, count: 0 };
+    }
+    qualifiedBySourceCre[qualifiedKey].count++;
+  });
+
+  console.log(`[buildSourceCreResponseDirect] Qualified leads by source+CRE: ${Object.keys(qualifiedBySourceCre).length} combinations`);
+
+  // Then aggregate total leads from lead_master
   leads.forEach(lead => {
-    const source = lead.source || 'Unknown';
-    const subsource = lead.sub_source || '';
+    // Normalize source: trim whitespace, convert to consistent case for grouping
+    const rawSource = (lead.source || '').toString().trim();
+    // Normalize to title case for display consistency
+    const source = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
+    const subsource = (lead.sub_source || '').toString().trim();
     const key = `${source}|||${subsource}`;
 
     if (!sourceMap[key]) {
@@ -180,17 +204,17 @@ async function buildSourceCreResponseDirect(
         qualified: 0,
         booked: 0,
         won: 0,  // Changed from 'retailed' to 'won'
-        creCounts: {} as Record<string, number>
+        creCounts: {} as Record<string, number>,
+        creQualifiedCounts: {} as Record<string, number>,  // Track qualified per CRE per source
+        creWonCounts: {} as Record<string, number>  // Track won per CRE per source (for conversion rate)
       };
     }
 
     const entry = sourceMap[key];
     entry.totalLeads++;
 
-    // Check if lead is in qualified_leads table
-    if (qualifiedLeadUids.has(lead.uid)) {
-      entry.qualified++;
-    }
+    const creName = lead.cre_name || 'Unassigned';
+    entry.creCounts[creName] = (entry.creCounts[creName] || 0) + 1;
 
     const finalStatus = (lead.final_status || '').toString().toLowerCase();
     if (finalStatus === 'booked') {
@@ -199,10 +223,8 @@ async function buildSourceCreResponseDirect(
     // Only count final_status = 'won' (not 'retailed')
     if (finalStatus === 'won') {
       entry.won++;
+      entry.creWonCounts[creName] = (entry.creWonCounts[creName] || 0) + 1;
     }
-
-    const creName = lead.cre_name || 'Unassigned';
-    entry.creCounts[creName] = (entry.creCounts[creName] || 0) + 1;
 
     // Also track overall CRE performance
     if (!creMap[creName]) {
@@ -230,27 +252,81 @@ async function buildSourceCreResponseDirect(
     creMap[creName].sources.add(source);
   });
 
-  const rows = Object.values(sourceMap).map((data: any) => {
-    let topCRE = 'N/A';
-    let topCRELeads = 0;
-    Object.entries(data.creCounts).forEach(([creName, count]: [string, any]) => {
-      if (count > topCRELeads) {
-        topCRE = creName;
-        topCRELeads = count;
-      }
-    });
+  // Aggregate qualified counts by source (not subsource) since qualified_leads doesn't have subsource
+  // Then we'll merge into sourceMap entries when building rows
+  const qualifiedBySource: Record<string, { qualified: number; creQualifiedCounts: Record<string, number> }> = {};
+  
+  Object.values(qualifiedBySourceCre).forEach(({ source, creName, count }) => {
+    if (!qualifiedBySource[source]) {
+      qualifiedBySource[source] = {
+        qualified: 0,
+        creQualifiedCounts: {}
+      };
+    }
+    qualifiedBySource[source].qualified += count;
+    qualifiedBySource[source].creQualifiedCounts[creName] = 
+      (qualifiedBySource[source].creQualifiedCounts[creName] || 0) + count;
+  });
 
-    return {
-      source: data.source,
-      subsource: data.subsource,
-      totalLeads: data.totalLeads,
-      qualified: data.qualified,
-      booked: data.booked,
-      retailed: data.won,  // Return 'won' as 'retailed' for backward compatibility with frontend
-      conversionPct: data.totalLeads > 0 ? (data.won / data.totalLeads) * 100 : 0,  // Conversion based on 'won'
-      topCRE,
-      creLeads: topCRELeads
-    };
+  console.log(`[buildSourceCreResponseDirect] Qualified by source:`, Object.keys(qualifiedBySource).map(s => `${s}: ${qualifiedBySource[s].qualified}`).join(', '));
+
+  // Group rows by source to assign qualified counts only once per source
+  const rowsBySource: Record<string, any[]> = {};
+  Object.values(sourceMap).forEach((data: any) => {
+    if (!rowsBySource[data.source]) {
+      rowsBySource[data.source] = [];
+    }
+    rowsBySource[data.source].push(data);
+  });
+
+  const rows = Object.entries(rowsBySource).flatMap(([source, sourceRows]: [string, any[]]) => {
+    // Get qualified data for this source (from qualified_leads table)
+    const sourceQualifiedData = qualifiedBySource[source] || { qualified: 0, creQualifiedCounts: {} };
+    
+    // Sort rows by totalLeads to assign qualified to the row with most leads
+    const sortedRows = [...sourceRows].sort((a, b) => b.totalLeads - a.totalLeads);
+    
+    return sortedRows.map((data: any, index: number) => {
+      let topCRE = 'N/A';
+      let topCRELeads = 0;
+      
+      // Build creDistribution array with all CREs for this source
+      // Use qualified counts from qualified_leads for accurate per-CRE qualified counts
+      const creDistribution = Object.entries(data.creCounts).map(([creName, count]: [string, any]) => {
+        if (count > topCRELeads) {
+          topCRE = creName;
+          topCRELeads = count;
+        }
+        return {
+          creName,
+          count,
+          qualified: sourceQualifiedData.creQualifiedCounts[creName] || 0,  // From qualified_leads table (accurate)
+          booked: 0,     // TODO: could track per-CRE booked if needed
+          retailed: data.creWonCounts[creName] || 0,  // Won leads per CRE per source (from lead_master with final_status='Won')
+          branch: '',
+          conversionRate: 0,
+          sourceCount: 1,
+          sources: [data.source]
+        };
+      }).sort((a, b) => b.count - a.count);
+
+      // Assign qualified count only to the first (primary) row for this source
+      // Frontend will aggregate by source, so this prevents double-counting
+      const qualified = index === 0 ? sourceQualifiedData.qualified : 0;
+
+      return {
+        source: data.source,
+        subsource: data.subsource,
+        totalLeads: data.totalLeads,
+        qualified,  // Only assigned to first row per source to avoid double-counting in frontend aggregation
+        booked: data.booked,
+        retailed: data.won,  // Return 'won' as 'retailed' for backward compatibility with frontend
+        conversionPct: data.totalLeads > 0 ? (data.won / data.totalLeads) * 100 : 0,  // Conversion based on 'won'
+        topCRE,
+        creLeads: topCRELeads,
+        creDistribution  // Add full CRE distribution for this source
+      };
+    });
   }).sort((a, b) => b.totalLeads - a.totalLeads);
 
   // Build overallCrePerformance array
@@ -299,10 +375,8 @@ async function buildLatestCallResponseDirect(
   }
 
   // Apply source filter if specified (not 'all')
-  if (sourceFilter && sourceFilter !== 'all') {
-    query = query.or(`source.eq.${sourceFilter},source.is.null`);
-  }
-
+  // Note: We'll filter by normalized source in memory after fetching, since source values might have different cases/spaces
+  // Fetch all leads first, then filter by normalized source name
   const { data: leads, error } = await query;
 
   if (error) {
@@ -312,7 +386,19 @@ async function buildLatestCallResponseDirect(
 
   console.log(`[buildLatestCallResponseDirect] Fetched ${leads?.length || 0} leads`);
 
-  if (!leads || leads.length === 0) {
+  // Filter by source if specified (normalize source names for matching)
+  let filteredLeads = leads || [];
+  if (sourceFilter && sourceFilter !== 'all') {
+    const normalizedFilter = sourceFilter.charAt(0).toUpperCase() + sourceFilter.slice(1).toLowerCase();
+    filteredLeads = filteredLeads.filter(lead => {
+      const rawSource = (lead.source || '').toString().trim();
+      const normalizedSource = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
+      return normalizedSource === normalizedFilter;
+    });
+    console.log(`[buildLatestCallResponseDirect] Filtered to ${filteredLeads.length} leads for source: ${normalizedFilter}`);
+  }
+
+  if (!filteredLeads || filteredLeads.length === 0) {
     return NextResponse.json({
       distribution: [],
       totalLeads: 0,
@@ -337,9 +423,14 @@ async function buildLatestCallResponseDirect(
 
   const allSources = new Set<string>();
   const sourceStatusMap: Record<string, Record<string, number>> = {};
+  // Track CRE counts per source per status
+  const sourceStatusCreMap: Record<string, Record<string, Set<string>>> = {};
 
-  leads.forEach(lead => {
-    const source = lead.source || 'Unknown';
+  filteredLeads.forEach(lead => {
+    // Normalize source: trim whitespace, convert to consistent case for grouping
+    const rawSource = (lead.source || '').toString().trim();
+    // Normalize to title case for display consistency
+    const source = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
     const creName = lead.cre_name || 'Unassigned';
     
     allSources.add(source);
@@ -367,8 +458,15 @@ async function buildLatestCallResponseDirect(
     // Track source-wise status distribution
     if (!sourceStatusMap[source]) {
       sourceStatusMap[source] = {};
+      sourceStatusCreMap[source] = {};
     }
     sourceStatusMap[source][latestStatus] = (sourceStatusMap[source][latestStatus] || 0) + 1;
+    
+    // Track CREs per source per status
+    if (!sourceStatusCreMap[source][latestStatus]) {
+      sourceStatusCreMap[source][latestStatus] = new Set();
+    }
+    sourceStatusCreMap[source][latestStatus].add(creName);
   });
 
   const distribution = Object.entries(statusMap)
@@ -382,7 +480,7 @@ async function buildLatestCallResponseDirect(
     }))
     .sort((a, b) => b.count - a.count);
 
-  // Build source-wise distribution
+  // Build source-wise distribution with CRE counts
   const sourceWiseDistribution = Object.entries(sourceStatusMap).map(([source, statuses]) => {
     const totalLeads = Object.values(statuses).reduce((sum, count) => sum + count, 0);
     return {
@@ -392,7 +490,9 @@ async function buildLatestCallResponseDirect(
         .map(([status, count]) => ({
           status,
           count,
-          percentage: ((count / totalLeads) * 100).toFixed(2)
+          percentage: ((count / totalLeads) * 100).toFixed(2),
+          creCount: sourceStatusCreMap[source]?.[status]?.size || 0,  // Number of unique CREs for this status in this source
+          cres: Array.from(sourceStatusCreMap[source]?.[status] || [])  // List of CRE names
         }))
         .sort((a, b) => b.count - a.count)
     };
@@ -400,7 +500,7 @@ async function buildLatestCallResponseDirect(
 
   return NextResponse.json({
     distribution,
-    totalLeads: leads.length,
+    totalLeads: filteredLeads.length,  // Use filtered count, not all leads
     summary: {
       totalStatuses: distribution.length,
       sources: allSources.size,

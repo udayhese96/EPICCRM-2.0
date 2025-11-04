@@ -172,19 +172,29 @@ export function LatestCallStatusDistribution({
     )
   }
 
+  // Normalize source name for matching (backend normalizes to title case)
+  const normalizeSource = (src: string) => {
+    if (!src) return 'Unknown';
+    const trimmed = src.trim();
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  };
+
   // Filter data based on selected source
-  const filteredStatusData = selectedSource === 'all' 
+  const normalizedSelectedSource = selectedSource === 'all' ? 'all' : normalizeSource(selectedSource);
+  
+  const filteredStatusData = normalizedSelectedSource === 'all' 
     ? data.latestCallStatusDistribution 
-    : data.latestCallStatusDistribution?.map(status => ({
-        ...status,
-        count: status.sources.includes(selectedSource) 
-          ? data.sourceWiseStatusDistribution
-              ?.find(s => s.source === selectedSource)
-              ?.statusDistribution
-              ?.find(sd => sd.status === status.status)
-              ?.count || 0
-          : 0
-      })).filter(status => status.count > 0) || [];
+    : data.sourceWiseStatusDistribution
+        ?.find(s => normalizeSource(s.source) === normalizedSelectedSource)
+        ?.statusDistribution?.map(status => ({
+          status: status.status,
+          count: status.count,
+          percentage: status.percentage,
+          sourceCount: 1,
+          creCount: status.creCount || 0,  // Use CRE count from backend
+          sources: [normalizedSelectedSource],
+          cres: status.cres || []  // Use CRE list from backend
+        })) || [];
 
   // Create pie chart data for top statuses
   const statusPieData = filteredStatusData?.slice(0, 8).map((status, index) => ({

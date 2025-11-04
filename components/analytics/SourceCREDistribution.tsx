@@ -205,24 +205,78 @@ export function SourceCREDistribution({
     }
   })
 
+  // Aggregate by source only (combine all subsources) for pie chart
+  const sourceAggregated = sortedSourceDataForPieChart.reduce((acc, item) => {
+    const existing = acc.find(a => a.source === item.source);
+    if (existing) {
+      existing.totalLeads += item.totalLeads;
+      existing.qualified += item.qualified;
+      existing.booked += item.booked;
+      existing.retailed += item.retailed;
+    } else {
+      acc.push({
+        source: item.source,
+        totalLeads: item.totalLeads,
+        qualified: item.qualified,
+        booked: item.booked,
+        retailed: item.retailed
+      });
+    }
+    return acc;
+  }, [] as any[]);
+
   // Create pie chart data for sources
-  const sourcePieData = sortedSourceDataForPieChart.slice(0, 8).map((source, index) => ({
-    name: source.source,
-    value: source.totalLeads,
-    color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
-  }))
+  // Use qualified counts when "Qualified Leads" sort is selected
+  // Use retailed (won) counts when "Conversion Rate" sort is selected
+  // Otherwise use total leads
+  const sourcePieData = sourceAggregated
+    .sort((a, b) => {
+      if (sortBy === 'qualified') {
+        return b.qualified - a.qualified;
+      }
+      if (sortBy === 'conversion') {
+        // Sort by retailed (won) count for conversion rate
+        return b.retailed - a.retailed;
+      }
+      return b.totalLeads - a.totalLeads;
+    })
+    .slice(0, 8)
+    .map((source, index) => ({
+      name: source.source,
+      value: sortBy === 'qualified' ? source.qualified : 
+             sortBy === 'conversion' ? source.retailed : 
+             source.totalLeads,
+      color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
+    }))
 
-  // Filter CRE data for pie charts based on selected source
-  const filteredCreDataForPieChart = selectedSource === 'all'
-    ? (data.overallCrePerformance || [])
-    : (data.overallCrePerformance || [])
-        .filter(cre => cre.sources.includes(selectedSource));
+  // Build CRE performance data from source distribution for accurate source-specific counts
+  const crePerformanceBySource: Record<string, { creName: string; count: number; qualified: number; booked: number; retailed: number }> = {};
+  
+  filteredSourceDataForPieChart.forEach(sourceRow => {
+    sourceRow.creDistribution?.forEach((creData: CREPerformanceData) => {
+      const key = creData.creName;
+      if (!crePerformanceBySource[key]) {
+        crePerformanceBySource[key] = {
+          creName: creData.creName,
+          count: 0,
+          qualified: 0,
+          booked: 0,
+          retailed: 0
+        };
+      }
+      crePerformanceBySource[key].count += creData.count || 0;
+      crePerformanceBySource[key].qualified += creData.qualified || 0;
+      crePerformanceBySource[key].booked += creData.booked || 0;
+      crePerformanceBySource[key].retailed += creData.retailed || 0;
+    });
+  });
 
-  // Sort CRE data for pie charts based on selected criteria
-  const sortedCreDataForPieChart = [...filteredCreDataForPieChart].sort((a, b) => {
+  // Convert to array and sort
+  const sortedCreDataForPieChart = Object.values(crePerformanceBySource).sort((a, b) => {
     switch (sortBy) {
       case 'conversion':
-        return b.conversionRate - a.conversionRate
+        // Sort by retailed (won) count, not conversion percentage
+        return b.retailed - a.retailed;
       case 'qualified':
         return b.qualified - a.qualified
       case 'leads':
@@ -231,9 +285,16 @@ export function SourceCREDistribution({
     }
   });
 
-  const crePieData = sortedCreDataForPieChart.slice(0, 8).map((cre, index) => ({
+  // Show ALL CREs when filtered by source (no slice limit), show top 8 when "all"
+  const creDataForChart = selectedSource === 'all' 
+    ? sortedCreDataForPieChart.slice(0, 8)
+    : sortedCreDataForPieChart; // Show all CREs for specific source
+  
+  const crePieData = creDataForChart.map((cre, index) => ({
     name: cre.creName,
-    value: cre.count, // Always show count (total leads) as the pie chart value
+    value: sortBy === 'qualified' ? cre.qualified : 
+           sortBy === 'conversion' ? cre.retailed :  // Show won count when "Conversion Rate" is selected
+           cre.count,  // Use total leads otherwise
     color: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'][index % 8]
   }))
 
