@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import PsPerformanceTable from '@/components/analytics/PsPerformanceTable'
+import PsFollowupsTable from '@/components/analytics/PsFollowupsTable'
 import TlPerformanceTable from '@/components/analytics/TlPerformanceTable'
 import SourceAnalyticsTable from '@/components/analytics/SourceAnalyticsTable'
 import KpiCards from '@/components/analytics/KpiCards'
@@ -196,6 +197,11 @@ const SalesManagerAnalytics = () => {
               {/* PS Performance Table */}
               <div className="transform transition-all duration-300 hover:shadow-xl">
                 <PsPerformanceTable showKpiCards={false} />
+              </div>
+
+              {/* PS Followups Table */}
+              <div className="transform transition-all duration-300 hover:shadow-xl">
+                <PsFollowupsTable />
               </div>
             </div>
           )}

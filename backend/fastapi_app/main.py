@@ -9278,6 +9278,229 @@ def process_lead_conversion_data(raw_data):
     
     return list(ps_conversions.values())
 
+@app.get("/analytics/sales-manager/ps-followups")
+async def get_ps_followups_analytics(
+    branch: str = Query(..., description="Branch name to filter data"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Get PS followups analytics for a specific branch.
+    Separate endpoint from ps-performance so we can evolve columns independently.
+    Requires sales_manager or admin role.
+    """
+    try:
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+
+        followup_rows = supabase.table("ps_followup_master").select(
+            "ps_name, first_call_date, second_call_date, third_call_date, fourth_call_date, fifth_call_date, sixth_call_date, "
+            "seventh_call_date, eighth_call_date, ninth_call_date, tenth_call_date, final_status, created_at"
+        ).eq("ps_branch", branch).execute()
+
+        if not followup_rows.data:
+            return {
+                "success": True,
+                "branch": branch,
+                "data": [],
+                "message": f"No data found for branch: {branch}",
+                "timestamp": datetime.now().isoformat(),
+                "requested_by": current_user.username,
+                "user_role": current_user.role
+            }
+
+        # Aggregate per PS: total leads, F1..F10 (first..tenth_call_date)
+        ps_counts = {}
+        for row in followup_rows.data:
+            try:
+                ps = row.get('ps_name') or 'Unknown'
+                # F1 definition: first_call_date IS NOT NULL (empty strings still count)
+                has_f1 = (row.get('first_call_date') is not None)
+                # F2 definition: second_call_date IS NOT NULL
+                has_f2 = (row.get('second_call_date') is not None)
+                # F3 definition: third_call_date IS NOT NULL
+                has_f3 = (row.get('third_call_date') is not None)
+                # F4 definition: fourth_call_date IS NOT NULL
+                has_f4 = (row.get('fourth_call_date') is not None)
+                # F5 definition: fifth_call_date IS NOT NULL
+                has_f5 = (row.get('fifth_call_date') is not None)
+                # F6 definition: sixth_call_date IS NOT NULL
+                has_f6 = (row.get('sixth_call_date') is not None)
+                # F7 definition: seventh_call_date IS NOT NULL
+                has_f7 = (row.get('seventh_call_date') is not None)
+                # F8 definition: eighth_call_date IS NOT NULL
+                has_f8 = (row.get('eighth_call_date') is not None)
+                # F9 definition: ninth_call_date IS NOT NULL
+                has_f9 = (row.get('ninth_call_date') is not None)
+                # F10 definition: tenth_call_date IS NOT NULL
+                has_f10 = (row.get('tenth_call_date') is not None)
+                if ps not in ps_counts:
+                    ps_counts[ps] = {
+                        'ps_name': ps,
+                        'lead_count': 0,
+                        'f1_count': 0,
+                        'f2_count': 0,
+                        'f3_count': 0,
+                        'f4_count': 0,
+                        'f5_count': 0,
+                        'f6_count': 0,
+                        'f7_count': 0,
+                        'f8_count': 0,
+                        'f9_count': 0,
+                        'f10_count': 0
+                    }
+                ps_counts[ps]['lead_count'] += 1
+                if has_f1:
+                    ps_counts[ps]['f1_count'] += 1
+                if has_f2:
+                    ps_counts[ps]['f2_count'] += 1
+                if has_f3:
+                    ps_counts[ps]['f3_count'] += 1
+                if has_f4:
+                    ps_counts[ps]['f4_count'] += 1
+                if has_f5:
+                    ps_counts[ps]['f5_count'] += 1
+                if has_f6:
+                    ps_counts[ps]['f6_count'] += 1
+                if has_f7:
+                    ps_counts[ps]['f7_count'] += 1
+                if has_f8:
+                    ps_counts[ps]['f8_count'] += 1
+                if has_f9:
+                    ps_counts[ps]['f9_count'] += 1
+                if has_f10:
+                    ps_counts[ps]['f10_count'] += 1
+            except Exception:
+                continue
+
+        data_list = list(ps_counts.values())
+
+        totals = {
+            'ps_name': 'TOTAL',
+            'lead_count': sum(r['lead_count'] for r in data_list),
+            'f1_count': sum(r.get('f1_count', 0) for r in data_list),
+            'f2_count': sum(r.get('f2_count', 0) for r in data_list),
+            'f3_count': sum(r.get('f3_count', 0) for r in data_list),
+            'f4_count': sum(r.get('f4_count', 0) for r in data_list),
+            'f5_count': sum(r.get('f5_count', 0) for r in data_list),
+            'f6_count': sum(r.get('f6_count', 0) for r in data_list),
+            'f7_count': sum(r.get('f7_count', 0) for r in data_list),
+            'f8_count': sum(r.get('f8_count', 0) for r in data_list),
+            'f9_count': sum(r.get('f9_count', 0) for r in data_list),
+            'f10_count': sum(r.get('f10_count', 0) for r in data_list)
+        }
+
+        processed = data_list + [totals]
+
+        return {
+            "success": True,
+            "branch": branch,
+            "data": processed,
+            "total_records": len(followup_rows.data),
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in PS followups analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch PS followups data: {str(e)}")
+
+@app.get("/analytics/sales-manager/ps-followup-leads")
+async def get_ps_followup_leads(
+    branch: str = Query(..., description="Branch name to filter data"),
+    ps_name: str = Query(..., description="PS name to filter leads"),
+    filter: Optional[str] = Query(None, description="Optional filter e.g. 'f1' for first_call_date present"),
+    current_user: CurrentUser = Depends(require_sales_manager_or_admin())
+):
+    """
+    Drill-down leads for PS Followups table. Returns raw leads to power the modal.
+    """
+    try:
+        if not branch or branch.strip() == "":
+            raise HTTPException(status_code=400, detail="Branch parameter is required")
+        if not ps_name or ps_name.strip() == "":
+            raise HTTPException(status_code=400, detail="ps_name parameter is required")
+
+        if current_user.role == 'sales_manager' and current_user.branch_id != branch:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
+            )
+
+        fields = (
+            "lead_uid, customer_name, customer_mobile_number, alternate_mobile_number, source, cre_name, "
+            "lead_category, model_interested, follow_up_date, lead_status, final_status, "
+            "first_call_date, first_call_remark, first_call_lead_status, "
+            "second_call_date, second_call_remark, second_call_lead_status, "
+            "third_call_date, third_call_remark, third_call_lead_status, "
+            "fourth_call_date, fourth_call_remark, fourth_call_lead_status, "
+            "fifth_call_date, fifth_call_remark, fifth_call_lead_status, "
+            "sixth_call_date, sixth_call_remark, sixth_call_lead_status, "
+            "seventh_call_date, seventh_call_remark, seventh_call_lead_status, "
+            "created_at, updated_at"
+        )
+
+        q = (
+            supabase
+                .table("ps_followup_master")
+                .select(fields)
+                .eq("ps_branch", branch)
+                .eq("ps_name", ps_name)
+        )
+
+        if filter == 'f1':
+            # leads where first_call_date exists / not null
+            q = q.not_.is_("first_call_date", "null")
+        elif filter == 'f2':
+            # leads where second_call_date exists / not null
+            q = q.not_.is_("second_call_date", "null")
+        elif filter == 'f3':
+            # leads where third_call_date exists / not null
+            q = q.not_.is_("third_call_date", "null")
+        elif filter == 'f4':
+            # leads where fourth_call_date exists / not null
+            q = q.not_.is_("fourth_call_date", "null")
+        elif filter == 'f5':
+            # leads where fifth_call_date exists / not null
+            q = q.not_.is_("fifth_call_date", "null")
+        elif filter == 'f6':
+            # leads where sixth_call_date exists / not null
+            q = q.not_.is_("sixth_call_date", "null")
+        elif filter == 'f7':
+            q = q.not_.is_("seventh_call_date", "null")
+        elif filter == 'f8':
+            q = q.not_.is_("eighth_call_date", "null")
+        elif filter == 'f9':
+            q = q.not_.is_("ninth_call_date", "null")
+        elif filter == 'f10':
+            q = q.not_.is_("tenth_call_date", "null")
+
+        leads = q.execute()
+
+        return {
+            "success": True,
+            "branch": branch,
+            "ps_name": ps_name,
+            "filter": filter,
+            "total_records": len(leads.data or []),
+            "leads": leads.data or [],
+            "timestamp": datetime.now().isoformat(),
+            "requested_by": current_user.username,
+            "user_role": current_user.role
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching PS followup leads: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch PS followup leads: {str(e)}")
+
 @app.get("/analytics/sales-manager/branch-summary")
 async def get_branch_summary_analytics(
     branch: str = Query(..., description="Branch name to filter data"),
