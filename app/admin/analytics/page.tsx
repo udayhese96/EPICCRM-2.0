@@ -20,6 +20,7 @@ interface CREPerformanceData {
   qualifiedLeads: number
   untouched: number
   openLeads: number
+  booked: number
   retailed: number
   lost: number
   tatAvg: number
@@ -331,10 +332,11 @@ export default function AdminAnalyticsPage() {
                             <MoreVertical className="h-4 w-4" />
                           </div>
                         </th>
+                        <th className="px-6 py-4 text-right text-sm font-semibold text-white">Untouched</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">Assigned</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">Qualified Leads</th>
-                        <th className="px-6 py-4 text-right text-sm font-semibold text-white">Untouched</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">Open leads</th>
+                        <th className="px-6 py-4 text-right text-sm font-semibold text-white">Booked</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">Retailed</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">Lost</th>
                         <th className="px-6 py-4 text-right text-sm font-semibold text-white">TAT(Avg)</th>
@@ -347,16 +349,19 @@ export default function AdminAnalyticsPage() {
                             {cre.creName}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700 text-right">
+                            {cre.untouched.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700 text-right">
                             {cre.assigned.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700 text-right">
                             {cre.qualifiedLeads.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700 text-right">
-                            {cre.untouched.toLocaleString()}
+                            {cre.openLeads.toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700 text-right">
-                            {cre.openLeads.toLocaleString()}
+                            {(cre.booked || 0).toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700 text-right">
                             {cre.retailed.toLocaleString()}
@@ -376,16 +381,19 @@ export default function AdminAnalyticsPage() {
                           TOTAL
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-white text-right">
+                          {data.total.untouched.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-sm font-bold text-white text-right">
                           {data.total.assigned.toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-white text-right">
                           {data.total.qualifiedLeads.toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-white text-right">
-                          {data.total.untouched.toLocaleString()}
+                          {data.total.openLeads.toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-white text-right">
-                          {data.total.openLeads.toLocaleString()}
+                          {(data.total.booked || 0).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-white text-right">
                           {data.total.retailed.toLocaleString()}

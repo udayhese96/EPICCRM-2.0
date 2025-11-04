@@ -88,12 +88,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database query failed', details: assignedError.message }, { status: 500 });
     }
 
-    // Fetch Retailed & Lost using updated_at from lead_master
-    // Note: Database stores as 'Won', 'Lost' (capitalized), also check 'Retailed'
+    // Fetch Booked, Retailed & Lost using updated_at from lead_master
+    // Note: Database stores as 'Won', 'Lost', 'Booked' (capitalized), also check 'Retailed'
     let updatedQuery = supabase
       .from('lead_master')
       .select('cre_name, final_status, updated_at')
-      .in('final_status', ['Won', 'Lost', 'Retailed', 'won', 'lost', 'retailed']);
+      .in('final_status', ['Won', 'Lost', 'Retailed', 'Booked', 'won', 'lost', 'retailed', 'booked']);
 
     if (startBound) {
       updatedQuery = updatedQuery.gte('updated_at', startBound.toISOString());
@@ -138,7 +138,8 @@ export async function GET(request: NextRequest) {
     const rows = assignedRows || [];
     const updatedData = updatedRows || [];
 
-    // Build quick maps for retailed and lost counts by CRE from updated_at filtered data
+    // Build quick maps for booked, retailed and lost counts by CRE from updated_at filtered data
+    const bookedByCre = new Map<string, number>();
     const retailedByCre = new Map<string, number>();
     const lostByCre = new Map<string, number>();
     
@@ -146,6 +147,11 @@ export async function GET(request: NextRequest) {
       const creName = row.cre_name || 'Unassigned';
       const finalStatus = (row.final_status || '');
       const fsLower = finalStatus.toLowerCase();
+      
+      // Booked: final_status = 'booked' or 'Booked'
+      if (fsLower === 'booked') {
+        bookedByCre.set(creName, (bookedByCre.get(creName) || 0) + 1);
+      }
       
       // Retailed: final_status = 'retailed', 'Retailed', 'won', 'Won'
       if (fsLower === 'retailed' || fsLower === 'won') {
@@ -173,6 +179,7 @@ export async function GET(request: NextRequest) {
           qualifiedLeads: 0,
           untouched: 0,
           openLeads: 0,
+          booked: 0,
           retailed: 0,
           lost: 0,
           tatSum: 0,
@@ -221,6 +228,7 @@ export async function GET(request: NextRequest) {
           qualifiedLeads: 0,
           untouched: 0,
           openLeads: 0,
+          booked: 0,
           retailed: 0,
           lost: 0,
           tatSum: 0,
@@ -232,6 +240,27 @@ export async function GET(request: NextRequest) {
       creMap[creName].qualifiedLeads += count;
     }
 
+    // Apply Booked counts (from updated_at filtered data)
+    for (const [creName, count] of bookedByCre.entries()) {
+      if (!creMap[creName]) {
+        creMap[creName] = {
+          creName,
+          assigned: 0,
+          qualifiedLeads: 0,
+          untouched: 0,
+          openLeads: 0,
+          booked: 0,
+          retailed: 0,
+          lost: 0,
+          tatSum: 0,
+          tatCount: 0,
+          tatAvg: 0,
+          tatUnit: 'd' as const
+        };
+      }
+      creMap[creName].booked += count;
+    }
+
     // Apply Retailed counts
     for (const [creName, count] of retailedByCre.entries()) {
       if (!creMap[creName]) {
@@ -241,6 +270,7 @@ export async function GET(request: NextRequest) {
           qualifiedLeads: 0,
           untouched: 0,
           openLeads: 0,
+          booked: 0,
           retailed: 0,
           lost: 0,
           tatSum: 0,
@@ -261,6 +291,7 @@ export async function GET(request: NextRequest) {
           qualifiedLeads: 0,
           untouched: 0,
           openLeads: 0,
+          booked: 0,
           retailed: 0,
           lost: 0,
           tatSum: 0,
@@ -308,6 +339,7 @@ export async function GET(request: NextRequest) {
       qualifiedLeads: acc.qualifiedLeads + cre.qualifiedLeads,
       untouched: acc.untouched + cre.untouched,
       openLeads: acc.openLeads + cre.openLeads,
+      booked: acc.booked + cre.booked,
       retailed: acc.retailed + cre.retailed,
       lost: acc.lost + cre.lost,
       tatAvg: 0,
@@ -318,6 +350,7 @@ export async function GET(request: NextRequest) {
       qualifiedLeads: 0,
       untouched: 0,
       openLeads: 0,
+      booked: 0,
       retailed: 0,
       lost: 0,
       tatAvg: 0,

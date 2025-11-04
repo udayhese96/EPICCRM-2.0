@@ -58,18 +58,20 @@ export async function GET(request: NextRequest) {
       endBound = tomorrow.toISOString();
       dateRangeMode = 'today';
     } else if (filter === 'range') {
-      // Date range: startDate 00:00 to (endDate + 1 day) 00:00
+      // Date range: startDate 00:00 UTC to (endDate + 1 day) 00:00 UTC
+      // Use UTC to avoid timezone issues - Supabase stores timestamps in UTC
       if (!startDateParam || !endDateParam) {
         return NextResponse.json({ error: 'startDate and endDate required for range filter' }, { status: 400 });
       }
-      const start = new Date(startDateParam);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDateParam);
-      end.setDate(end.getDate() + 1);
-      end.setHours(0, 0, 0, 0);
-      startBound = start.toISOString();
-      endBound = end.toISOString();
+      // Parse YYYY-MM-DD format and create UTC date
+      // Format: YYYY-MM-DD -> YYYY-MM-DDTHH:mm:ss.sssZ (UTC)
+      startBound = `${startDateParam}T00:00:00.000Z`;
+      // End date: next day at 00:00 UTC (exclusive bound)
+      const [endYear, endMonth, endDay] = endDateParam.split('-').map(Number);
+      const endDate = new Date(Date.UTC(endYear, endMonth - 1, endDay + 1, 0, 0, 0, 0));
+      endBound = endDate.toISOString();
       dateRangeMode = 'range';
+      console.log(`[Unified Analytics] Parsed date range: ${startDateParam} to ${endDateParam} -> ${startBound} to ${endBound}`);
     }
 
     console.log(`[Unified Analytics] Date bounds: ${startBound || 'null'} to ${endBound || 'null'}`);
@@ -101,6 +103,7 @@ async function buildSourceCreResponseDirect(
   console.log(`[buildSourceCreResponseDirect] Fetching with bounds: ${startBound} to ${endBound}, source: ${sourceFilter}`);
 
   // Build query with date filter
+  // Note: sourceFilter is NOT applied here for sourceCre section - we filter in memory after normalization
   let query = supabase
     .from('lead_master')
     .select('uid, source, sub_source, lead_status, final_status, cre_name, created_at');
@@ -112,12 +115,8 @@ async function buildSourceCreResponseDirect(
     query = query.lt('created_at', endBound);
   }
 
-  // Apply source filter if specified (not 'all')
-  if (sourceFilter && sourceFilter !== 'all') {
-    query = query.or(`source.eq.${sourceFilter},source.is.null`);
-    // Filter for specific source or null (which becomes 'Unknown')
-  }
-
+  // Note: sourceFilter is handled in memory after normalization for sourceCre section
+  // Only apply DB-level source filter for other sections if needed
   const { data: leads, error } = await query;
 
   if (error) {
@@ -125,13 +124,14 @@ async function buildSourceCreResponseDirect(
     return NextResponse.json({ error: 'Failed to fetch leads data', details: error.message }, { status: 500 });
   }
 
-  console.log(`[buildSourceCreResponseDirect] Fetched ${leads?.length || 0} leads`);
+  console.log(`[buildSourceCreResponseDirect] Fetched ${leads?.length || 0} leads from lead_master`);
+  console.log(`[buildSourceCreResponseDirect] Date bounds: ${startBound || 'null'} to ${endBound || 'null'}`);
 
-  // Fetch qualified leads from qualified_leads table WITH source and cre_name
+  // Fetch qualified leads from qualified_leads table WITH source, sub_source, and cre_name
   // This is the source of truth for qualified leads - use it directly for aggregation
   let qualifiedLeadsQuery = supabase
     .from('qualified_leads')
-    .select('lead_uid, source, cre_name, created_at');
+    .select('lead_uid, source, sub_source, cre_name, created_at');
 
   if (startBound) {
     qualifiedLeadsQuery = qualifiedLeadsQuery.gte('created_at', startBound);
@@ -141,6 +141,8 @@ async function buildSourceCreResponseDirect(
   }
 
   const { data: qualifiedLeadsData, error: qualifiedError } = await qualifiedLeadsQuery;
+  
+  console.log(`[buildSourceCreResponseDirect] Fetched ${qualifiedLeadsData?.length || 0} qualified leads from qualified_leads`);
 
   if (qualifiedError) {
     console.error('[buildSourceCreResponseDirect] Qualified leads query error:', qualifiedError);
@@ -168,33 +170,68 @@ async function buildSourceCreResponseDirect(
   const sourceMap: Record<string, any> = {};
   const creMap: Record<string, any> = {};
 
-  // First, build a map of qualified leads by normalized source + cre_name
+  // Helper function to normalize source names consistently
+  const normalizeSourceName = (rawSource: string | null | undefined): string => {
+    if (!rawSource) return 'Unknown';
+    const trimmed = rawSource.toString().trim();
+    if (!trimmed) return 'Unknown';
+    // Convert to title case: first letter uppercase, rest lowercase
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  };
+
+  // First, build a map of qualified leads by normalized source + sub_source + cre_name
   // This is the source of truth - use qualified_leads table directly
-  const qualifiedBySourceCre: Record<string, { source: string; creName: string; count: number }> = {};
+  const qualifiedBySourceSubsourceCre: Record<string, { source: string; subsource: string; creName: string; count: number }> = {};
   
   (qualifiedLeadsData || []).forEach(ql => {
-    // Normalize source from qualified_leads
-    const rawSource = (ql.source || '').toString().trim();
-    const source = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
+    // Normalize source from qualified_leads using the same normalization function
+    const source = normalizeSourceName(ql.source);
+    const subsource = (ql.sub_source || '').toString().trim(); // Get sub_source from qualified_leads
     const creName = (ql.cre_name || 'Unassigned').toString().trim();
-    const qualifiedKey = `${source}|||${creName}`;
+    const qualifiedKey = `${source}|||${subsource}|||${creName}`;
     
-    if (!qualifiedBySourceCre[qualifiedKey]) {
-      qualifiedBySourceCre[qualifiedKey] = { source, creName, count: 0 };
+    if (!qualifiedBySourceSubsourceCre[qualifiedKey]) {
+      qualifiedBySourceSubsourceCre[qualifiedKey] = { source, subsource, creName, count: 0 };
     }
-    qualifiedBySourceCre[qualifiedKey].count++;
+    qualifiedBySourceSubsourceCre[qualifiedKey].count++;
+  });
+  
+  // Also create a map by source + sub_source (for matching to sourceMap rows)
+  const qualifiedBySourceSubsource: Record<string, { qualified: number; creQualifiedCounts: Record<string, number> }> = {};
+  
+  Object.values(qualifiedBySourceSubsourceCre).forEach(({ source, subsource, creName, count }) => {
+    const key = `${source}|||${subsource}`;
+    if (!qualifiedBySourceSubsource[key]) {
+      qualifiedBySourceSubsource[key] = {
+        qualified: 0,
+        creQualifiedCounts: {}
+      };
+    }
+    qualifiedBySourceSubsource[key].qualified += count;
+    qualifiedBySourceSubsource[key].creQualifiedCounts[creName] = 
+      (qualifiedBySourceSubsource[key].creQualifiedCounts[creName] || 0) + count;
   });
 
-  console.log(`[buildSourceCreResponseDirect] Qualified leads by source+CRE: ${Object.keys(qualifiedBySourceCre).length} combinations`);
+  console.log(`[buildSourceCreResponseDirect] Qualified leads by source+subsource+CRE: ${Object.keys(qualifiedBySourceSubsourceCre).length} combinations`);
+  // Log qualified counts by source+subsource for debugging
+  const metaAdsCount = qualifiedBySourceSubsource['Meta|||Ads']?.qualified || 0;
+  console.log(`[buildSourceCreResponseDirect] Meta/Ads qualified count: ${metaAdsCount}`);
+  // Log some examples for debugging
+  const sampleQualified = Object.entries(qualifiedBySourceSubsource).slice(0, 5);
+  console.log(`[buildSourceCreResponseDirect] Sample qualified by source+subsource:`, sampleQualified.map(([k, v]) => `${k}: ${v.qualified}`).join(', '));
 
   // Then aggregate total leads from lead_master
+  // Count leads by source for debugging
+  const sourceCounts: Record<string, number> = {};
+  
   leads.forEach(lead => {
-    // Normalize source: trim whitespace, convert to consistent case for grouping
-    const rawSource = (lead.source || '').toString().trim();
-    // Normalize to title case for display consistency
-    const source = rawSource ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1).toLowerCase() : 'Unknown';
+    // Normalize source using the same function as qualified leads
+    const source = normalizeSourceName(lead.source);
     const subsource = (lead.sub_source || '').toString().trim();
     const key = `${source}|||${subsource}`;
+    
+    // Track source counts for debugging
+    sourceCounts[source] = (sourceCounts[source] || 0) + 1;
 
     if (!sourceMap[key]) {
       sourceMap[key] = {
@@ -252,11 +289,15 @@ async function buildSourceCreResponseDirect(
     creMap[creName].sources.add(source);
   });
 
-  // Aggregate qualified counts by source (not subsource) since qualified_leads doesn't have subsource
-  // Then we'll merge into sourceMap entries when building rows
+  // Log source counts for debugging
+  console.log(`[buildSourceCreResponseDirect] Lead counts by normalized source:`, 
+    Object.entries(sourceCounts).map(([s, c]) => `${s}: ${c}`).join(', '));
+
+  // Aggregate qualified counts by source (for fallback when subsource doesn't match)
+  // This is used when a source row doesn't have a matching subsource in qualified_leads
   const qualifiedBySource: Record<string, { qualified: number; creQualifiedCounts: Record<string, number> }> = {};
   
-  Object.values(qualifiedBySourceCre).forEach(({ source, creName, count }) => {
+  Object.values(qualifiedBySourceSubsourceCre).forEach(({ source, creName, count }) => {
     if (!qualifiedBySource[source]) {
       qualifiedBySource[source] = {
         qualified: 0,
@@ -268,7 +309,7 @@ async function buildSourceCreResponseDirect(
       (qualifiedBySource[source].creQualifiedCounts[creName] || 0) + count;
   });
 
-  console.log(`[buildSourceCreResponseDirect] Qualified by source:`, Object.keys(qualifiedBySource).map(s => `${s}: ${qualifiedBySource[s].qualified}`).join(', '));
+  console.log(`[buildSourceCreResponseDirect] Qualified by source (aggregated):`, Object.keys(qualifiedBySource).map(s => `${s}: ${qualifiedBySource[s].qualified}`).join(', '));
 
   // Group rows by source to assign qualified counts only once per source
   const rowsBySource: Record<string, any[]> = {};
@@ -280,13 +321,18 @@ async function buildSourceCreResponseDirect(
   });
 
   const rows = Object.entries(rowsBySource).flatMap(([source, sourceRows]: [string, any[]]) => {
-    // Get qualified data for this source (from qualified_leads table)
-    const sourceQualifiedData = qualifiedBySource[source] || { qualified: 0, creQualifiedCounts: {} };
-    
     // Sort rows by totalLeads to assign qualified to the row with most leads
     const sortedRows = [...sourceRows].sort((a, b) => b.totalLeads - a.totalLeads);
     
     return sortedRows.map((data: any, index: number) => {
+      // First try to get qualified data by source + subsource (most accurate)
+      const sourceSubsourceKey = `${data.source}|||${data.subsource}`;
+      let sourceQualifiedData = qualifiedBySourceSubsource[sourceSubsourceKey];
+      
+      // If no exact match, fall back to source-only aggregation (for rows without matching subsource)
+      if (!sourceQualifiedData) {
+        sourceQualifiedData = qualifiedBySource[data.source] || { qualified: 0, creQualifiedCounts: {} };
+      }
       let topCRE = 'N/A';
       let topCRELeads = 0;
       
@@ -310,9 +356,9 @@ async function buildSourceCreResponseDirect(
         };
       }).sort((a, b) => b.count - a.count);
 
-      // Assign qualified count only to the first (primary) row for this source
-      // Frontend will aggregate by source, so this prevents double-counting
-      const qualified = index === 0 ? sourceQualifiedData.qualified : 0;
+      // Assign qualified count to this specific source+subsource combination
+      // Since we're now matching by source+subsource, each row gets its own accurate count
+      const qualified = sourceQualifiedData.qualified;
 
       return {
         source: data.source,
