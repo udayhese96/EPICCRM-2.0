@@ -194,11 +194,21 @@ export async function GET(request: NextRequest) {
       // Assigned: count all rows (filtered by cre_assigned_at)
       cre.assigned++;
 
-      const leadStatus = (row.lead_status || '').toLowerCase();
-      const finalStatus = (row.final_status || '').toLowerCase();
-
+      // Untouched calculation - matches CRE dashboard computeCountsSnapshot logic exactly
+      // Untouched = lead_status is null/empty OR "Pending" AND final_status is "Pending" AND not finalized as won
+      const leadStatus = (row.lead_status ?? "").toString().toLowerCase();
+      const finalStatus = (row.final_status ?? "").toString().toLowerCase();
+      
+      // Check if finalized as won (booked, retailed, won)
+      const isFinalizedWon = (fs: string) => {
+        const fsLower = fs.toLowerCase();
+        return fsLower === 'booked' || fsLower === 'retailed' || fsLower === 'won' || fsLower.includes('won');
+      };
+      
       // Untouched: filtered by cre_assigned_at
-      if (leadStatus === 'untouched' || leadStatus === '') {
+      if ((leadStatus === "" || leadStatus === "pending") && 
+          finalStatus === "pending" && 
+          !isFinalizedWon(finalStatus)) {
         cre.untouched++;
       }
 
