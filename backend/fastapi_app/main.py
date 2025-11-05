@@ -4838,8 +4838,28 @@ async def get_source_performance(
         # Parse request body
         body = await request.json()
         ps_ids = body.get('ps_ids', [])
+
+        # Support either explicit ISO start/end or a preset like "today" or "all"
         start_date = body.get('start_date')
         end_date = body.get('end_date')
+        preset = body.get('date_range') or body.get('preset')
+
+        # Normalize "all" indicators coming from client
+        if isinstance(start_date, str) and start_date.lower() == 'all':
+            start_date = None
+        if isinstance(end_date, str) and end_date.lower() == 'all':
+            end_date = None
+        if preset and str(preset).lower() == 'all':
+            start_date = None
+            end_date = None
+        if (preset and preset == 'today') or (isinstance(start_date, str) and start_date.lower() == 'today'):
+            from datetime import datetime
+            now = datetime.now()
+            start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            start_date = start_dt.isoformat()
+            end_date = end_dt.isoformat()
+
         ps_name = body.get('ps_name')  # For specific PS filtering
         
         print(f"[Source Performance] PS IDs: {ps_ids}, Start: {start_date}, End: {end_date}, PS Name: {ps_name}")
@@ -4848,18 +4868,34 @@ async def get_source_performance(
             return {"sources": []}
         
         # Get all leads for the PS team with source information
-        # Use updated_at for date filtering across metrics (standardized)
+        # NOTE: Date range filtering now uses lead_master.created_at (as requested)
         base_query = supabase.table('ps_followup_master').select('*').in_('ps_id', ps_ids)
         
         # Apply PS name filter if provided (for specific PS filtering)
         if ps_name:
             base_query = base_query.eq('ps_name', ps_name)
         
-        # Apply date range filter using updated_at (standardized)
-        if start_date:
-            base_query = base_query.gte('updated_at', start_date)
-        if end_date:
-            base_query = base_query.lte('updated_at', end_date)
+        # Apply date range filter based on lead_master.created_at
+        if start_date or end_date:
+            try:
+                lm_query = supabase.table('lead_master').select('uid')
+                if start_date:
+                    lm_query = lm_query.gte('created_at', start_date)
+                if end_date:
+                    lm_query = lm_query.lte('created_at', end_date)
+                lm_resp = lm_query.execute()
+                lead_uids = [row.get('uid') for row in (lm_resp.data or []) if row.get('uid')]
+                # If no UIDs in range, short-circuit with empty result
+                if not lead_uids:
+                    return {"sources": []}
+                # Filter ps_followup_master by those lead_uids
+                base_query = base_query.in_('lead_uid', lead_uids)
+            except Exception as _e:
+                # Fallback to original ps_assigned_at filter if the join approach fails
+                if start_date:
+                    base_query = base_query.gte('ps_assigned_at', start_date)
+                if end_date:
+                    base_query = base_query.lte('ps_assigned_at', end_date)
         
         response = base_query.execute()
         all_leads = response.data or []
