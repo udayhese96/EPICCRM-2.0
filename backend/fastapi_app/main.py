@@ -7433,14 +7433,14 @@ async def approve_qualified_lead(
                 "updated_at": now_ist_iso()
             }).eq('lead_uid', lead_uid).execute()
             
-            # Set final_status to "Won" in lead_master for booking approval
+            # Set final_status to "Booked" in lead_master for booking approval
             supabase.table('lead_master').update({
-                "final_status": "Won",
+                "final_status": "Booked",
                 "updated_at": now_ist_iso()
             }).eq('uid', lead_uid).execute()
             
         elif approval_type == 'retailed':
-            # Retail approved - update existing row in master table and set final_status to "Won"
+            # Retail approved - update existing row in master table and set final_status to "Won" everywhere
             master_update = {
                 "retailed_id": updated_lead.get("retailed_id"),
                 "retailed_status": updated_lead.get("retailed_status"),
@@ -7449,6 +7449,7 @@ async def approve_qualified_lead(
                 "retailed_approved_timestamp": updated_lead.get("retailed_approved_timestamp"),
                 "approved_by_sales_manager": current_user.id,
                 "approved_at": now_ist_iso(),
+                "final_status": "Won",  # Set final_status to "Won" in booking_and_retail_master
                 "updated_at": now_ist_iso()
             }
             
@@ -7457,6 +7458,7 @@ async def approve_qualified_lead(
             if not existing.data:
                 supabase.table('booking_and_retail_master').insert({
                     "lead_uid": lead_uid,
+                    "final_status": "Won",  # Set final_status to "Won" when inserting
                     "created_at": now_ist_iso(),
                     "updated_at": now_ist_iso()
                 }).execute()
@@ -7474,6 +7476,12 @@ async def approve_qualified_lead(
                 "final_status": "Won",
                 "updated_at": now_ist_iso()
             }).eq('uid', lead_uid).execute()
+            
+            # Set final_status to "Won" in qualified_leads
+            supabase.table('qualified_leads').update({
+                "final_status": "Won",
+                "updated_at": now_ist_iso()
+            }).eq('lead_uid', lead_uid).execute()
         
         return {"message": f"{approval_type.title()} approved successfully"}
         
