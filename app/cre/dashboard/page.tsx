@@ -423,7 +423,7 @@ export default function CREDashboard() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lead_master', filter: `cre_name=eq.${user.username}` },
-        (payload) => {
+        (payload: any) => {
           const eventType = (payload as any)?.eventType || (payload as any)?.type
           const row = (payload as any)?.new || (payload as any)?.old
           const leadUid = row?.uid
@@ -454,7 +454,7 @@ export default function CREDashboard() {
           }, 250)
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (process.env.NODE_ENV === 'development') {
           console.log('📡 [Real-time] Lead master subscription status:', status)
           if (status === 'SUBSCRIBED') {
@@ -470,13 +470,14 @@ export default function CREDashboard() {
     const qualifiedSubscription = supabase
       .channel(`qualified_leads_changes_${user.username}`)
       .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'qualified_leads'
-        },
-        (payload) => {
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'qualified_leads',
+          filter: `cre_name.ilike.*${user.username}*`
+        }, 
+        (payload: any) => {
           const newCre = ((payload.new as any)?.cre_name || '').toLowerCase()
           const oldCre = ((payload.old as any)?.cre_name || '').toLowerCase()
           const usernameLower = user.username.toLowerCase()
@@ -501,7 +502,7 @@ export default function CREDashboard() {
           }, 1200)
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (status === 'CHANNEL_ERROR') {
           console.error('❌ [Real-time] Qualified leads subscription error')
         }
@@ -516,7 +517,7 @@ export default function CREDashboard() {
           schema: 'public', 
           table: 'ps_followup_master'
         }, 
-        (payload) => {
+        (payload: any) => {
           // Refresh leads data when ICROP IDs are updated or lost status changes
           if (process.env.NODE_ENV === 'development') {
             console.log('🔄 [Real-time] Follow-up change detected:', payload.eventType, (payload.new as any)?.lead_uid || (payload.old as any)?.lead_uid)
@@ -537,7 +538,7 @@ export default function CREDashboard() {
           requestRefresh({ immediate: true, force: true })
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (status === 'CHANNEL_ERROR') {
           console.error('❌ [Real-time] Follow-up subscription error')
         }
@@ -620,7 +621,10 @@ export default function CREDashboard() {
       
       // Only append refresh flag when explicitly forced by user action
       const url = `/api/cre-assigned?${qs.toString()}${forceRefresh ? '&refresh=1' : ''}`
-      const response = await fetch(url)
+      // Cancel any in-flight request before starting a new one
+      try { (window as any).__creAbortController?.abort() } catch {}
+      ;(window as any).__creAbortController = new AbortController()
+      const response = await fetch(url, { signal: (window as any).__creAbortController.signal })
       
       if (response.ok) {
         const raw = await response.json()
@@ -649,6 +653,9 @@ export default function CREDashboard() {
             sub_source: l.sub_source || '',
             campaign: l.campaign || '',
             date: (l.created_at || '').slice(0,10) || '',
+            // Include updated_at for correct MTD filtering in Won/Lost section
+            updated_at: l.updated_at || '',
+            created_at: l.created_at || '',
             lead_status: (l.lead_status || '').toString().trim(),
             final_status: (l.final_status || '').toString().trim(),
             lead_category: l.lead_category || 'Warm',
@@ -697,7 +704,14 @@ export default function CREDashboard() {
           }
         })
         
-        setLeads(mapped)
+        // Deduplicate by uid to prevent state growth
+        const unique: Record<string, any> = {}
+        for (const item of mapped) {
+          const key = (item?.uid || item?.id || '').toString()
+          if (!key || unique[key]) continue
+          unique[key] = item
+        }
+        setLeads(Object.values(unique))
         const after = computeCountsSnapshot(mapped)
         if (process.env.NODE_ENV === 'development') {
           console.debug('[CRE fetch] new counts:', after)
@@ -988,14 +1002,15 @@ export default function CREDashboard() {
     const withinDateFilter = (lead: any) => {
       const created = (lead.date || '').slice(0,10)
 
-      // For Won/Lost section, always show Month-To-Date (IST)
+      // For Won/Lost section, always show Month-To-Date (IST) using updated_at when available
       if (deferredActiveTab === 'wonlost') {
         const now = new Date()
         const istOffsetMinutes = 330 - now.getTimezoneOffset()
         const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
         const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
         const monthStartIso = monthStartIst.toISOString().slice(0,10)
-        return created >= monthStartIso
+        const effectiveDate = ((lead.updated_at || lead.created_at || created) as string).slice(0,10)
+        return effectiveDate >= monthStartIso
       }
 
       // Use new date range filter if dates are set
@@ -1393,13 +1408,13 @@ export default function CREDashboard() {
           return isLost || isLostRequested || isBooked || isRetailed || isWon
         })
         .filter(l => {
-          const created = (l?.date || '').toString().slice(0,10)
           const now = new Date()
           const istOffsetMinutes = 330 - now.getTimezoneOffset()
           const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
           const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
           const monthStartIso = monthStartIst.toISOString().slice(0,10)
-          return created >= monthStartIso
+          const effectiveDate = ((l as any)?.updated_at || (l as any)?.created_at || (l as any)?.date || '').toString().slice(0,10)
+          return effectiveDate >= monthStartIso
         }).length,
       // Fixed: Won leads should show final_status = 'booked', 'retailed', or 'won'
       won: leads
@@ -1409,13 +1424,13 @@ export default function CREDashboard() {
           return fs === 'booked' || fs === 'retailed' || fs === 'won' || fs.includes('won') || ls === 'won'
         })
         .filter(l => {
-          const created = (l?.date || '').toString().slice(0,10)
           const now = new Date()
           const istOffsetMinutes = 330 - now.getTimezoneOffset()
           const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
           const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
           const monthStartIso = monthStartIst.toISOString().slice(0,10)
-          return created >= monthStartIso
+          const effectiveDate = ((l as any)?.updated_at || (l as any)?.created_at || (l as any)?.date || '').toString().slice(0,10)
+          return effectiveDate >= monthStartIso
         }).length,
       // Fixed: Lost leads should show final_status = 'lost' (not lead_status)
       lost: leads
@@ -1424,13 +1439,13 @@ export default function CREDashboard() {
           return fs === 'lost'
         })
         .filter(l => {
-          const created = (l?.date || '').toString().slice(0,10)
           const now = new Date()
           const istOffsetMinutes = 330 - now.getTimezoneOffset()
           const nowIst = new Date(now.getTime() + istOffsetMinutes * 60 * 1000)
           const monthStartIst = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1))
           const monthStartIso = monthStartIst.toISOString().slice(0,10)
-          return created >= monthStartIso
+          const effectiveDate = ((l as any)?.updated_at || (l as any)?.created_at || (l as any)?.date || '').toString().slice(0,10)
+          return effectiveDate >= monthStartIso
         }).length,
       lostRequested: leads.filter(lead => (lead?.final_status || '').toString().toLowerCase() === 'lost requested').length,
       lostconfirm: lostRequests.length,
@@ -2628,13 +2643,18 @@ export default function CREDashboard() {
                               {activeTab === 'wonlost' ? (
                                 <>
                                   <Badge variant="outline" className="rounded-full text-xs">{lead.final_status || 'N/A'}</Badge>
-                                  <button 
-                                    className="px-2 py-1 bg-blue-100 text-blue-800 rounded-xl text-xs hover:shadow-lg flex items-center gap-1" 
-                                    onClick={() => { setSelectedLead(lead); setIsRemarksSyncOpen(true) }}
-                                    title="View History"
-                                  >
-                                    📋 History
-                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    <Button size="sm" variant="outline" className="rounded-2xl" onClick={() => openUpdateModal(lead)}>
+                                      <Edit3 className="w-4 h-4" />
+                                    </Button>
+                                    <button 
+                                      className="px-2 py-1 bg-blue-100 text-blue-800 rounded-xl text-xs hover:shadow-lg flex items-center gap-1" 
+                                      onClick={() => { setSelectedLead(lead); setIsRemarksSyncOpen(true) }}
+                                      title="View History"
+                                    >
+                                      📋 History
+                                    </button>
+                                  </div>
                                 </>
                               ) : (
                                 (() => {
