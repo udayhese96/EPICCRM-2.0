@@ -5968,23 +5968,21 @@ async def get_cre_team_leader_qualified_leads(
         month_start_utc = month_start_ist - ist_offset
         month_start_iso = month_start_utc.isoformat().replace("+00:00", "Z")
 
-        # Get total count first (MTD IST)
+        # Get total count first (MTD IST) - include ALL statuses
         count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
-                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .gte('created_at', month_start_iso)
                 .execute()
         )
         total_count = count_response.count or 0
         
-        # Get unassigned leads count (MTD IST)
+        # Get unassigned leads count (MTD IST) - include ALL statuses
         unassigned_count_response = (
             supabase
                 .table('qualified_leads')
                 .select('id', count='exact')
-                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .is_('ps_name', 'null')
                 .gte('created_at', month_start_iso)
                 .execute()
@@ -6005,7 +6003,6 @@ async def get_cre_team_leader_qualified_leads(
                     'finance_option,profession,test_drive_type,trade_in,branch,ps_name,'
                     'final_status,booking_status,retailed_status,created_at,updated_at'
                 )
-                .or_('final_status.is.null,final_status.in.(Pending,Follow-up,Waiting for Approval)')
                 .gte('created_at', month_start_iso)
                 .order('created_at', desc=True)
                 .execute()
