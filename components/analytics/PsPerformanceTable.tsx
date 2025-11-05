@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { RefreshCw, ChevronDown, Download, Phone, Calendar, FileText, User, X } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import KpiCards from './KpiCards'
 import PsRankings from './PsRankings'
 
@@ -82,9 +83,12 @@ interface LeadDetail {
 interface PsPerformanceTableProps {
   branch?: string
   showKpiCards?: boolean
+  dateFilterType?: 'today' | 'mtd' | 'from_to' | 'all_time'
+  startDate?: string
+  endDate?: string
 }
 
-const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpiCards = true }) => {
+const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpiCards = true, dateFilterType = 'all_time', startDate = '', endDate = '' }) => {
   const [data, setData] = useState<PsPerformanceData[]>([])
   const [kpiCards, setKpiCards] = useState<KpiCardsData | null>(null)
   const [psRankings, setPsRankings] = useState<PsRankingData[]>([])
@@ -92,6 +96,8 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
   const [error, setError] = useState<string | null>(null)
   const [userBranch, setUserBranch] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [teamLeaders, setTeamLeaders] = useState<string[]>([])
+  const [selectedTeamLeader, setSelectedTeamLeader] = useState<string>('all')
   
   // Drill-down modal state
   const [drillDownOpen, setDrillDownOpen] = useState(false)
@@ -121,15 +127,85 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
 
       if (!currentBranch) {
         setError('Branch information not available')
+        setLoading(false)
         return
       }
 
       if (!token) {
         setError('Authentication token not found. Please log in again.')
+        setLoading(false)
         return
       }
 
-      const response = await fetch(`/api/analytics/sales-manager/ps-performance?branch=${encodeURIComponent(currentBranch)}&_t=${Date.now()}`, {
+      // Validate date filter for 'from_to' type
+      if (dateFilterType === 'from_to') {
+        // Normalize dates by trimming whitespace
+        const normalizedStartDate = startDate?.trim() || ''
+        const normalizedEndDate = endDate?.trim() || ''
+        
+        console.log('📅 Date filter validation:', {
+          dateFilterType,
+          startDate: normalizedStartDate,
+          endDate: normalizedEndDate,
+          startDateLength: normalizedStartDate.length,
+          endDateLength: normalizedEndDate.length
+        })
+        
+        if (!normalizedStartDate || !normalizedEndDate) {
+          const missingDates = []
+          if (!normalizedStartDate) missingDates.push('start date')
+          if (!normalizedEndDate) missingDates.push('end date')
+          setError(`Please select both start date and end date for the date range filter. Missing: ${missingDates.join(' and ')}`)
+          setLoading(false)
+          return
+        }
+        
+        // Validate date format and ensure end date is after start date
+        const start = new Date(normalizedStartDate)
+        const end = new Date(normalizedEndDate)
+        
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+          console.error('❌ Invalid date format:', { normalizedStartDate, normalizedEndDate, start: start.getTime(), end: end.getTime() })
+          setError('Invalid date format. Please select valid dates.')
+          setLoading(false)
+          return
+        }
+        
+        if (end < start) {
+          setError('End date must be after or equal to start date.')
+          setLoading(false)
+          return
+        }
+      }
+
+                  // Build query params with date filter and team leader filter
+                  const params = new URLSearchParams({
+                    branch: currentBranch,
+                    _t: Date.now().toString()
+                  })
+                  
+                  if (dateFilterType !== 'all_time') {
+                    params.append('date_filter_type', dateFilterType)
+                    if (dateFilterType === 'from_to') {
+                      // Use normalized dates (already validated above)
+                      const normalizedStartDate = startDate?.trim() || ''
+                      const normalizedEndDate = endDate?.trim() || ''
+                      if (normalizedStartDate && normalizedEndDate) {
+                        params.append('start_date', normalizedStartDate)
+                        params.append('end_date', normalizedEndDate)
+                        console.log('✅ Adding dates to params:', { start_date: normalizedStartDate, end_date: normalizedEndDate })
+                      }
+                    }
+                  }
+                  
+                  if (selectedTeamLeader && selectedTeamLeader !== 'all') {
+                    params.append('team_leader', selectedTeamLeader)
+                    console.log('✅ Adding Team Leader filter:', selectedTeamLeader)
+                  }
+                  
+                  console.log('📤 Final API URL params:', params.toString())
+      
+      const response = await fetch(`/api/analytics/sales-manager/ps-performance?${params.toString()}`, {
         cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -138,15 +214,34 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
         }
       })
 
-      if (response.ok) {
-        const result = await response.json()
-        setData(result.data || [])
-        setKpiCards(result.kpi_cards || null)
-        setPsRankings(result.ps_rankings || [])
-        console.log(`✅ PS Performance data loaded for branch: ${currentBranch}`, result.data)
-        console.log(`✅ KPI Cards data loaded:`, result.kpi_cards)
-        console.log(`✅ PS Rankings data loaded:`, result.ps_rankings)
-      } else {
+                  if (response.ok) {
+                    const result = await response.json()
+                    console.log(`📦 Full API response:`, result)
+                    console.log(`📦 Team Leaders in result:`, result.team_leaders)
+                    console.log(`📦 Type of team_leaders:`, typeof result.team_leaders)
+                    console.log(`📦 Is array:`, Array.isArray(result.team_leaders))
+                    
+                    setData(result.data || [])
+                    setKpiCards(result.kpi_cards || null)
+                    setPsRankings(result.ps_rankings || [])
+                    
+                    // Ensure team_leaders is an array
+                    const teamLeadersArray = Array.isArray(result.team_leaders) 
+                      ? result.team_leaders 
+                      : (result.team_leaders ? [result.team_leaders] : [])
+                    
+                    setTeamLeaders(teamLeadersArray)
+                    console.log(`✅ PS Performance data loaded for branch: ${currentBranch}`, result.data)
+                    console.log(`✅ KPI Cards data loaded:`, result.kpi_cards)
+                    console.log(`✅ PS Rankings data loaded:`, result.ps_rankings)
+                    console.log(`✅ Team Leaders loaded:`, teamLeadersArray)
+                    console.log(`✅ Team Leaders count:`, teamLeadersArray.length)
+                    if (teamLeadersArray.length > 0) {
+                      console.log(`✅ Team Leaders list:`, teamLeadersArray)
+                    } else {
+                      console.warn(`⚠️ No Team Leaders found in response. Full result keys:`, Object.keys(result))
+                    }
+                  } else {
         const errorData = await response.json()
         setError(errorData.error || 'Failed to load PS performance data')
         console.error('❌ Failed to load PS performance data:', errorData)
@@ -161,9 +256,21 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
 
   useEffect(() => {
     if (userBranch) {
+      // Don't auto-fetch if 'from_to' filter is selected but dates are missing
+      const normalizedStartDate = startDate?.trim() || ''
+      const normalizedEndDate = endDate?.trim() || ''
+      
+      if (dateFilterType === 'from_to' && (!normalizedStartDate || !normalizedEndDate)) {
+        console.log('⏸️ Skipping fetch - dates missing:', { dateFilterType, startDate: normalizedStartDate, endDate: normalizedEndDate })
+        setError('Please select both start date and end date for the date range filter.')
+        setLoading(false)
+        return
+      }
+      
+      console.log('🔄 Triggering fetch with:', { dateFilterType, startDate: normalizedStartDate, endDate: normalizedEndDate })
       fetchPsPerformanceData()
     }
-  }, [userBranch, branch])
+              }, [userBranch, branch, dateFilterType, startDate, endDate, selectedTeamLeader])
 
   const exportToCSV = () => {
     if (!data || data.length === 0) {
@@ -318,8 +425,34 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
         return
       }
       
+      // Build query params with date filter
+      const params = new URLSearchParams({
+        branch: currentBranch,
+        ps_name: psName,
+        status_type: statusType
+      })
+      
+      // Always include date filter parameters to match the table data
+      if (dateFilterType !== 'all_time') {
+        params.append('date_filter_type', dateFilterType)
+        if (dateFilterType === 'from_to') {
+          const normalizedStartDate = startDate?.trim() || ''
+          const normalizedEndDate = endDate?.trim() || ''
+          if (normalizedStartDate && normalizedEndDate) {
+            params.append('start_date', normalizedStartDate)
+            params.append('end_date', normalizedEndDate)
+            console.log('✅ PS Drill-down - Adding dates to params:', { start_date: normalizedStartDate, end_date: normalizedEndDate })
+          }
+        }
+      } else {
+        // Explicitly set all_time if no filter is selected
+        params.append('date_filter_type', 'all_time')
+      }
+      
+      console.log('📤 PS Drill-down API URL params:', params.toString())
+      
       const response = await fetch(
-        `/api/analytics/sales-manager/ps-leads?branch=${encodeURIComponent(currentBranch)}&ps_name=${encodeURIComponent(psName)}&status_type=${statusType}`,
+        `/api/analytics/sales-manager/ps-leads?${params.toString()}`,
         {
           cache: 'no-store',
           headers: {
@@ -399,7 +532,15 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
               </CardHeader>
               <CardContent>
                 <div className="text-center py-8">
-                  <p className="text-red-600 mb-4">{error}</p>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-2">
+                      <X className="h-6 w-6 text-red-600" />
+                    </div>
+                    <p className="text-red-600 font-medium">{error}</p>
+                    {error.includes('start_date and end_date') || error.includes('Please select both start date') ? (
+                      <p className="text-sm text-gray-500 mt-2">Please use the date filter above to select a date range.</p>
+                    ) : null}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -424,28 +565,51 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
         {/* Main PS Performance Table */}
         <div className="flex-1">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <CardTitle>PS Performance Analytics</CardTitle>
-              <div className="flex gap-2">
-                <Button 
-                  onClick={exportToCSV} 
-                  variant="outline" 
-                  size="sm"
-                  disabled={exporting || data.length === 0}
-                  className="px-2 sm:px-3"
-                >
-                  <Download className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
-                </Button>
-                <Button 
-                  onClick={fetchPsPerformanceData} 
-                  variant="outline" 
-                  size="sm"
-                  className="px-2 sm:px-3"
-                >
-                  <RefreshCw className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Refresh</span>
-                </Button>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+                {/* Team Leader Filter */}
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-gray-500" />
+                  <Select value={selectedTeamLeader} onValueChange={setSelectedTeamLeader} disabled={loading}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder={loading ? "Loading..." : teamLeaders.length === 0 ? "No Team Leaders" : "Select Team Leader"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {teamLeaders.length > 0 ? (
+                        teamLeaders.map((tl) => (
+                          <SelectItem key={tl} value={tl}>
+                            {tl}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no_tl" disabled>No Team Leaders Found</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={exportToCSV} 
+                    variant="outline" 
+                    size="sm"
+                    disabled={exporting || data.length === 0}
+                    className="px-2 sm:px-3"
+                  >
+                    <Download className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
+                  </Button>
+                  <Button 
+                    onClick={fetchPsPerformanceData} 
+                    variant="outline" 
+                    size="sm"
+                    className="px-2 sm:px-3"
+                  >
+                    <RefreshCw className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Refresh</span>
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -566,7 +730,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
                         const currentDate = new Date().toISOString().split('T')[0]
                         const currentTime = new Date().toLocaleTimeString()
                         
-                        const headers = ['Lead UID', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'CRE', 'Model Interested', 'Status', 'First Call Date', 'Second Call Date', 'Third Call Date', 'Fourth Call Date', 'Fifth Call Date', 'Sixth Call Date', 'Seventh Call Date']
+                        const headers = ['Lead UID', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'Created At', 'Model Interested', 'Status', 'First Call Date', 'Second Call Date', 'Third Call Date', 'Fourth Call Date', 'Fifth Call Date', 'Sixth Call Date', 'Seventh Call Date']
                         
                         const csvRows = [
                           drillDownTitle,
@@ -580,7 +744,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
                             lead.customer_mobile_number || '',
                             lead.alternate_mobile_number || '',
                             `"${lead.source || ''}"`,
-                            `"${lead.cre_name || ''}"`,
+                            lead.created_at ? new Date(lead.created_at).toISOString() : '',
                             `"${lead.model_interested || ''}"`,
                             `"${lead.final_status || lead.lead_status || 'Pending'}"`,
                             lead.first_call_date ? new Date(lead.first_call_date).toISOString() : '',
@@ -640,7 +804,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
                     <TableHead>Customer Name</TableHead>
                     <TableHead>Mobile</TableHead>
                     <TableHead>Source</TableHead>
-                    <TableHead>CRE</TableHead>
+                    <TableHead>Created At</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -658,7 +822,7 @@ const PsPerformanceTable: React.FC<PsPerformanceTableProps> = ({ branch, showKpi
                       <TableCell className="font-medium">{lead.customer_name || 'N/A'}</TableCell>
                       <TableCell>{lead.customer_mobile_number || 'N/A'}</TableCell>
                       <TableCell>{lead.source || 'N/A'}</TableCell>
-                      <TableCell>{lead.cre_name || 'N/A'}</TableCell>
+                      <TableCell>{lead.created_at ? new Date(lead.created_at).toLocaleString() : 'N/A'}</TableCell>
                       <TableCell>{lead.model_interested || 'N/A'}</TableCell>
                       <TableCell>
                         <Badge className={

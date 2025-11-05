@@ -3,12 +3,13 @@
 import React, { useState, useEffect } from 'react'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import PsPerformanceTable from '@/components/analytics/PsPerformanceTable'
+import PsFollowupsTable from '@/components/analytics/PsFollowupsTable'
 import TlPerformanceTable from '@/components/analytics/TlPerformanceTable'
 import SourceAnalyticsTable from '@/components/analytics/SourceAnalyticsTable'
 import KpiCards from '@/components/analytics/KpiCards'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { BarChart3, Users, Zap, RefreshCw, Download, TrendingUp, Activity, Award, Sparkles } from 'lucide-react'
+import { BarChart3, Users, Zap, RefreshCw, Download, TrendingUp, Activity, Award, Sparkles, Calendar } from 'lucide-react'
 
 interface KpiCardData {
   value: number
@@ -29,6 +30,11 @@ const SalesManagerAnalytics = () => {
   const [kpiCards, setKpiCards] = useState<KpiCardsData | null>(null)
   const [kpiLoading, setKpiLoading] = useState(true)
   const [userBranch, setUserBranch] = useState<string | null>(null)
+  
+  // Date filter state
+  const [dateFilterType, setDateFilterType] = useState<'today' | 'mtd' | 'from_to' | 'all_time'>('all_time')
+  const [startDate, setStartDate] = useState<string>('')
+  const [endDate, setEndDate] = useState<string>('')
 
   // Get user's branch from localStorage on mount
   useEffect(() => {
@@ -58,7 +64,38 @@ const SalesManagerAnalytics = () => {
         return
       }
 
-      const response = await fetch(`/api/analytics/sales-manager/ps-performance?branch=${encodeURIComponent(currentBranch)}&_t=${Date.now()}`, {
+      // Validate dates for 'from_to' filter
+      if (dateFilterType === 'from_to') {
+        const normalizedStartDate = startDate?.trim() || ''
+        const normalizedEndDate = endDate?.trim() || ''
+        
+        if (!normalizedStartDate || !normalizedEndDate) {
+          console.log('⏸️ KPI Fetch - Skipping due to missing dates:', { dateFilterType, startDate: normalizedStartDate, endDate: normalizedEndDate })
+          setKpiLoading(false)
+          return
+        }
+      }
+
+      // Build query params with date filter
+      const params = new URLSearchParams({
+        branch: currentBranch,
+        _t: Date.now().toString()
+      })
+      
+      if (dateFilterType !== 'all_time') {
+        params.append('date_filter_type', dateFilterType)
+        if (dateFilterType === 'from_to') {
+          const normalizedStartDate = startDate?.trim() || ''
+          const normalizedEndDate = endDate?.trim() || ''
+          if (normalizedStartDate && normalizedEndDate) {
+            params.append('start_date', normalizedStartDate)
+            params.append('end_date', normalizedEndDate)
+            console.log('✅ KPI Fetch - Adding dates to params:', { start_date: normalizedStartDate, end_date: normalizedEndDate })
+          }
+        }
+      }
+      
+      const response = await fetch(`/api/analytics/sales-manager/ps-performance?${params.toString()}`, {
         cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -80,9 +117,21 @@ const SalesManagerAnalytics = () => {
 
   useEffect(() => {
     if (userBranch) {
+      // Don't auto-fetch if 'from_to' filter is selected but dates are missing
+      if (dateFilterType === 'from_to') {
+        const normalizedStartDate = startDate?.trim() || ''
+        const normalizedEndDate = endDate?.trim() || ''
+        
+        if (!normalizedStartDate || !normalizedEndDate) {
+          console.log('⏸️ KPI useEffect - Skipping fetch - dates missing:', { dateFilterType, startDate: normalizedStartDate, endDate: normalizedEndDate })
+          return
+        }
+      }
+      
+      console.log('🔄 KPI useEffect - Triggering fetch with:', { dateFilterType, startDate: startDate?.trim(), endDate: endDate?.trim() })
       fetchKpiData()
     }
-  }, [userBranch])
+  }, [userBranch, dateFilterType, startDate, endDate])
 
   return (
     <DashboardLayout>
@@ -158,6 +207,56 @@ const SalesManagerAnalytics = () => {
             </Button>
           </div>
 
+          {/* Date Filter - Only show for PS Analytics tab */}
+          {activeTab === 'ps' && (
+            <Card className="bg-white shadow-md rounded-xl border-0">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-700">Date Filter:</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select
+                      value={dateFilterType}
+                      onChange={(e) => {
+                        const newType = e.target.value as 'today' | 'mtd' | 'from_to' | 'all_time'
+                        setDateFilterType(newType)
+                        if (newType !== 'from_to') {
+                          setStartDate('')
+                          setEndDate('')
+                        }
+                      }}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
+                    >
+                      <option value="all_time">All Time</option>
+                      <option value="today">Today</option>
+                      <option value="mtd">MTD (Month to Date)</option>
+                      <option value="from_to">From To</option>
+                    </select>
+                    {dateFilterType === 'from_to' && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        />
+                        <span className="text-gray-500">to</span>
+                        <input
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Content based on active tab */}
           {activeTab === 'ps' && (
             <div className="space-y-4 sm:space-y-6 animate-in slide-in-from-bottom-4 duration-500">
@@ -190,12 +289,30 @@ const SalesManagerAnalytics = () => {
               
               {/* Team Leader Analytics */}
               <div className="transform transition-all duration-300 hover:shadow-xl">
-                <TlPerformanceTable />
+                <TlPerformanceTable 
+                  dateFilterType={dateFilterType}
+                  startDate={startDate}
+                  endDate={endDate}
+                />
               </div>
               
               {/* PS Performance Table */}
               <div className="transform transition-all duration-300 hover:shadow-xl">
-                <PsPerformanceTable showKpiCards={false} />
+                <PsPerformanceTable 
+                  showKpiCards={false}
+                  dateFilterType={dateFilterType}
+                  startDate={startDate}
+                  endDate={endDate}
+                />
+              </div>
+
+              {/* PS Followups Table */}
+              <div className="transform transition-all duration-300 hover:shadow-xl">
+                <PsFollowupsTable 
+                  dateFilterType={dateFilterType}
+                  startDate={startDate}
+                  endDate={endDate}
+                />
               </div>
             </div>
           )}

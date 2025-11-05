@@ -1,94 +1,96 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { RefreshCw, ChevronDown, Download, Calendar, Phone, User, X } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { RefreshCw, Download, ChevronDown, Calendar, User } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-interface TlPerformanceData {
-  tl_name: string
+interface PsFollowupsRow {
+  ps_name: string
   lead_count: number
-  unattended: number
-  open_leads: number
-  lost_leads: number
-  approval_pending: number
-  booked: number
-  retailed: number
+  unattended_count?: number
+  f1_count?: number
+  f2_count?: number
+  f3_count?: number
+  f4_count?: number
+  f5_count?: number
+  f6_count?: number
+  f7_count?: number
+  f8_count?: number
+  f9_count?: number
+  f10_count?: number
 }
 
 interface LeadDetail {
   lead_uid: string
-  ps_name?: string
+  uid?: string  // legacy field name, prefer lead_uid
   customer_name: string
   customer_mobile_number: string
   alternate_mobile_number: string
   source: string
-  sub_source?: string
-  cre_name: string
-  lead_category: string
+  cre_name?: string
   model_interested: string
-  follow_up_date: string
   lead_status: string
   final_status: string
-  first_call_date: string
-  first_call_remark: string
-  first_call_lead_status: string
-  second_call_date: string
-  second_call_remark: string
-  second_call_lead_status: string
-  third_call_date: string
-  third_call_remark: string
-  third_call_lead_status: string
-  fourth_call_date: string
-  fourth_call_remark: string
-  fourth_call_lead_status: string
-  fifth_call_date: string
-  fifth_call_remark: string
-  fifth_call_lead_status: string
-  sixth_call_date: string
-  sixth_call_remark: string
-  sixth_call_lead_status: string
-  seventh_call_date: string
-  seventh_call_remark: string
-  seventh_call_lead_status: string
+  first_call_date?: string
+  first_call_remark?: string
+  first_call_lead_status?: string
+  second_call_date?: string
+  second_call_remark?: string
+  second_call_lead_status?: string
+  third_call_date?: string
+  third_call_remark?: string
+  third_call_lead_status?: string
+  fourth_call_date?: string
+  fourth_call_remark?: string
+  fourth_call_lead_status?: string
+  fifth_call_date?: string
+  fifth_call_remark?: string
+  fifth_call_lead_status?: string
+  sixth_call_date?: string
+  sixth_call_remark?: string
+  sixth_call_lead_status?: string
+  seventh_call_date?: string
+  seventh_call_remark?: string
+  seventh_call_lead_status?: string
   created_at: string
-  updated_at: string
+  updated_at?: string
 }
 
-interface TlPerformanceTableProps {
+interface PsFollowupsTableProps {
   branch?: string
   dateFilterType?: 'today' | 'mtd' | 'from_to' | 'all_time'
   startDate?: string
   endDate?: string
 }
 
-const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFilterType = 'all_time', startDate = '', endDate = '' }) => {
-  const [data, setData] = useState<TlPerformanceData[]>([])
+const PsFollowupsTable: React.FC<PsFollowupsTableProps> = ({ branch, dateFilterType = 'all_time', startDate = '', endDate = '' }) => {
+  const [data, setData] = useState<PsFollowupsRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [userBranch, setUserBranch] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
-  
-  // Drill-down modal state
+  const [teamLeaders, setTeamLeaders] = useState<string[]>([])
+  const [selectedTeamLeader, setSelectedTeamLeader] = useState<string>('all')
+
   const [drillDownOpen, setDrillDownOpen] = useState(false)
-  const [drillDownLeads, setDrillDownLeads] = useState<LeadDetail[]>([])
   const [drillDownLoading, setDrillDownLoading] = useState(false)
   const [drillDownTitle, setDrillDownTitle] = useState('')
+  const [drillDownLeads, setDrillDownLeads] = useState<LeadDetail[]>([])
   const [selectedLead, setSelectedLead] = useState<LeadDetail | null>(null)
   const [leadDetailOpen, setLeadDetailOpen] = useState(false)
 
-  // Get user's branch from localStorage on mount
   useEffect(() => {
     const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
     const parsed = session ? JSON.parse(session) : null
-    const branchFromSession = parsed?.branch || null
-    setUserBranch(branchFromSession)
+    setUserBranch(parsed?.branch || null)
   }, [])
 
-  const fetchTlPerformanceData = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true)
       setError(null)
@@ -100,42 +102,14 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
 
       if (!currentBranch) {
         setError('Branch information not available')
-        setLoading(false)
         return
       }
-
       if (!token) {
         setError('Authentication token not found. Please log in again.')
-        setLoading(false)
         return
       }
 
-      // Validate date filter for 'from_to' type
-      if (dateFilterType === 'from_to') {
-        if (!startDate || !endDate || startDate.trim() === '' || endDate.trim() === '') {
-          setError('Please select both start date and end date for the date range filter.')
-          setLoading(false)
-          return
-        }
-        
-        // Validate date format and ensure end date is after start date
-        const start = new Date(startDate)
-        const end = new Date(endDate)
-        
-        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-          setError('Invalid date format. Please select valid dates.')
-          setLoading(false)
-          return
-        }
-        
-        if (end < start) {
-          setError('End date must be after or equal to start date.')
-          setLoading(false)
-          return
-        }
-      }
-
-      // Build query params with date filter
+      // Build query params with date filter and team leader filter
       const params = new URLSearchParams({
         branch: currentBranch,
         _t: Date.now().toString()
@@ -149,7 +123,12 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
         }
       }
       
-      const response = await fetch(`/api/analytics/sales-manager/tl-performance?${params.toString()}`, {
+      if (selectedTeamLeader && selectedTeamLeader !== 'all') {
+        params.append('team_leader', selectedTeamLeader)
+        console.log('✅ Adding Team Leader filter:', selectedTeamLeader)
+      }
+      
+      const res = await fetch(`/api/analytics/sales-manager/ps-followups?${params.toString()}`, {
         cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -158,238 +137,131 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
         }
       })
 
-      if (response.ok) {
-        const result = await response.json()
-        setData(result.data || [])
-        console.log(`✅ TL Performance data loaded for branch: ${currentBranch}`, result.data)
-      } else {
-        const errorData = await response.json()
-        setError(errorData.error || 'Failed to load TL Performance data')
-        console.error('❌ Failed to load TL Performance data:', errorData)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error || 'Failed to load PS followups data')
       }
-    } catch (error) {
-      console.error('❌ Error loading TL Performance data:', error)
-      setError('Error loading TL Performance data')
+
+      const result = await res.json()
+      setData(result.data || [])
+      
+      // Ensure team_leaders is an array
+      const teamLeadersArray = Array.isArray(result.team_leaders) 
+        ? result.team_leaders 
+        : (result.team_leaders ? [result.team_leaders] : [])
+      
+      setTeamLeaders(teamLeadersArray)
+      console.log(`✅ Team Leaders loaded:`, teamLeadersArray)
+      console.log(`✅ Team Leaders count:`, teamLeadersArray.length)
+    } catch (e:any) {
+      setError(e?.message || 'Error loading PS followups data')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    if (userBranch) {
-      // Don't auto-fetch if 'from_to' filter is selected but dates are missing
-      if (dateFilterType === 'from_to' && (!startDate || !endDate || startDate.trim() === '' || endDate.trim() === '')) {
-        setError('Please select both start date and end date for the date range filter.')
-        setLoading(false)
-        return
-      }
-      fetchTlPerformanceData()
-    }
-  }, [userBranch, branch, dateFilterType, startDate, endDate])
+    if (userBranch) fetchData()
+  }, [userBranch, branch, dateFilterType, startDate, endDate, selectedTeamLeader])
 
   const exportToCSV = () => {
     if (!data || data.length === 0) {
       setError('No data available to export')
       return
     }
-
     setExporting(true)
-
     try {
       const currentDate = new Date().toISOString().split('T')[0]
-      const currentTime = new Date().toLocaleTimeString()
       const branchName = userBranch || branch || 'analytics'
 
-      // Create CSV headers
-      const headers = [
-        'Team Leader Name',
-        'Total Leads',
-        'Unattended',
-        'Open Leads',
-        'Lost Leads',
-        'Approval Pending',
-        'Booked',
-        'Retailed'
-      ]
+      const headers = ['PS Name', 'Total Leads', 'Unattended', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10']
+      const rows = data.map(r => [
+        `"${r.ps_name}"`, r.lead_count,
+        (r.unattended_count ?? 0),
+        (r.f1_count ?? 0), (r.f2_count ?? 0), (r.f3_count ?? 0), (r.f4_count ?? 0),
+        (r.f5_count ?? 0), (r.f6_count ?? 0), (r.f7_count ?? 0), (r.f8_count ?? 0),
+        (r.f9_count ?? 0), (r.f10_count ?? 0)
+      ].join(','))
 
-      // Create CSV content with metadata
-      const csvRows = [
-        // Metadata rows
-        `Team Leader Performance Analytics Report`,
+      const csv = [
+        'PS Followups Report',
         `Branch: ${branchName}`,
-        `Generated: ${currentDate} at ${currentTime}`,
+        `Generated: ${currentDate}`,
         `Total Records: ${data.length}`,
-        '', // Empty row for spacing
-        // Headers
+        '',
         headers.join(','),
-        // Data rows
-        ...data.map(row => [
-          `"${row.tl_name}"`,
-          row.lead_count,
-          row.unattended,
-          row.open_leads,
-          row.lost_leads,
-          row.approval_pending,
-          row.booked,
-          row.retailed
-        ].join(','))
-      ]
+        ...rows
+      ].join('\n')
 
-      // Create CSV content
-      const csvContent = csvRows.join('\n')
-
-      // Create and download file
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
       const link = document.createElement('a')
       const url = URL.createObjectURL(blob)
-
-      link.setAttribute('href', url)
-      link.setAttribute('download', `tl-performance-${branchName}-${currentDate}.csv`)
+      link.href = url
+      link.download = `ps-followups-${branchName}-${currentDate}.csv`
       link.style.visibility = 'hidden'
-
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-
-      console.log(`✅ TL Performance data exported successfully for branch: ${branchName}`)
-    } catch (error) {
-      console.error('❌ Error exporting data:', error)
+    } catch (e) {
       setError('Failed to export data')
     } finally {
       setExporting(false)
     }
   }
 
-  const getStatusBadgeColor = (status: string, count: number) => {
-    if (count === 0) return 'bg-gray-100 text-gray-600'
-
-    switch (status) {
-      case 'Unattended':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'Open Leads':
-        return 'bg-blue-100 text-blue-800'
-      case 'Lost':
-        return 'bg-red-100 text-red-800'
-      case 'Waiting for Approval':
-        return 'bg-purple-100 text-purple-800'
-      case 'Booked':
-        return 'bg-green-100 text-green-800'
-      case 'Won':
-        return 'bg-emerald-100 text-emerald-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'Unattended':
-        return 'Unattended'
-      case 'Open Leads':
-        return 'Open Leads'
-      case 'Lost':
-        return 'Lost Leads'
-      case 'Waiting for Approval':
-        return 'Approval Pending'
-      case 'Booked':
-        return 'Booked'
-      case 'Won':
-        return 'Retailed'
-      default:
-        return status
-    }
-  }
-
-  const handleCellClick = async (tlName: string, statusType: string) => {
-    // Don't allow clicking on TOTAL row
-    if (tlName === 'TOTAL') return
-    
-    // Don't allow clicking on cells with 0 count
-    const row = data.find(r => r.tl_name === tlName)
-    if (!row) return
-    
-    const countMap: { [key: string]: number } = {
-      'total': row.lead_count,
-      'unattended': row.unattended,
-      'open_leads': row.open_leads,
-      'lost_leads': row.lost_leads,
-      'approval_pending': row.approval_pending,
-      'booked': row.booked,
-      'retailed': row.retailed
-    }
-    
-    if (countMap[statusType] === 0) return
-    
+  const openDrillDown = async (psName: string, total: number, filter?: 'unattended' | 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f9' | 'f10') => {
+    if (psName === 'TOTAL' || total === 0) return
     try {
       setDrillDownLoading(true)
-      setDrillDownTitle(`${tlName} - ${getStatusLabel(statusType)} (${countMap[statusType]})`)
+      const filterLabel = filter === 'unattended' ? 'Unattended' : filter ? filter.toUpperCase() : 'Total Leads'
+      setDrillDownTitle(`${psName} - ${filterLabel} (${total})`)
       setDrillDownOpen(true)
-      
+
       const currentBranch = branch || userBranch
-      if (!currentBranch) {
-        setError('Branch information not available')
-        return
-      }
-      
+      if (!currentBranch) return
+
       const session = localStorage.getItem('supabase_user') || localStorage.getItem('user')
       const parsed = session ? JSON.parse(session) : null
       const token = parsed?.access_token || ''
-      
-      if (!token) {
-        setError('Authentication token not found. Please log in again.')
-        return
-      }
-      
-      // Build query params with date filter
+      if (!token) return
+
+      // Build query params with date filter and team leader filter
       const params = new URLSearchParams({
         branch: currentBranch,
-        tl_name: tlName,
-        status_type: statusType
+        ps_name: psName
       })
       
-      // Always include date filter parameters to match the table data
+      if (filter) {
+        params.append('filter', filter)
+      }
+      
       if (dateFilterType !== 'all_time') {
         params.append('date_filter_type', dateFilterType)
-        if (dateFilterType === 'from_to') {
-          const normalizedStartDate = startDate?.trim() || ''
-          const normalizedEndDate = endDate?.trim() || ''
-          if (normalizedStartDate && normalizedEndDate) {
-            params.append('start_date', normalizedStartDate)
-            params.append('end_date', normalizedEndDate)
-            console.log('✅ TL Drill-down - Adding dates to params:', { start_date: normalizedStartDate, end_date: normalizedEndDate })
-          }
+        if (dateFilterType === 'from_to' && startDate && endDate) {
+          params.append('start_date', startDate)
+          params.append('end_date', endDate)
         }
-      } else {
-        // Explicitly set all_time if no filter is selected
-        params.append('date_filter_type', 'all_time')
       }
       
-      console.log('📤 TL Drill-down API URL params:', params.toString())
+      // Note: team_leader filter is already applied at the main table level,
+      // so drill-down will only show PS under the selected team leader
       
-      const response = await fetch(
-        `/api/analytics/sales-manager/tl-leads?${params.toString()}`,
-        {
-          cache: 'no-store',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store, no-cache, must-revalidate'
-          }
+      const res = await fetch(`/api/analytics/sales-manager/ps-followup-leads?${params.toString()}`, {
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate'
         }
-      )
-      
-      if (response.ok) {
-        const result = await response.json()
-        setDrillDownLeads(result.leads || [])
-        console.log(`✅ Drill-down leads loaded: ${result.leads?.length || 0} leads`)
-      } else {
-        const errorData = await response.json()
-        setError(errorData.error || 'Failed to load drill-down data')
-        console.error('❌ Failed to load drill-down data:', errorData)
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error || 'Failed to load followup leads')
       }
-    } catch (error) {
-      console.error('❌ Error loading drill-down data:', error)
-      setError('Error loading drill-down data')
+      const result = await res.json()
+      setDrillDownLeads(result.leads || [])
+    } catch (e:any) {
+      setError(e?.message || 'Error loading drill-down data')
     } finally {
       setDrillDownLoading(false)
     }
@@ -399,50 +271,12 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Team Leader Analytics</CardTitle>
+          <CardTitle>PS Followups</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8">
-            <RefreshCw className="mx-auto h-8 w-8 text-gray-400 animate-spin" />
-            <p className="text-gray-500 mt-4">Loading Team Leader Performance data...</p>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (error) {
-    return (
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Team Leader Analytics</CardTitle>
-          <div className="flex gap-2">
-            <Button
-              onClick={exportToCSV}
-              variant="outline"
-              size="sm"
-              disabled={exporting || data.length === 0}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              {exporting ? 'Exporting...' : 'Export CSV'}
-            </Button>
-            <Button onClick={fetchTlPerformanceData} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Retry
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8">
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-2">
-                <X className="h-6 w-6 text-red-600" />
-              </div>
-              <p className="text-red-600 font-medium">{error}</p>
-              {error.includes('start_date and end_date') || error.includes('Please select both start date') ? (
-                <p className="text-sm text-gray-500 mt-2">Please use the date filter above to select a date range.</p>
-              ) : null}
-            </div>
+          <div className="flex items-center justify-center py-8">
+            <RefreshCw className="h-6 w-6 animate-spin mr-2" />
+            <span>Loading PS followups...</span>
           </div>
         </CardContent>
       </Card>
@@ -450,124 +284,154 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Team Leader Analytics</CardTitle>
-        <div className="flex gap-2">
-          <Button
-            onClick={exportToCSV}
-            variant="outline"
-            size="sm"
-            disabled={exporting || data.length === 0}
-            className="px-2 sm:px-3"
-          >
-            <Download className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
-          </Button>
-          <Button 
-            onClick={fetchTlPerformanceData} 
-            variant="outline" 
-            size="sm"
-            className="px-2 sm:px-3"
-          >
-            <RefreshCw className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-hidden">
-          <Table className="w-full text-xs">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="font-semibold text-left w-24">Team Leader</TableHead>
-                <TableHead className="text-center font-semibold w-12">Total</TableHead>
-                <TableHead className="text-center font-semibold w-16">Unattended</TableHead>
-                <TableHead className="text-center font-semibold w-12">Open</TableHead>
-                <TableHead className="text-center font-semibold w-12">Lost</TableHead>
-                <TableHead className="text-center font-semibold w-16">Pending</TableHead>
-                <TableHead className="text-center font-semibold w-12">Booked</TableHead>
-                <TableHead className="text-center font-semibold w-12">Retailed</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((row, index) => (
-                <TableRow 
-                  key={row.tl_name} 
-                  className={row.tl_name === 'TOTAL' ? 'font-bold bg-gray-50' : ''}
-                >
-                  <TableCell className="text-left">
-                    <div className="truncate max-w-20" title={row.tl_name}>
-                      {row.tl_name}
-                    </div>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && handleCellClick(row.tl_name, 'total')}
-                  >
-                    {row.lead_count}
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.unattended > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.unattended > 0 && handleCellClick(row.tl_name, 'unattended')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Unattended', row.unattended)} text-xs px-1 py-0`}>
-                      {row.unattended}
-                    </Badge>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.open_leads > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.open_leads > 0 && handleCellClick(row.tl_name, 'open_leads')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Open Leads', row.open_leads)} text-xs px-1 py-0`}>
-                      {row.open_leads}
-                    </Badge>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.lost_leads > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.lost_leads > 0 && handleCellClick(row.tl_name, 'lost_leads')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Lost', row.lost_leads)} text-xs px-1 py-0`}>
-                      {row.lost_leads}
-                    </Badge>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.approval_pending > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.approval_pending > 0 && handleCellClick(row.tl_name, 'approval_pending')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Waiting for Approval', row.approval_pending)} text-xs px-1 py-0`}>
-                      {row.approval_pending}
-                    </Badge>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.booked > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.booked > 0 && handleCellClick(row.tl_name, 'booked')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Booked', row.booked)} text-xs px-1 py-0`}>
-                      {row.booked}
-                    </Badge>
-                  </TableCell>
-                  <TableCell 
-                    className={`text-center ${row.tl_name !== 'TOTAL' && row.retailed > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
-                    onClick={() => row.tl_name !== 'TOTAL' && row.retailed > 0 && handleCellClick(row.tl_name, 'retailed')}
-                  >
-                    <Badge variant="outline" className={`${getStatusBadgeColor('Won', row.retailed)} text-xs px-1 py-0`}>
-                      {row.retailed}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        {data.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No Team Leader Performance data available for this branch.
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <CardTitle>PS Followups</CardTitle>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+            {/* Team Leader Filter */}
+            <div className="flex items-center gap-2">
+              <User className="h-4 w-4 text-gray-500" />
+              <Select value={selectedTeamLeader} onValueChange={setSelectedTeamLeader} disabled={loading}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder={loading ? "Loading..." : teamLeaders.length === 0 ? "No Team Leaders" : "Select Team Leader"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {teamLeaders.length > 0 ? (
+                    teamLeaders.map((tl) => (
+                      <SelectItem key={tl} value={tl}>
+                        {tl}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="no_tl" disabled>No Team Leaders Found</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={exportToCSV} variant="outline" size="sm" disabled={exporting || data.length === 0} className="px-2 sm:px-3">
+                <Download className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export CSV'}</span>
+              </Button>
+              <Button onClick={fetchData} variant="outline" size="sm" className="px-2 sm:px-3">
+                <RefreshCw className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            </div>
           </div>
-        )}
-      </CardContent>
-      
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="text-center py-4 text-red-600">{error}</div>
+          )}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="font-semibold">PS Name</TableHead>
+                  <TableHead className="text-center">Total Leads</TableHead>
+                  <TableHead className="text-center">Unattended</TableHead>
+                  <TableHead className="text-center">F1</TableHead>
+                  <TableHead className="text-center">F2</TableHead>
+                  <TableHead className="text-center">F3</TableHead>
+                  <TableHead className="text-center">F4</TableHead>
+                  <TableHead className="text-center">F5</TableHead>
+                  <TableHead className="text-center">F6</TableHead>
+                  <TableHead className="text-center">F7</TableHead>
+                  <TableHead className="text-center">F8</TableHead>
+                  <TableHead className="text-center">F9</TableHead>
+                  <TableHead className="text-center">F10</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.map(row => (
+                  <TableRow key={row.ps_name} className={row.ps_name === 'TOTAL' ? 'bg-gray-50 font-semibold' : ''}>
+                    <TableCell className={row.ps_name === 'TOTAL' ? 'font-bold' : ''}>{row.ps_name}</TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && openDrillDown(row.ps_name, row.lead_count)}
+                    >
+                      <Badge variant="outline" className="bg-blue-50 text-blue-700">{row.lead_count}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.unattended_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.unattended_count || 0) > 0 && openDrillDown(row.ps_name, row.unattended_count || 0, 'unattended')}
+                    >
+                      <Badge className={(row.unattended_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-800'}>{row.unattended_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f1_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f1_count || 0) > 0 && openDrillDown(row.ps_name, row.f1_count || 0, 'f1' as const)}
+                    >
+                      <Badge className={(row.f1_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f1_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f2_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f2_count || 0) > 0 && openDrillDown(row.ps_name, row.f2_count || 0, 'f2' as const)}
+                    >
+                      <Badge className={(row.f2_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f2_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f3_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f3_count || 0) > 0 && openDrillDown(row.ps_name, row.f3_count || 0, 'f3' as const)}
+                    >
+                      <Badge className={(row.f3_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f3_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f4_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f4_count || 0) > 0 && openDrillDown(row.ps_name, row.f4_count || 0, 'f4' as const)}
+                    >
+                      <Badge className={(row.f4_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f4_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f5_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f5_count || 0) > 0 && openDrillDown(row.ps_name, row.f5_count || 0, 'f5' as const)}
+                    >
+                      <Badge className={(row.f5_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f5_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f6_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f6_count || 0) > 0 && openDrillDown(row.ps_name, row.f6_count || 0, 'f6' as const)}
+                    >
+                      <Badge className={(row.f6_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f6_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f7_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f7_count || 0) > 0 && openDrillDown(row.ps_name, row.f7_count || 0, 'f7' as const)}
+                    >
+                      <Badge className={(row.f7_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f7_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f8_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f8_count || 0) > 0 && openDrillDown(row.ps_name, row.f8_count || 0, 'f8' as const)}
+                    >
+                      <Badge className={(row.f8_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f8_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f9_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f9_count || 0) > 0 && openDrillDown(row.ps_name, row.f9_count || 0, 'f9' as const)}
+                    >
+                      <Badge className={(row.f9_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f9_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell 
+                      className={`text-center ${row.ps_name !== 'TOTAL' && (row.f10_count || 0) > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                      onClick={() => row.ps_name !== 'TOTAL' && (row.f10_count || 0) > 0 && openDrillDown(row.ps_name, row.f10_count || 0, 'f10' as const)}
+                    >
+                      <Badge className={(row.f10_count || 0) === 0 ? 'bg-gray-100 text-gray-600' : 'bg-emerald-100 text-emerald-800'}>{row.f10_count || 0}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {data.length === 0 && (
+            <div className="text-center py-8 text-gray-500">No PS followups data available for this branch.</div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Drill-down Leads Modal */}
       <Dialog open={drillDownOpen} onOpenChange={setDrillDownOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -583,19 +447,15 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
                     onClick={() => {
                       try {
                         const currentDate = new Date().toISOString().split('T')[0]
-                        const currentTime = new Date().toLocaleTimeString()
-                        
-                        const headers = ['Lead UID', 'PS Name', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'Created At', 'Model Interested', 'Status', 'First Call Date', 'Second Call Date', 'Third Call Date', 'Fourth Call Date', 'Fifth Call Date', 'Sixth Call Date', 'Seventh Call Date']
-                        
+                        const headers = ['Lead UID', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'Created At', 'Model', 'Status', 'First Call', 'Second Call', 'Third Call', 'Fourth Call', 'Fifth Call', 'Sixth Call', 'Seventh Call']
                         const csvRows = [
                           drillDownTitle,
-                          `Generated: ${currentDate} at ${currentTime}`,
+                          `Generated: ${currentDate}`,
                           `Total Records: ${drillDownLeads.length}`,
                           '',
                           headers.join(','),
                           ...drillDownLeads.map(lead => [
-                            `"${lead.lead_uid || ''}"`,
-                            `"${lead.ps_name || ''}"`,
+                            `"${lead.lead_uid || (lead as any).uid || ''}"`,
                             `"${lead.customer_name || ''}"`,
                             lead.customer_mobile_number || '',
                             lead.alternate_mobile_number || '',
@@ -612,25 +472,16 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
                             lead.seventh_call_date ? new Date(lead.seventh_call_date).toISOString() : ''
                           ].join(','))
                         ]
-                        
-                        const csvContent = csvRows.join('\n')
-                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+                        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
                         const link = document.createElement('a')
                         const url = URL.createObjectURL(blob)
-                        
-                        link.setAttribute('href', url)
-                        link.setAttribute('download', `${drillDownTitle.replace(/[^a-z0-9]/gi, '_')}-${currentDate}.csv`)
+                        link.href = url
+                        link.download = `${drillDownTitle.replace(/[^a-z0-9]/gi, '_')}-${currentDate}.csv`
                         link.style.visibility = 'hidden'
-                        
                         document.body.appendChild(link)
                         link.click()
                         document.body.removeChild(link)
-                        
-                        console.log(`✅ Drill-down leads exported successfully`)
-                      } catch (error) {
-                        console.error('❌ Error exporting drill-down data:', error)
-                        setError('Failed to export data')
-                      }
+                      } catch {}
                     }}
                     variant="outline"
                     size="sm"
@@ -642,23 +493,19 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
               )}
             </div>
           </DialogHeader>
-          
           {drillDownLoading ? (
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="h-6 w-6 animate-spin mr-2" />
               <span>Loading leads...</span>
             </div>
           ) : drillDownLeads.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No leads found for this selection.
-            </div>
+            <div className="text-center py-8 text-gray-500">No leads found for this selection.</div>
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Customer Name</TableHead>
-                    <TableHead>PS Name</TableHead>
                     <TableHead>Mobile</TableHead>
                     <TableHead>Source</TableHead>
                     <TableHead>Created At</TableHead>
@@ -669,7 +516,7 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
                 <TableBody>
                   {drillDownLeads.map((lead) => (
                     <TableRow 
-                      key={lead.lead_uid}
+                      key={lead.lead_uid || (lead as any).uid || Math.random()}
                       className="cursor-pointer hover:bg-gray-50"
                       onClick={() => {
                         setSelectedLead(lead)
@@ -677,7 +524,6 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
                       }}
                     >
                       <TableCell className="font-medium">{lead.customer_name || 'N/A'}</TableCell>
-                      <TableCell>{lead.ps_name && lead.ps_name.trim() !== '' ? lead.ps_name : 'Unassigned'}</TableCell>
                       <TableCell>{lead.customer_mobile_number || 'N/A'}</TableCell>
                       <TableCell>{lead.source || 'N/A'}</TableCell>
                       <TableCell>{lead.created_at ? new Date(lead.created_at).toLocaleString() : 'N/A'}</TableCell>
@@ -701,7 +547,7 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
           )}
         </DialogContent>
       </Dialog>
-      
+
       {/* Lead Detail Modal */}
       <Dialog open={leadDetailOpen} onOpenChange={setLeadDetailOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -742,10 +588,6 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
                     <div>
                       <label className="text-sm font-semibold text-gray-500">CRE</label>
                       <div className="text-sm">{selectedLead.cre_name || 'N/A'}</div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-500">PS Name</label>
-                      <div className="text-sm">{selectedLead.ps_name || 'N/A'}</div>
                     </div>
                     <div>
                       <label className="text-sm font-semibold text-gray-500">Model Interested</label>
@@ -947,8 +789,10 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFil
           )}
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   )
 }
 
-export default TlPerformanceTable
+export default PsFollowupsTable
+
+
