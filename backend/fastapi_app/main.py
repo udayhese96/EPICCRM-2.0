@@ -8953,12 +8953,17 @@ def require_sales_manager_or_admin():
 @app.get("/analytics/sales-manager/ps-performance")
 async def get_ps_performance_analytics(
     branch: str = Query(..., description="Branch name to filter data"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
+    team_leader: Optional[str] = Query(None, description="Team Leader name to filter PS data"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
     Get PS performance analytics for a specific branch.
     This endpoint processes the data server-side for better performance and scalability.
     Requires sales_manager or admin role.
+    Supports date filtering based on ps_assigned_at column.
     """
     try:
         # Validate branch parameter
@@ -8972,10 +8977,39 @@ async def get_ps_performance_analytics(
                 detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
             )
         
-        # Get all PS followup data for the branch
-        ps_data = supabase.table("ps_followup_master").select(
-            "ps_name, first_call_date, final_status, created_at"
-        ).eq("ps_branch", branch).execute()
+        # Build query with date filter
+        query = supabase.table("ps_followup_master").select(
+            "ps_name, first_call_date, final_status, created_at, ps_assigned_at"
+        ).eq("ps_branch", branch)
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                # Filter for today: ps_assigned_at = current day
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                # Filter for month to date: ps_assigned_at in current month
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                # Filter for custom date range
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        
+        ps_data = query.execute()
         
         if not ps_data.data:
             return {
@@ -8988,8 +9022,53 @@ async def get_ps_performance_analytics(
                 "user_role": current_user.role
             }
         
+        # Filter by Team Leader if specified
+        filtered_ps_data = ps_data.data
+        if team_leader and team_leader.strip() != "" and team_leader.lower() != "all":
+            # Get Team Leaders for this branch
+            team_leaders_data = supabase.table("users").select(
+                "id, username"
+            ).eq("branch", branch).eq("role", "team_leader").execute()
+            
+            # Get PS users with their team leader assignments (include all PS users)
+            users_data = supabase.table("users").select(
+                "username, full_name, team_leader_id"
+            ).eq("branch", branch).eq("role", "ps").execute()
+            
+            # Create ID to Team Leader name mapping
+            tl_id_to_name_map = {}
+            if team_leaders_data.data:
+                for tl in team_leaders_data.data:
+                    tl_id_to_name_map[tl.get('id')] = tl.get('username')
+            
+            # Create PS to Team Leader mapping
+            ps_to_tl_map = {}
+            if users_data.data:
+                for user in users_data.data:
+                    ps_username = user.get('username')
+                    ps_full_name = user.get('full_name')
+                    team_leader_id = user.get('team_leader_id')
+                    if team_leader_id:
+                        team_leader_name = tl_id_to_name_map.get(team_leader_id, f"Unknown TL ({team_leader_id})")
+                        # Map username to team leader (always)
+                        if ps_username:
+                            ps_to_tl_map[ps_username] = team_leader_name
+                        # Map full_name to team leader if it exists
+                        if ps_full_name:
+                            ps_to_tl_map[ps_full_name] = team_leader_name
+            
+            # Filter PS data by team leader
+            filtered_ps_data = []
+            for row in ps_data.data:
+                ps_name = row.get('ps_name', 'Unknown')
+                ps_tl = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
+                if ps_tl == team_leader:
+                    filtered_ps_data.append(row)
+            
+            print(f"DEBUG: Filtered by Team Leader '{team_leader}': {len(filtered_ps_data)} records")
+        
         # Process the data server-side
-        processed_data = process_ps_performance_data(ps_data.data)
+        processed_data = process_ps_performance_data(filtered_ps_data)
         
         # Extract KPI cards data from TOTAL row
         kpi_cards = extract_kpi_cards_data(processed_data)
@@ -8997,12 +9076,42 @@ async def get_ps_performance_analytics(
         # Extract PS rankings data
         ps_rankings = extract_ps_rankings_data(processed_data)
         
+        # Get list of Team Leaders for this branch (for dropdown filter)
+        # Use the same query as TL Performance endpoint (no is_active filter)
+        team_leaders_data = supabase.table("users").select(
+            "id, username, full_name"
+        ).eq("branch", branch).eq("role", "team_leader").execute()
+        
+        print(f"DEBUG: Found {len(team_leaders_data.data) if team_leaders_data.data else 0} team leaders for branch {branch}")
+        
+        team_leaders_list = []
+        if team_leaders_data.data:
+            for tl in team_leaders_data.data:
+                # Use username as the identifier (consistent with TL performance)
+                # TL Performance uses username, so we use the same
+                tl_username = tl.get('username')
+                if tl_username:
+                    team_leaders_list.append(tl_username)
+                    print(f"DEBUG: Added Team Leader: {tl_username} (id: {tl.get('id')})")
+                else:
+                    # Fallback to full_name only if username is missing
+                    tl_full_name = tl.get('full_name')
+                    if tl_full_name:
+                        team_leaders_list.append(tl_full_name)
+                        print(f"DEBUG: Added Team Leader (using full_name): {tl_full_name} (id: {tl.get('id')}, username was null)")
+        
+        # Remove duplicates and sort
+        team_leaders_list = sorted(list(set(team_leaders_list)))
+        print(f"DEBUG: Final team_leaders_list for branch {branch}: {team_leaders_list}")
+        print(f"DEBUG: Total unique team leaders: {len(team_leaders_list)}")
+        
         return {
             "success": True,
             "branch": branch,
             "data": processed_data,
             "kpi_cards": kpi_cards,
             "ps_rankings": ps_rankings,
+            "team_leaders": team_leaders_list,
             "total_records": len(ps_data.data),
             "timestamp": datetime.now().isoformat(),
             "requested_by": current_user.username,
@@ -9281,12 +9390,17 @@ def process_lead_conversion_data(raw_data):
 @app.get("/analytics/sales-manager/ps-followups")
 async def get_ps_followups_analytics(
     branch: str = Query(..., description="Branch name to filter data"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
+    team_leader: Optional[str] = Query(None, description="Team Leader name to filter PS data"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
     Get PS followups analytics for a specific branch.
     Separate endpoint from ps-performance so we can evolve columns independently.
     Requires sales_manager or admin role.
+    Supports date filtering based on ps_assigned_at column.
     """
     try:
         if not branch or branch.strip() == "":
@@ -9298,27 +9412,123 @@ async def get_ps_followups_analytics(
                 detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
             )
 
-        followup_rows = supabase.table("ps_followup_master").select(
+        # Build query with date filter
+        query = supabase.table("ps_followup_master").select(
             "ps_name, first_call_date, second_call_date, third_call_date, fourth_call_date, fifth_call_date, sixth_call_date, "
-            "seventh_call_date, eighth_call_date, ninth_call_date, tenth_call_date, final_status, created_at"
-        ).eq("ps_branch", branch).execute()
+            "seventh_call_date, eighth_call_date, ninth_call_date, tenth_call_date, final_status, created_at, ps_assigned_at"
+        ).eq("ps_branch", branch)
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                # Filter for today: ps_assigned_at = current day
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                # Filter for month to date: ps_assigned_at in current month
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                # Filter for custom date range
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        
+        followup_rows = query.execute()
 
         if not followup_rows.data:
+            # Still return team_leaders list even if no data
+            team_leaders_data = supabase.table("users").select(
+                "id, username, full_name"
+            ).eq("branch", branch).eq("role", "team_leader").execute()
+            
+            team_leaders_list = []
+            if team_leaders_data.data:
+                for tl in team_leaders_data.data:
+                    tl_username = tl.get('username')
+                    if tl_username:
+                        team_leaders_list.append(tl_username)
+                    else:
+                        tl_full_name = tl.get('full_name')
+                        if tl_full_name:
+                            team_leaders_list.append(tl_full_name)
+            team_leaders_list = sorted(list(set(team_leaders_list)))
+            
             return {
                 "success": True,
                 "branch": branch,
                 "data": [],
+                "team_leaders": team_leaders_list,
                 "message": f"No data found for branch: {branch}",
                 "timestamp": datetime.now().isoformat(),
                 "requested_by": current_user.username,
                 "user_role": current_user.role
             }
 
-        # Aggregate per PS: total leads, F1..F10 (first..tenth_call_date)
+        # Filter by Team Leader if specified
+        filtered_followup_rows = followup_rows.data
+        if team_leader and team_leader.strip() != "" and team_leader.lower() != "all":
+            # Get Team Leaders for this branch
+            team_leaders_data = supabase.table("users").select(
+                "id, username"
+            ).eq("branch", branch).eq("role", "team_leader").execute()
+            
+            # Get PS users with their team leader assignments (include all PS users)
+            users_data = supabase.table("users").select(
+                "username, full_name, team_leader_id"
+            ).eq("branch", branch).eq("role", "ps").execute()
+            
+            # Create ID to Team Leader name mapping
+            tl_id_to_name_map = {}
+            if team_leaders_data.data:
+                for tl in team_leaders_data.data:
+                    tl_id_to_name_map[tl.get('id')] = tl.get('username')
+            
+            # Create PS to Team Leader mapping
+            ps_to_tl_map = {}
+            if users_data.data:
+                for user in users_data.data:
+                    ps_username = user.get('username')
+                    ps_full_name = user.get('full_name')
+                    team_leader_id = user.get('team_leader_id')
+                    if team_leader_id:
+                        team_leader_name = tl_id_to_name_map.get(team_leader_id, f"Unknown TL ({team_leader_id})")
+                        # Map username to team leader (always)
+                        if ps_username:
+                            ps_to_tl_map[ps_username] = team_leader_name
+                        # Map full_name to team leader if it exists
+                        if ps_full_name:
+                            ps_to_tl_map[ps_full_name] = team_leader_name
+            
+            # Filter PS data by team leader
+            filtered_followup_rows = []
+            for row in followup_rows.data:
+                ps_name = row.get('ps_name', 'Unknown')
+                ps_tl = ps_to_tl_map.get(ps_name, 'Unassigned Team Leader')
+                if ps_tl == team_leader:
+                    filtered_followup_rows.append(row)
+            
+            print(f"DEBUG: Filtered by Team Leader '{team_leader}': {len(filtered_followup_rows)} records")
+
+        # Aggregate per PS: total leads, unattended, F1..F10 (first..tenth_call_date)
         ps_counts = {}
-        for row in followup_rows.data:
+        for row in filtered_followup_rows:
             try:
                 ps = row.get('ps_name') or 'Unknown'
+                # Unattended definition: first_call_date IS NULL
+                first_call_date = row.get('first_call_date')
+                is_unattended = (first_call_date is None)
                 # F1 definition: first_call_date IS NOT NULL (empty strings still count)
                 has_f1 = (row.get('first_call_date') is not None)
                 # F2 definition: second_call_date IS NOT NULL
@@ -9343,6 +9553,7 @@ async def get_ps_followups_analytics(
                     ps_counts[ps] = {
                         'ps_name': ps,
                         'lead_count': 0,
+                        'unattended_count': 0,
                         'f1_count': 0,
                         'f2_count': 0,
                         'f3_count': 0,
@@ -9355,6 +9566,8 @@ async def get_ps_followups_analytics(
                         'f10_count': 0
                     }
                 ps_counts[ps]['lead_count'] += 1
+                if is_unattended:
+                    ps_counts[ps]['unattended_count'] += 1
                 if has_f1:
                     ps_counts[ps]['f1_count'] += 1
                 if has_f2:
@@ -9383,6 +9596,7 @@ async def get_ps_followups_analytics(
         totals = {
             'ps_name': 'TOTAL',
             'lead_count': sum(r['lead_count'] for r in data_list),
+            'unattended_count': sum(r.get('unattended_count', 0) for r in data_list),
             'f1_count': sum(r.get('f1_count', 0) for r in data_list),
             'f2_count': sum(r.get('f2_count', 0) for r in data_list),
             'f3_count': sum(r.get('f3_count', 0) for r in data_list),
@@ -9397,10 +9611,40 @@ async def get_ps_followups_analytics(
 
         processed = data_list + [totals]
 
+        # Get list of Team Leaders for this branch (for dropdown filter)
+        # Use the same query as TL Performance endpoint (no is_active filter)
+        team_leaders_data = supabase.table("users").select(
+            "id, username, full_name"
+        ).eq("branch", branch).eq("role", "team_leader").execute()
+        
+        print(f"DEBUG: Found {len(team_leaders_data.data) if team_leaders_data.data else 0} team leaders for branch {branch}")
+        
+        team_leaders_list = []
+        if team_leaders_data.data:
+            for tl in team_leaders_data.data:
+                # Use username as the identifier (consistent with TL performance)
+                # TL Performance uses username, so we use the same
+                tl_username = tl.get('username')
+                if tl_username:
+                    team_leaders_list.append(tl_username)
+                    print(f"DEBUG: Added Team Leader: {tl_username} (id: {tl.get('id')})")
+                else:
+                    # Fallback to full_name only if username is missing
+                    tl_full_name = tl.get('full_name')
+                    if tl_full_name:
+                        team_leaders_list.append(tl_full_name)
+                        print(f"DEBUG: Added Team Leader (using full_name): {tl_full_name} (id: {tl.get('id')}, username was null)")
+        
+        # Remove duplicates and sort
+        team_leaders_list = sorted(list(set(team_leaders_list)))
+        print(f"DEBUG: Final team_leaders_list for branch {branch}: {team_leaders_list}")
+        print(f"DEBUG: Total unique team leaders: {len(team_leaders_list)}")
+
         return {
             "success": True,
             "branch": branch,
             "data": processed,
+            "team_leaders": team_leaders_list,
             "total_records": len(followup_rows.data),
             "timestamp": datetime.now().isoformat(),
             "requested_by": current_user.username,
@@ -9417,6 +9661,9 @@ async def get_ps_followup_leads(
     branch: str = Query(..., description="Branch name to filter data"),
     ps_name: str = Query(..., description="PS name to filter leads"),
     filter: Optional[str] = Query(None, description="Optional filter e.g. 'f1' for first_call_date present"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
@@ -9444,7 +9691,7 @@ async def get_ps_followup_leads(
             "fifth_call_date, fifth_call_remark, fifth_call_lead_status, "
             "sixth_call_date, sixth_call_remark, sixth_call_lead_status, "
             "seventh_call_date, seventh_call_remark, seventh_call_lead_status, "
-            "created_at, updated_at"
+            "created_at, updated_at, ps_assigned_at"
         )
 
         q = (
@@ -9454,8 +9701,35 @@ async def get_ps_followup_leads(
                 .eq("ps_branch", branch)
                 .eq("ps_name", ps_name)
         )
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                q = q.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                q = q.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    q = q.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
 
-        if filter == 'f1':
+        if filter == 'unattended':
+            # leads where first_call_date is null (unattended)
+            q = q.is_("first_call_date", "null")
+        elif filter == 'f1':
             # leads where first_call_date exists / not null
             q = q.not_.is_("first_call_date", "null")
         elif filter == 'f2':
@@ -9739,12 +10013,16 @@ def process_source_analytics_data(raw_data):
 @app.get("/analytics/sales-manager/tl-performance")
 async def get_tl_performance_analytics(
     branch: str = Query(..., description="Branch name to filter data"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
     Get Team Leader performance analytics for a specific branch.
     Shows team leaders and their PS performance metrics.
     Requires sales_manager or admin role.
+    Supports date filtering based on ps_assigned_at column.
     """
     try:
         # Validate branch parameter
@@ -9758,10 +10036,39 @@ async def get_tl_performance_analytics(
                 detail=f"Access denied. You can only view analytics for your assigned branch: {current_user.branch_id}"
             )
 
-        # Get all PS followup data for the branch
-        ps_data = supabase.table("ps_followup_master").select(
-            "ps_name, first_call_date, final_status, created_at"
-        ).eq("ps_branch", branch).execute()
+        # Build query with date filter
+        query = supabase.table("ps_followup_master").select(
+            "ps_name, first_call_date, final_status, created_at, ps_assigned_at"
+        ).eq("ps_branch", branch)
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                # Filter for today: ps_assigned_at = current day
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                # Filter for month to date: ps_assigned_at in current month
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                # Filter for custom date range
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        
+        ps_data = query.execute()
 
         if not ps_data.data:
             return {
@@ -9905,6 +10212,9 @@ async def get_ps_leads_drilldown(
     branch: str = Query(..., description="Branch name to filter data"),
     ps_name: str = Query(..., description="PS name to filter data"),
     status_type: str = Query(..., description="Status type: total, unattended, open_leads, lost_leads, approval_pending, booked, retailed"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
@@ -9939,8 +10249,32 @@ async def get_ps_leads_drilldown(
                fifth_call_date, fifth_call_remark, fifth_call_lead_status,
                sixth_call_date, sixth_call_remark, sixth_call_lead_status,
                seventh_call_date, seventh_call_remark, seventh_call_lead_status,
-               final_status, created_at, updated_at"""
+               final_status, created_at, updated_at, ps_assigned_at"""
         ).eq("ps_branch", branch).eq("ps_name", ps_name)
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
         
         # Apply status filter based on status_type
         if status_type == "total":
@@ -10101,6 +10435,9 @@ async def get_tl_leads_drilldown(
     branch: str = Query(..., description="Branch name to filter data"),
     tl_name: str = Query(..., description="Team Leader name to filter data"),
     status_type: str = Query(..., description="Status type: total, unattended, open_leads, lost_leads, approval_pending, booked, retailed"),
+    date_filter_type: Optional[str] = Query(None, description="Date filter type: today, mtd, from_to, or all_time"),
+    start_date: Optional[str] = Query(None, description="Start date for from_to filter (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for from_to filter (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(require_sales_manager_or_admin())
 ):
     """
@@ -10137,20 +10474,29 @@ async def get_tl_leads_drilldown(
         
         # Get PS users with their team leader assignments
         users_data = supabase.table("users").select(
-            "username, full_name, team_leader_id"
+            "id, username, full_name, team_leader_id"
         ).eq("branch", branch).execute()
         
-        # Create PS to Team Leader mapping
+        # Create PS to Team Leader mapping and PS ID to name mapping
         ps_to_tl_map = {}
+        ps_id_to_name_map = {}
         if users_data.data:
             for user in users_data.data:
+                ps_id = user.get('id')
                 ps_username = user.get('username')
                 ps_full_name = user.get('full_name')
                 team_leader_id = user.get('team_leader_id')
-                if ps_full_name and team_leader_id:
+                
+                # Build PS ID to name mapping (prefer full_name, fallback to username)
+                if ps_id:
+                    ps_id_to_name_map[ps_id] = ps_full_name or ps_username or 'Unknown'
+                
+                if (ps_full_name or ps_username) and team_leader_id:
                     team_leader_name = tl_id_to_name_map.get(team_leader_id, f"Unknown TL ({team_leader_id})")
-                    ps_to_tl_map[ps_username] = team_leader_name
-                    ps_to_tl_map[ps_full_name] = team_leader_name
+                    if ps_username:
+                        ps_to_tl_map[ps_username] = team_leader_name
+                    if ps_full_name:
+                        ps_to_tl_map[ps_full_name] = team_leader_name
         
         # Get all PS names that belong to this team leader
         ps_names_for_tl = []
@@ -10173,7 +10519,7 @@ async def get_tl_leads_drilldown(
         
         # Build the query based on status_type
         query = supabase.table("ps_followup_master").select(
-            """lead_uid, ps_name, ps_branch, customer_name, customer_mobile_number,
+            """lead_uid, ps_name, ps_id, ps_branch, customer_name, customer_mobile_number,
                alternate_mobile_number, source, cre_name, lead_category, model_interested,
                follow_up_date, lead_status, first_call_date, first_call_remark, first_call_lead_status,
                second_call_date, second_call_remark, second_call_lead_status,
@@ -10182,8 +10528,32 @@ async def get_tl_leads_drilldown(
                fifth_call_date, fifth_call_remark, fifth_call_lead_status,
                sixth_call_date, sixth_call_remark, sixth_call_lead_status,
                seventh_call_date, seventh_call_remark, seventh_call_lead_status,
-               final_status, created_at, updated_at"""
+               final_status, created_at, updated_at, ps_assigned_at"""
         ).eq("ps_branch", branch).in_("ps_name", ps_names_for_tl)
+        
+        # Apply date filter based on ps_assigned_at
+        if date_filter_type and date_filter_type != 'all_time':
+            from datetime import time
+            today = date.today()
+            
+            if date_filter_type == 'today':
+                start_of_day = datetime.combine(today, time.min).isoformat()
+                end_of_day = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_day).lte('ps_assigned_at', end_of_day)
+            elif date_filter_type == 'mtd':
+                first_day_of_month = date(today.year, today.month, 1)
+                start_of_month = datetime.combine(first_day_of_month, time.min).isoformat()
+                end_of_today = datetime.combine(today, time.max).isoformat()
+                query = query.gte('ps_assigned_at', start_of_month).lte('ps_assigned_at', end_of_today)
+            elif date_filter_type == 'from_to':
+                if not start_date or not end_date:
+                    raise HTTPException(status_code=400, detail="start_date and end_date are required for 'from_to' filter")
+                try:
+                    start_dt = datetime.fromisoformat(start_date + 'T00:00:00')
+                    end_dt = datetime.fromisoformat(end_date + 'T23:59:59')
+                    query = query.gte('ps_assigned_at', start_dt.isoformat()).lte('ps_assigned_at', end_dt.isoformat())
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
         
         # Apply status filter based on status_type
         if status_type == "total":
@@ -10202,8 +10572,18 @@ async def get_tl_leads_drilldown(
             # Format leads
             formatted_leads = []
             for lead in leads:
+                # Get PS name - prefer from lead, fallback to lookup by ps_id
+                ps_name_value = lead.get("ps_name")
+                if not ps_name_value or ps_name_value.strip() == "":
+                    ps_id = lead.get("ps_id")
+                    if ps_id and ps_id in ps_id_to_name_map:
+                        ps_name_value = ps_id_to_name_map[ps_id]
+                    else:
+                        ps_name_value = "Unknown"
+                
                 formatted_lead = {
                     "lead_uid": lead.get("lead_uid"),
+                    "ps_name": ps_name_value,
                     "customer_name": lead.get("customer_name"),
                     "customer_mobile_number": lead.get("customer_mobile_number"),
                     "alternate_mobile_number": lead.get("alternate_mobile_number"),
@@ -10279,9 +10659,18 @@ async def get_tl_leads_drilldown(
         # Format the leads data for frontend
         formatted_leads = []
         for lead in ps_data.data:
+            # Get PS name - prefer from lead, fallback to lookup by ps_id
+            ps_name_value = lead.get("ps_name")
+            if not ps_name_value or ps_name_value.strip() == "":
+                ps_id = lead.get("ps_id")
+                if ps_id and ps_id in ps_id_to_name_map:
+                    ps_name_value = ps_id_to_name_map[ps_id]
+                else:
+                    ps_name_value = "Unknown"
+            
             formatted_lead = {
                 "lead_uid": lead.get("lead_uid"),
-                "ps_name": lead.get("ps_name"),
+                "ps_name": ps_name_value,
                 "customer_name": lead.get("customer_name"),
                 "customer_mobile_number": lead.get("customer_mobile_number"),
                 "alternate_mobile_number": lead.get("alternate_mobile_number"),

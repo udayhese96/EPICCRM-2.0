@@ -60,9 +60,12 @@ interface LeadDetail {
 
 interface TlPerformanceTableProps {
   branch?: string
+  dateFilterType?: 'today' | 'mtd' | 'from_to' | 'all_time'
+  startDate?: string
+  endDate?: string
 }
 
-const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
+const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch, dateFilterType = 'all_time', startDate = '', endDate = '' }) => {
   const [data, setData] = useState<TlPerformanceData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -97,15 +100,56 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
 
       if (!currentBranch) {
         setError('Branch information not available')
+        setLoading(false)
         return
       }
 
       if (!token) {
         setError('Authentication token not found. Please log in again.')
+        setLoading(false)
         return
       }
 
-      const response = await fetch(`/api/analytics/sales-manager/tl-performance?branch=${encodeURIComponent(currentBranch)}&_t=${Date.now()}`, {
+      // Validate date filter for 'from_to' type
+      if (dateFilterType === 'from_to') {
+        if (!startDate || !endDate || startDate.trim() === '' || endDate.trim() === '') {
+          setError('Please select both start date and end date for the date range filter.')
+          setLoading(false)
+          return
+        }
+        
+        // Validate date format and ensure end date is after start date
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+        
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+          setError('Invalid date format. Please select valid dates.')
+          setLoading(false)
+          return
+        }
+        
+        if (end < start) {
+          setError('End date must be after or equal to start date.')
+          setLoading(false)
+          return
+        }
+      }
+
+      // Build query params with date filter
+      const params = new URLSearchParams({
+        branch: currentBranch,
+        _t: Date.now().toString()
+      })
+      
+      if (dateFilterType !== 'all_time') {
+        params.append('date_filter_type', dateFilterType)
+        if (dateFilterType === 'from_to' && startDate && endDate) {
+          params.append('start_date', startDate)
+          params.append('end_date', endDate)
+        }
+      }
+      
+      const response = await fetch(`/api/analytics/sales-manager/tl-performance?${params.toString()}`, {
         cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -133,9 +177,15 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
 
   useEffect(() => {
     if (userBranch) {
+      // Don't auto-fetch if 'from_to' filter is selected but dates are missing
+      if (dateFilterType === 'from_to' && (!startDate || !endDate || startDate.trim() === '' || endDate.trim() === '')) {
+        setError('Please select both start date and end date for the date range filter.')
+        setLoading(false)
+        return
+      }
       fetchTlPerformanceData()
     }
-  }, [userBranch, branch])
+  }, [userBranch, branch, dateFilterType, startDate, endDate])
 
   const exportToCSV = () => {
     if (!data || data.length === 0) {
@@ -290,8 +340,34 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
         return
       }
       
+      // Build query params with date filter
+      const params = new URLSearchParams({
+        branch: currentBranch,
+        tl_name: tlName,
+        status_type: statusType
+      })
+      
+      // Always include date filter parameters to match the table data
+      if (dateFilterType !== 'all_time') {
+        params.append('date_filter_type', dateFilterType)
+        if (dateFilterType === 'from_to') {
+          const normalizedStartDate = startDate?.trim() || ''
+          const normalizedEndDate = endDate?.trim() || ''
+          if (normalizedStartDate && normalizedEndDate) {
+            params.append('start_date', normalizedStartDate)
+            params.append('end_date', normalizedEndDate)
+            console.log('✅ TL Drill-down - Adding dates to params:', { start_date: normalizedStartDate, end_date: normalizedEndDate })
+          }
+        }
+      } else {
+        // Explicitly set all_time if no filter is selected
+        params.append('date_filter_type', 'all_time')
+      }
+      
+      console.log('📤 TL Drill-down API URL params:', params.toString())
+      
       const response = await fetch(
-        `/api/analytics/sales-manager/tl-leads?branch=${encodeURIComponent(currentBranch)}&tl_name=${encodeURIComponent(tlName)}&status_type=${statusType}`,
+        `/api/analytics/sales-manager/tl-leads?${params.toString()}`,
         {
           cache: 'no-store',
           headers: {
@@ -358,7 +434,15 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
         </CardHeader>
         <CardContent>
           <div className="text-center py-8">
-            <p className="text-red-600 mb-4">{error}</p>
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-2">
+                <X className="h-6 w-6 text-red-600" />
+              </div>
+              <p className="text-red-600 font-medium">{error}</p>
+              {error.includes('start_date and end_date') || error.includes('Please select both start date') ? (
+                <p className="text-sm text-gray-500 mt-2">Please use the date filter above to select a date range.</p>
+              ) : null}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -501,7 +585,7 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
                         const currentDate = new Date().toISOString().split('T')[0]
                         const currentTime = new Date().toLocaleTimeString()
                         
-                        const headers = ['Lead UID', 'PS Name', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'CRE', 'Model Interested', 'Status', 'First Call Date', 'Second Call Date', 'Third Call Date', 'Fourth Call Date', 'Fifth Call Date', 'Sixth Call Date', 'Seventh Call Date']
+                        const headers = ['Lead UID', 'PS Name', 'Customer Name', 'Mobile', 'Alternate Mobile', 'Source', 'Created At', 'Model Interested', 'Status', 'First Call Date', 'Second Call Date', 'Third Call Date', 'Fourth Call Date', 'Fifth Call Date', 'Sixth Call Date', 'Seventh Call Date']
                         
                         const csvRows = [
                           drillDownTitle,
@@ -516,7 +600,7 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
                             lead.customer_mobile_number || '',
                             lead.alternate_mobile_number || '',
                             `"${lead.source || ''}"`,
-                            `"${lead.cre_name || ''}"`,
+                            lead.created_at ? new Date(lead.created_at).toISOString() : '',
                             `"${lead.model_interested || ''}"`,
                             `"${lead.final_status || lead.lead_status || 'Pending'}"`,
                             lead.first_call_date ? new Date(lead.first_call_date).toISOString() : '',
@@ -577,7 +661,7 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
                     <TableHead>PS Name</TableHead>
                     <TableHead>Mobile</TableHead>
                     <TableHead>Source</TableHead>
-                    <TableHead>CRE</TableHead>
+                    <TableHead>Created At</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -593,10 +677,10 @@ const TlPerformanceTable: React.FC<TlPerformanceTableProps> = ({ branch }) => {
                       }}
                     >
                       <TableCell className="font-medium">{lead.customer_name || 'N/A'}</TableCell>
-                      <TableCell>{lead.ps_name || 'N/A'}</TableCell>
+                      <TableCell>{lead.ps_name && lead.ps_name.trim() !== '' ? lead.ps_name : 'Unassigned'}</TableCell>
                       <TableCell>{lead.customer_mobile_number || 'N/A'}</TableCell>
                       <TableCell>{lead.source || 'N/A'}</TableCell>
-                      <TableCell>{lead.cre_name || 'N/A'}</TableCell>
+                      <TableCell>{lead.created_at ? new Date(lead.created_at).toLocaleString() : 'N/A'}</TableCell>
                       <TableCell>{lead.model_interested || 'N/A'}</TableCell>
                       <TableCell>
                         <Badge className={

@@ -45,6 +45,9 @@ export async function GET(request: NextRequest) {
     const branch = searchParams.get('branch')
     const psName = searchParams.get('ps_name')
     const statusType = searchParams.get('status_type')
+    const dateFilterType = searchParams.get('date_filter_type')
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
 
     // Validate required parameters
     if (!branch || branch.trim() === '') {
@@ -68,6 +71,19 @@ export async function GET(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Validate date filter parameters if from_to is selected
+    if (dateFilterType === 'from_to') {
+      const normalizedStartDate = startDate?.trim() || ''
+      const normalizedEndDate = endDate?.trim() || ''
+      
+      if (!normalizedStartDate || !normalizedEndDate) {
+        return NextResponse.json({ 
+          error: 'start_date and end_date are required for \'from_to\' filter. Please select both start and end dates.',
+          success: false 
+        }, { status: 400 })
+      }
+    }
+
     // Get authentication token from request headers
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -80,16 +96,30 @@ export async function GET(request: NextRequest) {
     const authToken = authHeader.substring(7) // Remove 'Bearer ' prefix
     console.log(`🔄 Fetching PS leads data for branch: ${branch}, ps: ${psName}, status: ${statusType}`)
     console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+    if (dateFilterType) {
+      console.log(`🔄 Date filter: ${dateFilterType}`, startDate && endDate ? `(${startDate} to ${endDate})` : '')
+    }
 
     // Build query params
     const params = new URLSearchParams({
       branch,
       ps_name: psName,
       status_type: statusType
-    }).toString()
+    })
+    
+    // Add date filter parameters if provided
+    if (dateFilterType && dateFilterType !== 'all_time') {
+      params.append('date_filter_type', dateFilterType)
+      if (dateFilterType === 'from_to' && startDate && endDate) {
+        params.append('start_date', startDate.trim())
+        params.append('end_date', endDate.trim())
+      }
+    }
+    
+    const paramsString = params.toString()
 
     // Call FastAPI backend with retry logic and authentication
-    const fastApiResponse = await callFastAPIWithRetry(params, authToken)
+    const fastApiResponse = await callFastAPIWithRetry(paramsString, authToken)
 
     if (!fastApiResponse.ok) {
       let errorMessage = 'Failed to fetch PS leads data from backend'
