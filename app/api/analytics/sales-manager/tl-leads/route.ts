@@ -44,6 +44,9 @@ export async function GET(request: NextRequest) {
     const branch = searchParams.get('branch')
     const tlName = searchParams.get('tl_name')
     const statusType = searchParams.get('status_type')
+    const dateFilterType = searchParams.get('date_filter_type')
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
 
     if (!branch || branch.trim() === '') {
       return NextResponse.json({ 
@@ -66,6 +69,19 @@ export async function GET(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Validate date filter parameters if from_to is selected
+    if (dateFilterType === 'from_to') {
+      const normalizedStartDate = startDate?.trim() || ''
+      const normalizedEndDate = endDate?.trim() || ''
+      
+      if (!normalizedStartDate || !normalizedEndDate) {
+        return NextResponse.json({ 
+          error: 'start_date and end_date are required for \'from_to\' filter. Please select both start and end dates.',
+          success: false 
+        }, { status: 400 })
+      }
+    }
+
     const authHeader = request.headers.get('authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
@@ -77,14 +93,28 @@ export async function GET(request: NextRequest) {
     const authToken = authHeader.substring(7)
     console.log(`🔄 Fetching TL leads data for branch: ${branch}, tl: ${tlName}, status: ${statusType}`)
     console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+    if (dateFilterType) {
+      console.log(`🔄 Date filter: ${dateFilterType}`, startDate && endDate ? `(${startDate} to ${endDate})` : '')
+    }
 
     const params = new URLSearchParams({
       branch,
       tl_name: tlName,
       status_type: statusType
-    }).toString()
+    })
+    
+    // Add date filter parameters if provided
+    if (dateFilterType && dateFilterType !== 'all_time') {
+      params.append('date_filter_type', dateFilterType)
+      if (dateFilterType === 'from_to' && startDate && endDate) {
+        params.append('start_date', startDate.trim())
+        params.append('end_date', endDate.trim())
+      }
+    }
+    
+    const paramsString = params.toString()
 
-    const fastApiResponse = await callFastAPIWithRetry(params, authToken)
+    const fastApiResponse = await callFastAPIWithRetry(paramsString, authToken)
 
     if (!fastApiResponse.ok) {
       let errorMessage = 'Failed to fetch TL leads data from backend'

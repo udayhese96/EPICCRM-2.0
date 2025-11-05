@@ -8,32 +8,60 @@ async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function callFastAPIWithRetry(branch: string, authToken: string, retries = MAX_RETRIES): Promise<Response> {
+async function callFastAPIWithRetry(branch: string, authToken: string, dateFilterType?: string, startDate?: string, endDate?: string, retries = MAX_RETRIES): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+  
   try {
-    const url = `${FASTAPI_BASE_URL}/analytics/sales-manager/tl-performance?branch=${encodeURIComponent(branch)}`
-    console.log(`🔄 Calling FastAPI: ${url}`)
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`,
-      },
-      // Add timeout
-      signal: AbortSignal.timeout(10000) // 10 second timeout
+    const params = new URLSearchParams({
+      branch: branch
     })
+    
+    if (dateFilterType && dateFilterType !== 'all_time') {
+      params.append('date_filter_type', dateFilterType)
+      if (dateFilterType === 'from_to' && startDate && endDate) {
+        params.append('start_date', startDate)
+        params.append('end_date', endDate)
+      }
+    }
+    
+    const url = `${FASTAPI_BASE_URL}/analytics/sales-manager/tl-performance?${params.toString()}`
+    console.log(`🔄 Calling FastAPI: ${url}`)
+    console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (!response.ok && retries > 0) {
+        console.warn(`FastAPI call failed, retrying... (${MAX_RETRIES - retries + 1}/${MAX_RETRIES})`)
+        await sleep(RETRY_DELAY)
+        return callFastAPIWithRetry(branch, authToken, dateFilterType, startDate, endDate, retries - 1)
+      }
 
-    if (!response.ok && retries > 0) {
-      console.warn(`FastAPI call failed, retrying... (${MAX_RETRIES - retries + 1}/${MAX_RETRIES})`)
-      await sleep(RETRY_DELAY)
-      return callFastAPIWithRetry(branch, authToken, retries - 1)
+      return response
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId)
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Request timeout - FastAPI took too long to respond')
+      }
+      throw fetchError
     }
 
-    return response
-  } catch (error) {
+  } catch (error: any) {
+    clearTimeout(timeoutId)
     if (retries > 0) {
       console.warn(`FastAPI call error, retrying... (${MAX_RETRIES - retries + 1}/${MAX_RETRIES})`, error)
       await sleep(RETRY_DELAY)
-      return callFastAPIWithRetry(branch, authToken, retries - 1)
+      return callFastAPIWithRetry(branch, authToken, dateFilterType, startDate, endDate, retries - 1)
     }
     throw error
   }
@@ -43,6 +71,9 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const branch = searchParams.get('branch')
+    const dateFilterType = searchParams.get('date_filter_type')
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
 
     // Validate branch parameter
     if (!branch || branch.trim() === '') {
@@ -50,6 +81,35 @@ export async function GET(request: NextRequest) {
         error: 'Branch parameter is required and cannot be empty',
         success: false 
       }, { status: 400 })
+    }
+
+    // Validate date filter parameters
+    if (dateFilterType === 'from_to') {
+      if (!startDate || !endDate || startDate.trim() === '' || endDate.trim() === '') {
+        return NextResponse.json({ 
+          error: 'start_date and end_date are required for \'from_to\' filter. Please select both start and end dates.',
+          success: false 
+        }, { status: 400 })
+      }
+      
+      // Validate date format
+      const startDateObj = new Date(startDate)
+      const endDateObj = new Date(endDate)
+      
+      if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+        return NextResponse.json({ 
+          error: 'Invalid date format. Please provide dates in YYYY-MM-DD format.',
+          success: false 
+        }, { status: 400 })
+      }
+      
+      // Validate date range
+      if (endDateObj < startDateObj) {
+        return NextResponse.json({ 
+          error: 'End date must be after or equal to start date.',
+          success: false 
+        }, { status: 400 })
+      }
     }
 
     // Get authentication token from request headers
@@ -64,9 +124,12 @@ export async function GET(request: NextRequest) {
     const authToken = authHeader.substring(7) // Remove 'Bearer ' prefix
     console.log(`🔄 Fetching TL Performance data for branch: ${branch}`)
     console.log(`🔄 Using FastAPI URL: ${FASTAPI_BASE_URL}`)
+    if (dateFilterType) {
+      console.log(`🔄 Date filter: ${dateFilterType}`, startDate && endDate ? `(${startDate} to ${endDate})` : '')
+    }
 
     // Call FastAPI backend with retry logic and authentication
-    const fastApiResponse = await callFastAPIWithRetry(branch, authToken)
+    const fastApiResponse = await callFastAPIWithRetry(branch, authToken, dateFilterType || undefined, startDate || undefined, endDate || undefined)
 
     if (!fastApiResponse.ok) {
       let errorMessage = 'Failed to fetch TL Performance data from backend'
@@ -111,18 +174,22 @@ export async function GET(request: NextRequest) {
     console.error('❌ TL Performance API error:', error)
     
     // Handle different types of errors
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    if (error instanceof TypeError && (error.message.includes('fetch') || error.message.includes('Failed to fetch'))) {
+      console.error('❌ FastAPI connection error:', error.message)
       return NextResponse.json({ 
-        error: 'Unable to connect to analytics backend service',
+        error: 'Unable to connect to analytics backend service. Please ensure the FastAPI backend is running.',
         success: false,
-        details: 'Please check if the FastAPI backend is running'
+        details: `FastAPI URL: ${FASTAPI_BASE_URL}`,
+        errorType: 'CONNECTION_ERROR'
       }, { status: 503 })
     }
     
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('timeout'))) {
+      console.error('❌ FastAPI timeout error:', error.message)
       return NextResponse.json({ 
         error: 'Request timeout - analytics service took too long to respond',
-        success: false
+        success: false,
+        errorType: 'TIMEOUT_ERROR'
       }, { status: 504 })
     }
     
